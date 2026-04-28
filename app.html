@@ -473,6 +473,7 @@
     let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
     let _mediaRecorder  = null;
     let _audioStream    = null;
+    let _rawStream      = null;  // stream gốc từ getDisplayMedia (để cleanup đúng)
 
     // Cập nhật trạng thái nút ▶ theo status
     function setCaptionsState(on) {
@@ -828,10 +829,13 @@
             video: { width: 320, height: 240, frameRate: 1 },
           });
         }
-        _audioStream = stream;
+        // Dừng video track và tạo audio-only stream để MediaRecorder
+        // không encode vp8, tránh webm;codecs=vp8,opus làm hỏng decode phía STT
+        _rawStream = stream;
         stream.getVideoTracks().forEach(t => t.stop());
-
         const audioTracks = stream.getAudioTracks();
+        _audioStream = new MediaStream(audioTracks);
+
         if (!audioTracks.length) {
           statusMsg.textContent = '⚠ Không có audio track — thử lại';
           return;
@@ -853,9 +857,11 @@
 
           const rec = new MediaRecorder(_audioStream, { mimeType });
           _mediaRecorder = rec;
+          console.log('[audio] MediaRecorder mimeType:', rec.mimeType, '| audioTracks:', _audioStream.getAudioTracks().length);
 
           rec.addEventListener('dataavailable', async (e) => {
             if (e.data && e.data.size > 2000) {
+              console.log(`[audio] chunk ${e.data.size} bytes, type=${e.data.type}`);
               const buf = await e.data.arrayBuffer();
               api.sendAudioChunk({ buffer: buf, mimeType: e.data.type || mimeType });
             }
@@ -891,7 +897,9 @@
         _mediaRecorder.stop();
       }
       _audioStream?.getTracks().forEach(t => t.stop());
+      _rawStream?.getTracks().forEach(t => t.stop());
       _audioStream = null;
+      _rawStream = null;
       _mediaRecorder = null;
     }
 

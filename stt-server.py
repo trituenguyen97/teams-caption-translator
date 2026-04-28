@@ -89,10 +89,17 @@ def decode_audio(path):
         for frame in container.decode(audio=0):
             for r in resampler.resample(frame):
                 chunks.append(r.to_ndarray())
+        # Flush resampler để lấy hết audio còn lại trong buffer
+        for r in resampler.resample(None):
+            chunks.append(r.to_ndarray())
         container.close()
         if not chunks:
+            print(f'[STT] decode_audio: không có chunk nào, file={path}', flush=True)
             return np.array([], dtype=np.float32)
-        return np.concatenate(chunks, axis=1).flatten().astype(np.float32) / 32768.0
+        pcm = np.concatenate(chunks, axis=1).flatten().astype(np.float32) / 32768.0
+        dur = len(pcm) / 16000
+        print(f'[STT] decode_audio: {len(pcm)} samples ({dur:.2f}s)', flush=True)
+        return pcm
     except Exception as e:
         print(f'[STT] Lỗi decode audio: {e}', flush=True)
         return np.array([], dtype=np.float32)
@@ -135,6 +142,7 @@ class STTHandler(BaseHTTPRequestHandler):
             try:
                 samples = decode_audio(tmpfile)
                 if samples.size < 1600:   # < 0.1s — bỏ qua
+                    print(f'[STT] audio quá ngắn: {samples.size} samples, bỏ qua', flush=True)
                     self._reply(200, '')
                     return
 
@@ -144,6 +152,7 @@ class STTHandler(BaseHTTPRequestHandler):
                     recognizer.decode_stream(stream)
                     raw = stream.result.text.strip()
 
+                print(f'[STT] raw result: "{raw}"', flush=True)
                 sentences = [s for part in [raw] for s in split_sentences(part) if s]
                 self._reply(200, '\n'.join(sentences))
             finally:
