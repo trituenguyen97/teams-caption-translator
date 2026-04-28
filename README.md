@@ -1,20 +1,57 @@
 # Teams Caption Translator
 
-Đọc **Live Captions từ Microsoft Teams** qua CDP (Chrome DevTools Protocol) và dịch sang ngôn ngữ tùy chọn bằng Google Translate miễn phí.
+Ứng dụng desktop (Electron) dịch hội thoại meeting theo thời gian thực, hỗ trợ **3 nguồn đầu vào** và **5 provider dịch thuật** tùy chọn.
 
-Giao diện desktop (Electron) hiển thị captions theo thời gian thực, hỗ trợ đóng gói thành file `.exe`.
+## Tính năng
 
-## Yêu cầu
+### Nguồn đầu vào (3 chế độ)
 
-- Node.js 18+
-- Microsoft Teams (bản desktop — New Teams, dùng WebView2)
-- Đang trong meeting và đã bật Live Captions
+| Chế độ | Mô tả |
+|--------|-------|
+| 📹 **Teams Live Captions** | Đọc subtitle trực tiếp từ Teams Web qua CDP (Chrome DevTools Protocol) — không cần mic, không delay |
+| 🔊 **System Audio** | Ghi âm âm thanh hệ thống → nhận dạng giọng nói cục bộ bằng **SenseVoice-Small** (sherpa-onnx) |
+| 🎤 **Microphone** | Ghi âm từ mic bất kỳ → nhận dạng giọng nói cục bộ bằng **SenseVoice-Small** (sherpa-onnx) |
+
+> Chế độ System Audio / Microphone dùng **SenseVoice-Small** chạy hoàn toàn offline, tự tải model ~110MB lần đầu. Hỗ trợ: Tiếng Nhật, Trung, Anh, Hàn, Quảng Đông.
+
+### Provider dịch thuật
+
+| Provider | Loại | Yêu cầu |
+|----------|------|---------|
+| 🤖 **Groq** | LLM — tối ưu cho IT/BrSE | API key miễn phí (14.400 req/ngày) |
+| 🤖 **OpenAI** | LLM | API key (trả phí) |
+| 🌐 **Google Cloud Translate** | Neural MT | API key |
+| 🌐 **DeepL** | Neural MT | API key |
+| 🌐 **Azure Translator** | Neural MT | API key |
+
+> Provider LLM (Groq, OpenAI) được tối ưu cho context IT/BrSE: giữ nguyên thuật ngữ kỹ thuật tiếng Anh (bug, deploy, PR, API…).
+
+### Ngôn ngữ đích hỗ trợ
+
+🇻🇳 Việt · 🇺🇸 English · 🇨🇳 中文 · 🇰🇷 한국어 · 🇯🇵 日本語 · 🇫🇷 Français · 🇩🇪 Deutsch · 🇪🇸 Español
 
 ---
 
-## Cài đặt một lần: Bật CDP cho Teams WebView2
+## Yêu cầu hệ thống
 
-Mở **PowerShell** và chạy lệnh sau (chỉ cần làm một lần):
+- **Node.js** 18+
+- **Microsoft Teams** bản desktop (New Teams — dùng WebView2) — chỉ cần cho chế độ Teams CDP
+
+---
+
+## Cài đặt
+
+```bash
+npm install
+```
+
+---
+
+## Thiết lập CDP cho Teams (chỉ cần làm một lần)
+
+> *Chỉ cần thiết nếu dùng chế độ **Teams Live Captions**.*
+
+Mở **PowerShell** và chạy:
 
 ```powershell
 [System.Environment]::SetEnvironmentVariable(
@@ -26,38 +63,39 @@ Mở **PowerShell** và chạy lệnh sau (chỉ cần làm một lần):
 
 Sau đó **đóng Teams hoàn toàn** (kể cả system tray) và mở lại.
 
-> Để tắt sau này: chạy lại và đổi value thành `""`.
+> Để tắt: chạy lại lệnh trên và đổi value thành `""`.
 
----
-
-## Cài dependencies
-
-```bash
-npm install
-```
+App tự quét các port CDP từ **9222–9240**, không xung đột nếu nhiều ứng dụng cùng mở.
 
 ---
 
 ## Cách dùng
 
-### 1. Vào meeting Teams và bật Live Captions
+### Chế độ Teams Live Captions
 
-Trong meeting → nhấn **More (...)** → **Language and speech** → **Turn on live captions**
+1. Vào meeting → **More (...)** → **Language and speech** → **Turn on live captions**
+2. Chạy app: `npm start`
 
-### 2. Chạy app
+### Chế độ System Audio / Microphone
+
+1. Vào **Settings** trong app → tab **Source** → chọn nguồn
+2. Chạy app: `npm start` — model STT tự tải lần đầu (~110MB)
 
 ```bash
 npm start
 ```
 
-Cửa sổ **Caption Translator** sẽ hiện lên (luôn trên đầu màn hình theo mặc định).
+---
 
-### Tính năng trong app
+## Giao diện
 
-| Nút | Chức năng |
-|-----|-----------|
-| Dropdown ngôn ngữ | Chọn ngôn ngữ dịch (Việt, EN, 中文, 한국어, 日本語, ...) |
-| 📌 | Bật/tắt "luôn trên đầu" |
+Cửa sổ luôn hiển thị trên đầu màn hình (có thể tắt).
+
+| Điều khiển | Chức năng |
+|------------|-----------|
+| Dropdown ngôn ngữ | Chọn ngôn ngữ dịch đích |
+| ⚙️ Settings | Chọn provider, API key, nguồn đầu vào |
+| 📌 | Bật/tắt luôn trên đầu màn hình |
 | ↓ Auto | Bật/tắt tự cuộn xuống entry mới nhất |
 | Xóa | Xóa danh sách captions |
 
