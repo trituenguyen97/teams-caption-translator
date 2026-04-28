@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# AI Model files (large binary files - download separately)
+nllb-cache/
+nllb-ct2/
+nllb-onnx/
+nllb-xenova/
+qwen-ct2/
+qwen05-ct2/
+
+# Electron build output
+dist/
+out/
+release/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Temporary / archives
+*.zip
+*.tmp
+*.temp
+

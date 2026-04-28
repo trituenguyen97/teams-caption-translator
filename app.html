@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+  <title>Caption Translator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #1b1b1b;
+      color: #d4d4d4;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: #2d2d30;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #3e3e42;
+      flex-shrink: 0;
+      -webkit-app-region: drag;
+    }
+    .header-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #cccccc;
+      flex: 1;
+    }
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      -webkit-app-region: no-drag;
+    }
+
+    select, button {
+      font-family: inherit;
+      font-size: 12px;
+      border-radius: 4px;
+      border: 1px solid #3e3e42;
+      background: #3c3c3c;
+      color: #cccccc;
+      cursor: pointer;
+      padding: 3px 8px;
+      outline: none;
+      transition: background 0.15s;
+    }
+    select:hover, button:hover { background: #4a4a4a; }
+    button.active {
+      background: #264f78;
+      border-color: #3794ff;
+      color: #fff;
+    }
+
+    /* ── Status bar ── */
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 12px;
+      font-size: 11px;
+      color: #999;
+      background: #252526;
+      border-bottom: 1px solid #3e3e42;
+      flex-shrink: 0;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #555;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .status.connecting   .dot,
+    .status.waiting      .dot,
+    .status.loading      .dot,
+    .status.waiting-captions .dot { background: #dcdcaa; animation: blink 1.2s infinite; }
+    .status.running      .dot { background: #4ec9b0; }
+    .status.error        .dot { background: #f44747; }
+    .status.ended        .dot { background: #555; }
+
+    #cc-btn {
+      margin-left: auto;
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 3px;
+      border: 1px solid #3e3e42;
+      background: #3c3c3c;
+      color: #aaa;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    #cc-btn:hover { background: #4a4a4a; }
+    #cc-btn.active {
+      background: #1a4a1a;
+      border-color: #4ec9b0;
+      color: #4ec9b0;
+    }
+
+    /* ── Settings modal ── */
+    .modal-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #252526;
+      border: 1px solid #3e3e42;
+      border-radius: 8px;
+      padding: 20px;
+      width: 340px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      -webkit-app-region: no-drag;
+    }
+    .modal h3 { font-size: 14px; color: #ccc; margin-bottom: 14px; }
+    .modal label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
+    .modal input[type="password"], .modal input[type="text"] {
+      width: 100%; padding: 6px 9px; font-size: 12px;
+      background: #3c3c3c; border: 1px solid #3e3e42;
+      border-radius: 4px; color: #eee; outline: none;
+      font-family: monospace;
+    }
+    .modal input:focus { border-color: #3794ff; }
+    .modal .hint { font-size: 10px; color: #555; margin-top: 4px; }
+    .modal .hint a { color: #3794ff; text-decoration: none; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+    .modal-actions button { font-size: 12px; padding: 5px 14px; }
+    .modal-actions .btn-save { background: #1a4a78; border-color: #3794ff; color: #fff; }
+    .modal-actions .btn-save:hover { background: #1a5a98; }
+
+    /* Tabs */
+    .tab-bar { display:flex; border-bottom:1px solid #3e3e42; margin-bottom:14px; }
+    .tab-btn {
+      flex:1; padding:7px 8px; font-size:12px; background:none; border:none;
+      border-bottom:2px solid transparent; color:#888; border-radius:0;
+      cursor:pointer; transition:color 0.15s, border-color 0.15s;
+    }
+    .tab-btn:hover { color:#ccc; background:#2a2a2a; }
+    .tab-btn.active { color:#3794ff; border-bottom-color:#3794ff; }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+
+    /* Window picker */
+    .win-card {
+      background:#252526; border:2px solid transparent;
+      border-radius:5px; overflow:hidden;
+      cursor:pointer; transition:border-color 0.15s, background 0.15s;
+      display:flex; flex-direction:column;
+    }
+    .win-card:hover { border-color:#555; }
+    .win-card.selected { border-color:#3794ff; background:#1a2535; }
+    .win-card img.win-thumb { width:100%; aspect-ratio:16/10; object-fit:cover; display:block; background:#111; }
+    .win-card .win-title {
+      font-size:10px; color:#ccc; padding:4px 6px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      display:flex; align-items:center; gap:4px;
+    }
+    .win-card.selected .win-title { color:#7cb8ef; }
+
+    .api-status { font-size: 10px; margin-top: 6px; padding: 4px 8px; border-radius: 3px; display: none; }
+    .api-status.ok { display: block; background: #1a3a1a; color: #4ec9b0; border: 1px solid #2a5a2a; }
+    .api-status.err { display: block; background: #3a1a1a; color: #f88; border: 1px solid #5a2a2a; }
+    .api-status.warn { display: block; background: #3a3a1a; color: #dcdcaa; border: 1px solid #5a5a2a; }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.2; }
+    }
+
+    /* ── Caption list ── */
+    .list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .list::-webkit-scrollbar { width: 5px; }
+    .list::-webkit-scrollbar-thumb { background: #3e3e42; border-radius: 3px; }
+    .list::-webkit-scrollbar-track { background: transparent; }
+
+    .empty {
+      color: #555;
+      font-size: 12px;
+      text-align: center;
+      margin-top: 48px;
+      line-height: 1.8;
+    }
+
+    /* ── Caption entry ── */
+    .entry {
+      background: #252526;
+      border: 1px solid #3e3e42;
+      border-radius: 6px;
+      padding: 8px 10px;
+      animation: fadeUp 0.18s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(5px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .entry-meta {
+      display: flex;
+      align-items: baseline;
+      margin-bottom: 3px;
+    }
+    .entry-author {
+      font-size: 11px;
+      font-weight: 600;
+      color: #9cdcfe;
+    }
+    .entry-time {
+      font-size: 10px;
+      color: #555;
+      margin-left: auto;
+    }
+    .entry-original {
+      font-size: 12px;
+      color: #6a6a6a;
+      line-height: 1.45;
+      margin-bottom: 3px;
+    }
+    .entry-translated {
+      font-size: 13px;
+      color: #d4d4d4;
+      line-height: 1.5;
+    }
+
+    /* ── Live entry (caption đang được nói) ── */
+    .entry.live {
+      border-color: #264f78;
+      background: #1a2535;
+    }
+    .entry.live .entry-translated { color: #7cb8ef; }
+    .live-dot {
+      display: inline-block;
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #4ec9b0;
+      margin-left: 5px;
+      vertical-align: middle;
+      animation: blink 1s infinite;
+    }
+
+    /* ── Error banner ── */
+    .error-banner {
+      background: #3b1a1a;
+      border: 1px solid #6b2020;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 11px;
+      color: #f88c8c;
+      line-height: 1.7;
+    }
+
+    /* ── Hint banner (bật captions thủ công) ── */
+    .hint-banner {
+      background: #1e2030;
+      border: 1px solid #3a4060;
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-size: 11px;
+      color: #9db4d8;
+      line-height: 2;
+    }
+    .hint-banner b { color: #c8d8f0; }
+    .hint-banner kbd {
+      display: inline-block;
+      background: #2d3050;
+      border: 1px solid #505880;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-size: 10px;
+      font-family: monospace;
+      color: #d0e0ff;
+    }
+    .error-banner code {
+      display: block;
+      background: #2a1010;
+      padding: 5px 8px;
+      border-radius: 3px;
+      margin: 4px 0;
+      font-size: 10px;
+      color: #ce9178;
+      word-break: break-all;
+      user-select: text;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: #252526;
+      border-top: 1px solid #3e3e42;
+      flex-shrink: 0;
+    }
+    .footer-count {
+      font-size: 11px;
+      color: #555;
+    }
+    .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal" style="width:420px">
+      <h3>⚙️ Cài đặt</h3>
+
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="translate">🌐 Dịch thuật</button>
+        <button class="tab-btn" data-tab="source">🎙 Nguồn dịch</button>
+      </div>
+
+      <!-- Tab 1: Dịch thuật -->
+      <div class="tab-panel active" id="tab-translate">
+        <div style="margin-bottom:12px">
+          <label>Dịch vụ</label>
+          <select id="s-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
+            <option value="groq">🤖 Groq (LLM — free tier)</option>
+            <option value="openai">🤖 OpenAI (LLM)</option>
+            <option value="google">🌐 Google Cloud Translate</option>
+            <option value="deepl">🌐 DeepL</option>
+            <option value="azure">🌐 Azure Translator</option>
+          </select>
+        </div>
+
+        <div id="s-model-row" style="margin-bottom:12px">
+          <label>Model</label>
+          <select id="s-model" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
+        </div>
+
+        <div style="margin-bottom:12px">
+          <label id="s-key-label">API Key</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="password" id="s-apikey" placeholder="" autocomplete="off" spellcheck="false"
+              style="flex:1;padding:6px 9px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee;outline:none;font-family:monospace">
+            <button id="s-toggle-vis" style="flex-shrink:0;padding:4px 8px;font-size:11px">Show</button>
+          </div>
+          <div class="hint" id="s-key-hint"></div>
+        </div>
+
+        <div id="s-region-row" style="margin-bottom:12px;display:none">
+          <label>Azure Region <span style="color:#555">(ví dụ: eastasia, japaneast)</span></label>
+          <input type="text" id="s-apikey2" placeholder="eastasia"
+            style="width:100%;padding:6px 9px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee;outline:none">
+        </div>
+
+        <div class="api-status" id="api-status"></div>
+
+        <div id="s-quota-row" style="display:none;margin-bottom:4px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="font-size:11px;color:#888">Groq quota</span>
+            <button id="s-quota-refresh" style="padding:1px 7px;font-size:11px;margin-left:auto">🔄 Refresh</button>
+          </div>
+          <div id="s-quota-info" style="font-size:10px;color:#666;background:#1e1e1e;border:1px solid #333;border-radius:4px;padding:6px 8px;line-height:1.8"></div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Nguồn dịch -->
+      <div class="tab-panel" id="tab-source">
+        <div style="margin-bottom:12px">
+          <label>Nguồn âm thanh</label>
+          <select id="s-capture" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
+            <option value="teams">📹 Teams (Live Captions)</option>
+            <option value="system">🔊 Audio System (âm thanh hệ thống)</option>
+            <option value="mic">🎤 Microphone</option>
+          </select>
+        </div>
+
+        <div id="s-teams-note" style="margin-bottom:12px;font-size:10px;color:#888;background:#1e1e1e;border:1px solid #3e3e42;border-radius:4px;padding:6px 9px;line-height:1.7;display:none">
+          ℹ️ Kết nối qua <strong style="color:#aaa">Teams App desktop</strong> (WebView2 debug port 9222).<br>
+          Teams Web không hỗ trợ tự động — cần mở trình duyệt với flag <code style="color:#ce9178">--remote-debugging-port</code>.
+        </div>
+
+        <div id="s-mic-row" style="margin-bottom:12px;display:none">
+          <label>Chọn Microphone</label>
+          <select id="s-mic-device" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
+        </div>
+
+        <div id="s-stt-info" style="margin-bottom:4px;display:none;font-size:10px;color:#888;background:#1e1e1e;border:1px solid #3e3e42;border-radius:4px;padding:6px 9px">
+          🎙️ STT: <strong style="color:#4ec9b0">faster-whisper base</strong> (chạy cục bộ, không cần API)
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="settings-cancel">Hủy</button>
+        <button class="btn-save" id="settings-save">Lưu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <span style="font-size:15px;line-height:1">💬</span>
+    <span class="header-title">Caption Translator</span>
+    <div class="header-controls">
+      <select id="lang" title="Ngôn ngữ dịch">
+        <option value="vi">🇻🇳 Việt</option>
+        <option value="en">🇺🇸 English</option>
+        <option value="zh-CN">🇨🇳 中文</option>
+        <option value="ko">🇰🇷 한국어</option>
+        <option value="ja">🇯🇵 日本語</option>
+        <option value="fr">🇫🇷 Français</option>
+        <option value="de">🇩🇪 Deutsch</option>
+        <option value="es">🇪🇸 Español</option>
+      </select>
+      <button id="settings-btn" title="Cài đặt API" style="padding:2px 7px;font-size:13px;">⚙️</button>
+      <button id="pin-btn" title="Luôn trên đầu (đang tắt)">📌</button>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div class="status connecting" id="status">
+    <div class="dot"></div>
+    <span id="status-msg">Đang khởi động...</span>
+      <button id="cc-btn" title="Bật/tắt Live Captions trên Teams">▶</button>
+  </div>
+
+  <!-- Caption list -->
+  <div class="list" id="list">
+    <div class="empty">
+      Chờ captions từ Teams...<br>
+      <span style="color:#444;font-size:11px;">Vào meeting → bật Live Captions</span>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span class="footer-count" id="count">0 câu</span>
+    <div class="spacer"></div>
+    <button id="scroll-btn" class="active" title="Tự cuộn xuống">↓ Auto</button>
+    <button id="clear-btn">Xóa</button>
+  </div>
+
+  <script>
+    const api = window.__caption;
+    const listEl    = document.getElementById('list');
+    const statusEl  = document.getElementById('status');
+    const statusMsg = document.getElementById('status-msg');
+    const countEl   = document.getElementById('count');
+    const scrollBtn = document.getElementById('scroll-btn');
+    const pinBtn      = document.getElementById('pin-btn');
+    const ccBtn       = document.getElementById('cc-btn');
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsModal = document.getElementById('settings-modal');
+    const apiStatus     = document.getElementById('api-status');
+
+    let autoScroll  = true;
+    let pinned      = false;
+    let count       = 0;
+    let captionsOn  = false;
+    let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
+    let _mediaRecorder  = null;
+    let _audioStream    = null;
+
+    // Cập nhật trạng thái nút ▶ theo status
+    function setCaptionsState(on) {
+      captionsOn = on;
+      ccBtn.classList.toggle('active', on);
+      if (_currentSource === 'teams') {
+        ccBtn.title = on ? 'Captions đang bật — click để tắt' : 'Captions đang tắt — click để bật';
+      } else {
+        ccBtn.title = on ? 'Ghi âm đang chạy — click để tạm dừng' : 'Ghi âm tạm dừng — click để tiếp tục';
+      }
+    }
+
+    // Map: id → div element (để cập nhật bản dịch in-place)
+    const entryEls = new Map();
+
+    // Kiểm tra API key và lấy nguồn dịch khi khởi động
+    api.getSettings().then(s => {
+      _currentSource = s.captureSource || 'teams';
+      if (!s.apiKey) {
+        settingsBtn.textContent = '⚠️';
+        settingsBtn.title = 'Chưa có API key — click để cài đặt';
+      }
+    });
+
+    // Gửi lang mặc định ngay lập tức
+    api.setLang(document.getElementById('lang').value);
+
+    // ── Status ──
+    api.onStatus(({ type, msg }) => {
+      statusEl.className = 'status ' + type;
+      statusMsg.textContent = msg;
+      setCaptionsState(type === 'running');
+
+      if (type === 'waiting-captions') {
+        if (!listEl.querySelector('.entry')) {
+          listEl.innerHTML = '';
+          const banner = document.createElement('div');
+          banner.className = 'hint-banner';
+          banner.innerHTML =
+            '<b>Cần bật Live Captions trong Teams:</b><br>' +
+            '• Trong Teams: nhấn <b>More (...)</b> → <b>Language and speech</b> → <b>Turn on live captions</b><br>' +
+            '• Phím tắt: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd><br>' +
+            '• Hoặc nhấn nút <b>▶</b> ở thanh trạng thái bên dưới';
+          listEl.appendChild(banner);
+        }
+      }
+
+      if (type === 'error') {
+        listEl.innerHTML = '';
+        const banner = document.createElement('div');
+        banner.className = 'error-banner';
+        banner.innerHTML = `
+          <b>Cần bật CDP debug port — làm 1 lần duy nhất:</b><br><br>
+          1. Mở PowerShell và chạy:
+          <code>[System.Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS","--remote-debugging-port=9222","User")</code>
+          2. Đóng Teams hoàn toàn (kể cả system tray)<br>
+          3. Mở lại Teams<br>
+          4. Khởi động lại app này
+        `;
+        listEl.appendChild(banner);
+      }
+    });
+
+    // ── Caption: hiển/cập nhật entry (pending rồi được dịch) ──
+    api.onCaptionLive(({ id, author, original, translated, ts }) => {
+      listEl.querySelector('.empty, .hint-banner')?.remove();
+
+      let el = entryEls.get(id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'entry';
+        el.dataset.id = id;
+        listEl.appendChild(el);
+        entryEls.set(id, el);
+        count++;
+        countEl.textContent = count + ' câu';
+      }
+
+      const isPending = translated === '…';
+      el.innerHTML = `
+        <div class="entry-meta">
+          <span class="entry-author">${esc(author)}</span>
+          <span class="entry-time">${esc(ts)}</span>
+        </div>
+        <div class="entry-original">${esc(original)}</div>
+        <div class="entry-translated">${isPending
+          ? '<span style="color:#555;font-style:italic">đang dịch…</span>'
+          : esc(translated)}</div>
+      `;
+
+      if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+    });
+
+    // ── CC state từ main process (5s check + sau toggle) ──
+    api.onCcState(({ active }) => {
+      setCaptionsState(active);
+    });
+
+    // ── Settings modal ──
+    const PROVIDER_INFO = {
+      groq:   { label: 'Groq API Key', placeholder: 'gsk_...', hint: 'Free: 14,400 req/day', link: 'https://console.groq.com/keys', showModel: true },
+      openai: { label: 'OpenAI API Key', placeholder: 'sk-...', hint: 'platform.openai.com/api-keys', link: 'https://platform.openai.com/api-keys', showModel: true },
+      google: { label: 'Google Cloud API Key', placeholder: 'AIza...', hint: 'console.cloud.google.com → Cloud Translation API', link: 'https://console.cloud.google.com/apis/library/translate.googleapis.com', showModel: false },
+      deepl:  { label: 'DeepL API Key', placeholder: '....:fx (free) hoặc không có :fx (pro)', hint: 'www.deepl.com/account/summary', link: 'https://www.deepl.com/account/summary', showModel: false },
+      azure:  { label: 'Azure Subscr. Key', placeholder: '32-char hex key', hint: 'Azure Portal → Translator resource → Keys', link: 'https://portal.azure.com', showModel: false },
+    };
+
+    const sProvider    = document.getElementById('s-provider');
+    const sModelRow    = document.getElementById('s-model-row');
+    const sModel       = document.getElementById('s-model');
+    const sKeyLabel    = document.getElementById('s-key-label');
+    const sApiKey      = document.getElementById('s-apikey');
+    const sApiKey2     = document.getElementById('s-apikey2');
+    const sKeyHint     = document.getElementById('s-key-hint');
+    const sRegionRow   = document.getElementById('s-region-row');
+    const sToggleVis   = document.getElementById('s-toggle-vis');
+    const sCapture     = document.getElementById('s-capture');
+    const sMicRow      = document.getElementById('s-mic-row');
+    const sMicDevice   = document.getElementById('s-mic-device');
+
+    const PROVIDER_MODELS = {
+      groq: {
+        default: 'llama-3.1-8b-instant',
+        groups: [
+          { label: 'Groq Models', models: [
+            { value: 'llama-3.1-8b-instant',                     label: 'Llama 3.1 8B Instant ⭐ (nhanh, free)' },
+            { value: 'llama-3.3-70b-versatile',                  label: 'Llama 3.3 70B Versatile (chất lượng cao, free)' },
+            { value: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B (mới nhất)' },
+            { value: 'groq/compound-mini',                        label: 'Groq Compound Mini' },
+            { value: 'groq/compound',                             label: 'Groq Compound' },
+            { value: 'qwen/qwen3-32b',                            label: 'Qwen3 32B' },
+            { value: 'openai/gpt-oss-20b',                        label: 'OpenAI GPT-OSS 20B (trên Groq)' },
+            { value: 'openai/gpt-oss-120b',                       label: 'OpenAI GPT-OSS 120B (trên Groq)' },
+            { value: 'allam-2-7b',                                label: 'Allam 2 7B' },
+          ]},
+        ]
+      },
+      openai: {
+        default: 'gpt-4o-mini',
+        groups: [
+          { label: '💰 Budget', models: [
+            { value: 'gpt-4o-mini',   label: 'GPT-4o Mini (rẻ, nhanh)' },
+            { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+            { value: 'o1-mini',       label: 'O1 Mini' },
+            { value: 'o3-mini',       label: 'O3 Mini' },
+          ]},
+          { label: '🎯 Standard / Premium', models: [
+            { value: 'gpt-4o',       label: 'GPT-4o' },
+            { value: 'gpt-4-turbo',  label: 'GPT-4 Turbo' },
+            { value: 'o1',           label: 'O1' },
+            { value: 'o3',           label: 'O3' },
+          ]},
+        ]
+      },
+    };
+
+    function rebuildModelSelect(provider, currentVal) {
+      const data = PROVIDER_MODELS[provider];
+      sModel.innerHTML = '';
+      if (!data) return;
+      data.groups.forEach(g => {
+        const og = document.createElement('optgroup');
+        og.label = g.label;
+        g.models.forEach(m => {
+          const o = document.createElement('option');
+          o.value = m.value;
+          o.textContent = m.label;
+          og.appendChild(o);
+        });
+        sModel.appendChild(og);
+      });
+      sModel.value = (currentVal && [...sModel.options].some(o => o.value === currentVal))
+        ? currentVal : data.default;
+    }
+
+    function applyProviderUI(provider, modelVal) {
+      const info = PROVIDER_INFO[provider] || PROVIDER_INFO.groq;
+      sModelRow.style.display  = info.showModel ? '' : 'none';
+      sRegionRow.style.display = (provider === 'azure') ? '' : 'none';
+      sKeyLabel.textContent    = info.label;
+      sApiKey.placeholder      = info.placeholder;
+      sKeyHint.innerHTML       = info.hint ? `<a href="#" class="ext-link" data-url="${info.link}">${info.hint}</a>` : '';
+      rebuildModelSelect(provider, modelVal != null ? modelVal : sModel.value);
+    }
+
+    function applyCaptureUI(source) {
+      document.getElementById('s-teams-note').style.display = source === 'teams' ? '' : 'none';
+      sMicRow.style.display = source === 'mic' ? '' : 'none';
+      document.getElementById('s-stt-info').style.display = (source === 'system' || source === 'mic') ? '' : 'none';
+    }
+
+    async function loadMicDevices(currentId) {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        sMicDevice.innerHTML = mics.length
+          ? mics.map(d => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Microphone ' + d.deviceId.slice(0, 8))}</option>`).join('')
+          : '<option value="">Không tìm thấy microphone</option>';
+        if (currentId && [...sMicDevice.options].some(o => o.value === currentId))
+          sMicDevice.value = currentId;
+      } catch {
+        sMicDevice.innerHTML = '<option value="">Không thể liệt kê thiết bị</option>';
+      }
+    }
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+        if (btn.dataset.tab === 'source' && sCapture.value === 'mic') loadMicDevices(sMicDevice.value);
+      });
+    });
+
+    sProvider.addEventListener('change', () => {
+      applyProviderUI(sProvider.value);
+      document.getElementById('s-quota-row').style.display =
+        sProvider.value === 'groq' ? '' : 'none';
+    });
+
+    sCapture.addEventListener('change', () => {
+      applyCaptureUI(sCapture.value);
+      if (sCapture.value === 'mic') loadMicDevices(sMicDevice.value);
+    });
+
+    function openSettings() {
+      document.getElementById('s-quota-row').style.display =
+        sProvider.value === 'groq' ? '' : 'none';
+      document.getElementById('s-quota-info').textContent = '';
+      // Reset to first tab
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'translate'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-translate'));
+      api.getSettings().then(s => {
+        sProvider.value = s.provider || 'groq';
+        sApiKey.value   = s.apiKey   || '';
+        sApiKey2.value  = s.apiKey2  || '';
+        applyProviderUI(sProvider.value, s.llmModel || 'llama-3.1-8b-instant');
+        document.getElementById('s-quota-row').style.display =
+          ((s.provider || 'groq') === 'groq') ? '' : 'none';
+        document.getElementById('s-quota-info').textContent = '';
+        // Source tab
+        sCapture.value  = s.captureSource || 'teams';
+        applyCaptureUI(sCapture.value);
+        if (s.captureSource === 'mic') loadMicDevices(s.micDeviceId || '');
+        apiStatus.className  = 'api-status';
+        apiStatus.textContent = '';
+        if (s.apiKey) {
+          apiStatus.className  = 'api-status ok';
+          apiStatus.textContent = '✓ API key đã được lưu';
+        } else {
+          apiStatus.className  = 'api-status warn';
+          apiStatus.textContent = '⚠ Chưa có API key — captions sẽ hiển nguyên gốc không dịch';
+        }
+      });
+      settingsModal.classList.add('open');
+    }
+    settingsBtn.addEventListener('click', openSettings);
+    document.getElementById('settings-cancel').addEventListener('click', () => settingsModal.classList.remove('open'));
+    settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.remove('open'); });
+
+    sToggleVis.addEventListener('click', function() {
+      const isPass = sApiKey.type === 'password';
+      sApiKey.type = isPass ? 'text' : 'password';
+      this.textContent = isPass ? 'Hide' : 'Show';
+    });
+
+    document.getElementById('settings-save').addEventListener('click', () => {
+      api.saveSettings({
+        provider:      sProvider.value,
+        apiKey:        sApiKey.value.trim(),
+        apiKey2:       sApiKey2.value.trim(),
+        llmModel:      sModel.value,
+        captureSource: sCapture.value,
+        micDeviceId:   sMicDevice.value,
+      });
+    });
+    api.onSettingsSaved(({ ok }) => {
+      if (ok) {
+        _currentSource = sCapture.value;
+        apiStatus.className  = 'api-status ' + (sApiKey.value.trim() ? 'ok' : 'warn');
+        apiStatus.textContent = sApiKey.value.trim()
+          ? '✓ Đã lưu! Dịch bằng ' + sProvider.value
+          : '⚠ Đã xóa API key. Captions sẽ hiển nguyên gốc.';
+        settingsBtn.textContent = sApiKey.value.trim() ? '⚙️' : '⚠️';
+        setTimeout(() => { settingsModal.classList.remove('open'); }, 900);
+      }
+    });
+
+    // Quota refresh
+    document.getElementById('s-quota-refresh').addEventListener('click', () => {
+      const infoEl = document.getElementById('s-quota-info');
+      const btn    = document.getElementById('s-quota-refresh');
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      infoEl.textContent = 'Đang kiểm tra...';
+      api.checkGroqQuota(document.getElementById('s-model').value).then(q => {
+        btn.disabled = false;
+        btn.textContent = '🔄 Refresh';
+        if (q.error) {
+          infoEl.innerHTML = `<span style="color:#f88">✗ ${esc(q.error)}</span>`;
+          return;
+        }
+        const fmt = v => v ?? '—';
+        infoEl.innerHTML =
+          `<b style="color:#9cdcfe">Requests</b>: ` +
+          `<span style="color:#4ec9b0">${fmt(q.reqRemaining)}</span> / ${fmt(q.reqLimit)} còn lại` +
+          (q.reqReset ? ` · reset sau <span style="color:#dcdcaa">${fmt(q.reqReset)}</span>` : '') +
+          `<br><b style="color:#9cdcfe">Tokens</b>: ` +
+          `<span style="color:#4ec9b0">${fmt(q.tokRemaining)}</span> / ${fmt(q.tokLimit)} còn lại` +
+          (q.tokReset ? ` · reset sau <span style="color:#dcdcaa">${fmt(q.tokReset)}</span>` : '');
+      });
+    });
+
+    // Ext links trong hint
+    document.addEventListener('click', e => {
+      if (e.target.classList.contains('ext-link')) {
+        e.preventDefault();
+        api.openExternal(e.target.dataset.url);
+      }
+    });
+
+    // ── Nút ▶: toggle Live Captions (Teams) hoặc ghi âm (audio/mic) ──
+    ccBtn.addEventListener('click', () => {
+      ccBtn.disabled = true;
+      api.toggleCaptions();
+      setTimeout(() => { ccBtn.disabled = false; }, 2500);
+    });
+
+    // ── Audio capture (System Audio / Microphone) ──
+    function detectMimeType() {
+      const types = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+        'audio/mp4',
+      ];
+      return types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+    }
+
+    let _recordingActive = false;
+
+    async function startAudioCapture(source) {
+      try {
+        let stream;
+        if (source === 'mic') {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        } else {
+          // System audio qua setDisplayMediaRequestHandler (loopback Windows)
+          stream = await navigator.mediaDevices.getDisplayMedia({
+            audio: true,
+            video: { width: 320, height: 240, frameRate: 1 },
+          });
+        }
+        _audioStream = stream;
+        stream.getVideoTracks().forEach(t => t.stop());
+
+        const audioTracks = stream.getAudioTracks();
+        if (!audioTracks.length) {
+          statusMsg.textContent = '⚠ Không có audio track — thử lại';
+          return;
+        }
+
+        const mimeType = detectMimeType();
+        if (!mimeType) {
+          statusMsg.textContent = '❌ Electron không hỗ trợ MediaRecorder audio';
+          return;
+        }
+
+        _recordingActive = true;
+
+        // Dùng stop/restart cycle thay vì timeslice để mỗi chunk là WebM hoàn chỉnh
+        // (timeslice chỉ để lại header ở chunk đầu tiên, các chunk sau thiếu EBML header)
+        const CYCLE_MS = 4000;
+        const runCycle = () => {
+          if (!_recordingActive || !_audioStream || !_audioStream.active) return;
+
+          const rec = new MediaRecorder(_audioStream, { mimeType });
+          _mediaRecorder = rec;
+
+          rec.addEventListener('dataavailable', async (e) => {
+            if (e.data && e.data.size > 2000) {
+              const buf = await e.data.arrayBuffer();
+              api.sendAudioChunk({ buffer: buf, mimeType: e.data.type || mimeType });
+            }
+            // Khởi động cycle tiếp theo ngay sau khi nhận xong dữ liệu
+            if (_recordingActive && _audioStream?.active) {
+              setTimeout(runCycle, 50);
+            }
+          });
+
+          rec.start();
+          // Dừng sau CYCLE_MS để trigger dataavailable với file WebM hoàn chỉnh
+          setTimeout(() => {
+            if (rec.state === 'recording') rec.stop();
+          }, CYCLE_MS);
+        };
+
+        runCycle();
+
+      } catch (err) {
+        _recordingActive = false;
+        console.error('[audio]', err);
+        const msg = err.name === 'NotAllowedError'  ? 'Quyền bị từ chối' :
+                    err.name === 'NotFoundError'     ? 'Không tìm thấy thiết bị âm thanh' :
+                    err.name === 'AbortError'        ? 'Đã hủy' :
+                    (err.message || err.name || 'Lỗi không xác định');
+        statusMsg.textContent = '❌ Thu âm thất bại: ' + msg;
+      }
+    }
+
+    function stopAudioCapture() {
+      _recordingActive = false;
+      if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+        _mediaRecorder.stop();
+      }
+      _audioStream?.getTracks().forEach(t => t.stop());
+      _audioStream = null;
+      _mediaRecorder = null;
+    }
+
+    api.onStartAudioCapture(({ source }) => startAudioCapture(source));
+    api.onStopAudioCapture(() => stopAudioCapture());
+
+    // ── Controls ──
+    document.getElementById('lang').addEventListener('change', e => api.setLang(e.target.value));
+
+    pinBtn.addEventListener('click', function () {
+      pinned = !pinned;
+      this.classList.toggle('active', pinned);
+      this.title = pinned ? 'Luôn trên đầu (đang bật)' : 'Luôn trên đầu (đang tắt)';
+      api.setAlwaysOnTop(pinned);
+      // Khi bật pin: bring to front để tránh bị ẩn
+      if (pinned) api.focusWindow();
+    });
+
+    scrollBtn.addEventListener('click', function () {
+      autoScroll = !autoScroll;
+      this.classList.toggle('active', autoScroll);
+      if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+    });
+
+    document.getElementById('clear-btn').addEventListener('click', () => {
+      listEl.innerHTML = '<div class="empty">Đã xóa. Chờ captions mới...</div>';
+      entryEls.clear();
+      count = 0;
+      countEl.textContent = '0 câu';
+    });
+
+    // Tắt auto-scroll khi user cuộn lên
+    listEl.addEventListener('scroll', () => {
+      const atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 60;
+      if (!atBottom && autoScroll) {
+        autoScroll = false;
+        scrollBtn.classList.remove('active');
+      }
+    });
+
+    function esc(s) {
+      return String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>

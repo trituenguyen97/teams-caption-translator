@@ -1,0 +1,43 @@
+{
+  "name": "teams-caption-translator",
+  "version": "1.0.0",
+  "description": "Đọc Live Captions từ Microsoft Teams qua CDP và dịch sang ngôn ngữ tùy chọn",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "probe": "node probe-meeting-deep.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.42.0"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.teamscaptiontranslator",
+    "productName": "Caption Translator",
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app.html",
+      "translate-worker.js",
+      "translate-server.py",
+      "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "translate-worker.js",
+      "translate-server.py"
+    ],
+    "extraResources": [
+      {
+        "from": "nllb-ct2",
+        "to": "nllb-ct2"
+      }
+    ]
+  }
+}

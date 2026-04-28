@@ -1,0 +1,27 @@
+const { contextBridge, ipcRenderer, shell } = require('electron');
+
+contextBridge.exposeInMainWorld('__caption', {
+  onStatus:        cb => ipcRenderer.on('status',                (_, d) => cb(d)),
+  onCaptionLive:   cb => ipcRenderer.on('caption-live',          (_, d) => cb(d)),
+  onCaptionCommit: cb => ipcRenderer.on('caption-commit',        (_, d) => cb(d)),
+  onCcState:       cb => ipcRenderer.on('cc-state',              (_, d) => cb(d)),
+  onSttLang:       cb => ipcRenderer.on('stt-lang',              (_, d) => cb(d)),
+  onSettingsSaved: cb => ipcRenderer.on('settings-saved',        (_, d) => cb(d)),
+  onStartAudioCapture: cb => ipcRenderer.on('start-audio-capture', (_, d) => cb(d)),
+  onStopAudioCapture:  cb => ipcRenderer.on('stop-audio-capture',  ()    => cb()),
+  sendAudioChunk:  data => ipcRenderer.send('audio-chunk', data),
+  setLang:        lang => ipcRenderer.send('set-lang',     lang),
+  setSttLang:     lang => ipcRenderer.send('set-stt-lang', lang),
+  getSttLang:     ()   => ipcRenderer.invoke('get-stt-lang'),
+  getSettings:    ()   => ipcRenderer.invoke('get-settings'),
+  saveSettings:   s    => ipcRenderer.send('save-settings', s),
+  getOpenWindows:     ()       => ipcRenderer.invoke('get-open-windows'),
+  launchDebugBrowser: (opts)   => ipcRenderer.invoke('launch-debug-browser', opts || {}),
+  scanAllTabs:        ()       => ipcRenderer.invoke('scan-all-tabs'),
+  setWebTab:          t        => ipcRenderer.invoke('set-web-tab', t),
+  checkGroqQuota: (model) => ipcRenderer.invoke('check-groq-quota', model),
+  setAlwaysOnTop: v    => ipcRenderer.send('set-always-on-top', v),
+  focusWindow:    ()   => ipcRenderer.send('focus-window'),
+  toggleCaptions: ()   => ipcRenderer.send('toggle-captions'),
+  openExternal:   url  => shell.openExternal(url),
+});
