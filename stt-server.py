@@ -104,6 +104,53 @@ def decode_audio(path):
         print(f'[STT] Lỗi decode audio: {e}', flush=True)
         return np.array([], dtype=np.float32)
 
+# ── RMS energy check — bỏ qua audio im lặng ──────────────────
+# Ngưỡng RMS: 0.008 tương đương ~-42 dBFS, đủ nhạy với tiếng nói bình thường
+_RMS_THRESHOLD = 0.008
+
+def has_speech(pcm: np.ndarray) -> bool:
+    """Trả về True nếu audio có năng lượng đủ để nhận dạng."""
+    if pcm.size == 0:
+        return False
+    rms = float(np.sqrt(np.mean(pcm ** 2)))
+    print(f'[STT] RMS={rms:.5f} (ngưỡng={_RMS_THRESHOLD})', flush=True)
+    return rms >= _RMS_THRESHOLD
+
+# ── Hallucination filter ──────────────────────────────────────
+# SenseVoice/Whisper hay ảo giác khi input là silence hoặc tiếng ồn nền
+_HALLUCINATION_RE = re.compile(
+    r'^[\s\W]*$'                                  # chỉ có khoảng trắng/dấu câu
+    r'|^[^\w\s]{0,2}$'                            # chỉ 1-2 ký tự đặc biệt
+    r'|^\W*[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]\W*$'  # 1 ký tự Hàn đơn lẻ
+    r'|^\W*[\u4E00-\u9FFF]\W*$'                   # 1 ký tự CJK đơn lẻ
+    r'|^\W*[a-zA-Z]{1,3}\W*$'                     # 1-3 chữ Latin (The. An. a.)
+)
+
+# Các cụm ảo giác phổ biến của SenseVoice khi gặp silence/nhạc nền
+_HALLUCINATION_PHRASES = {
+    'ご視聴ありがとうございました', 'ありがとうございました', 'チャンネル登録',
+    'thank you for watching', 'thanks for watching', 'please subscribe',
+    '字幕', '字幕制作', 'subtitles', '[music]', '[applause]', '[noise]',
+    '♪', '【음악】', '(음악)', '음악',
+}
+
+def is_hallucination(text: str) -> bool:
+    """Trả về True nếu text trông như ảo giác của model."""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if _HALLUCINATION_RE.search(stripped):
+        return True
+    lower = stripped.lower()
+    for phrase in _HALLUCINATION_PHRASES:
+        if phrase.lower() in lower:
+            return True
+    # Lọc result quá ngắn: ít hơn 2 ký tự thực sự (bỏ dấu câu/khoảng trắng)
+    real_chars = re.sub(r'[\s\W]', '', stripped)
+    if len(real_chars) < 2:
+        return True
+    return False
+
 # ── Tách câu ngắn ─────────────────────────────────────────────
 _SPLIT_RE = re.compile(r'(?<=[.!?\u3002\uff01\uff1f])\s*')
 
@@ -146,6 +193,12 @@ class STTHandler(BaseHTTPRequestHandler):
                     self._reply(200, '')
                     return
 
+                # Bỏ qua audio im lặng / tiếng ồn nền — tránh hallucination
+                if not has_speech(samples):
+                    print(f'[STT] audio im lặng (RMS thấp), bỏ qua', flush=True)
+                    self._reply(200, '')
+                    return
+
                 with _lock:
                     stream = recognizer.create_stream()
                     stream.accept_waveform(16000, samples)
@@ -153,6 +206,13 @@ class STTHandler(BaseHTTPRequestHandler):
                     raw = stream.result.text.strip()
 
                 print(f'[STT] raw result: "{raw}"', flush=True)
+
+                # Lọc hallucination trước khi trả về
+                if is_hallucination(raw):
+                    print(f'[STT] lọc hallucination: "{raw}"', flush=True)
+                    self._reply(200, '')
+                    return
+
                 sentences = [s for part in [raw] for s in split_sentences(part) if s]
                 self._reply(200, '\n'.join(sentences))
             finally:
