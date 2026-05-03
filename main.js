@@ -4,13 +4,14 @@ const { exec } = require('child_process');
 const puppeteer = require('puppeteer-core');
 const https = require('https');
 const http  = require('http');
+const WebSocket = require('ws');
 
 // Tắt GPU hardware acceleration
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('disable-software-rasterizer');
 const CDP_URL = 'http://localhost:9222';
-const POLL_MS = 600;
+const POLL_MS = 200;
 
 let win;
 let targetLang      = 'Vietnamese';  // tên ngôn ngữ cho Groq prompt
@@ -24,6 +25,11 @@ let _audioPaused    = false;
 let _audioEntryId   = 0;
 let _sttProcess     = null;  // Python faster-whisper subprocess
 const STT_PORT      = 8765;
+
+// Teams Internal Translator — dùng token bắt được từ CDP worker
+let _teamsToken     = null;  // Bearer token từ Teams worker network request
+let _teamsTokenTs   = 0;     // Timestamp lần capture (ms)
+const TEAMS_TOKEN_TTL = 55 * 60 * 1000; // 55 phút (token Teams thường 1h)
 
 // Settings: lưu/đọc Groq API key
 const Store = (() => {
@@ -334,14 +340,126 @@ function isLLMRefusal(output, input) {
 
 let _llmModel  = 'llama-3.1-8b-instant';  // cho groq/openai
 
+// ── Teams Internal Translator ────────────────────────────────────────────────
+// Mapping tên ngôn ngữ → mã ISO 639-1 cho MS Translator API
+const _msTranslatorLangMap = {
+  'Vietnamese': 'vi', 'English': 'en', 'Japanese': 'ja', 'Korean': 'ko',
+  'Simplified Chinese': 'zh-Hans', 'Traditional Chinese': 'zh-Hant',
+  'French': 'fr', 'German': 'de', 'Spanish': 'es', 'Italian': 'it',
+  'Portuguese': 'pt', 'Russian': 'ru', 'Thai': 'th', 'Indonesian': 'id',
+};
+
+// Gọi MS Translator Text API với Teams bearer token
+async function translateViaTeamsToken(text) {
+  if (!_teamsToken) return null;
+  if (Date.now() - _teamsTokenTs > TEAMS_TOKEN_TTL) {
+    _teamsToken = null;
+    console.log('[teams-translate] Token hết hạn, đợi capture lại');
+    return null;
+  }
+  const to = _msTranslatorLangMap[targetLang];
+  if (!to) return null;
+  try {
+    const r = await httpsPost(
+      'api.cognitive.microsofttranslator.com',
+      `/translate?api-version=3.0&to=${to}&textType=plain`,
+      { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_teamsToken}` },
+      JSON.stringify([{ Text: text }])
+    );
+    if (r.status === 200) {
+      const result = JSON.parse(r.body)[0]?.translations?.[0]?.text;
+      if (result) console.log('[teams-translate] OK:', text.slice(0,30), '→', result.slice(0,30));
+      return result || null;
+    }
+    if (r.status === 401 || r.status === 403) {
+      console.warn('[teams-translate] Token bị từ chối (', r.status, '), xóa token');
+      _teamsToken = null;
+    }
+    return null;
+  } catch (e) {
+    console.warn('[teams-translate] lỗi:', e.message);
+    return null;
+  }
+}
+
+// Cài raw CDP WebSocket vào worker target để bắt bearer token từ network requests
+function _monitorWorkerForToken(wsUrl, label) {
+  try {
+    const ws = new WebSocket(wsUrl);
+    let msgId = 0;
+    ws.on('open', () => {
+      ws.send(JSON.stringify({ id: ++msgId, method: 'Network.enable', params: { maxPostDataSize: 128 } }));
+    });
+    ws.on('message', raw => {
+      try {
+        const msg = JSON.parse(raw);
+        if (msg.method !== 'Network.requestWillBeSent') return;
+        const auth = msg.params?.request?.headers?.authorization ||
+                     msg.params?.request?.headers?.Authorization;
+        if (!auth || !auth.startsWith('Bearer ')) return;
+        const token = auth.slice(7);
+        // Chỉ lấy JWT thực (dài > 100 ký tự, bắt đầu bằng eyJ)
+        if (token.length > 100 && token.startsWith('eyJ')) {
+          if (token !== _teamsToken) {
+            _teamsToken = token;
+            _teamsTokenTs = Date.now();
+            console.log('[teams-token] Bearer token mới từ', label);
+          }
+        }
+      } catch {}
+    });
+    ws.on('error', () => {});
+    ws.on('close', () => {
+      // Thử reconnect sau 5s
+      setTimeout(() => _monitorWorkerForToken(wsUrl, label), 5000);
+    });
+  } catch {}
+}
+
+// Lấy danh sách workers/service-workers từ CDP port và cài monitor
+async function startTeamsTokenCapture(cdpPort) {
+  if (!cdpPort) return;
+  try {
+    const raw = await new Promise(resolve => {
+      const req = http.get({ hostname: '127.0.0.1', port: cdpPort, path: '/json/list' }, res => {
+        let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
+      });
+      req.setTimeout(1500, () => { req.destroy(); resolve('[]'); });
+      req.on('error', () => resolve('[]'));
+    });
+    const targets = JSON.parse(raw);
+    let count = 0;
+    for (const t of targets) {
+      if ((t.type === 'worker' || t.type === 'service_worker') && t.webSocketDebuggerUrl) {
+        _monitorWorkerForToken(t.webSocketDebuggerUrl, `[${t.type}] ${(t.url||'').slice(0,50)}`);
+        count++;
+      }
+    }
+    console.log(`[teams-token] Đang monitor ${count} worker targets trên port ${cdpPort}`);
+  } catch (e) {
+    console.warn('[teams-token] Lỗi startTeamsTokenCapture:', e.message);
+  }
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
 async function translateText(text) {
-  if (!_apiKey) return text;
   // Tra bảng dịch sẵn trước — không cần gọi API
   const instant = lookupPhrase(text);
   if (instant) {
     console.log('[translate] phrase match:', text, '→', instant);
     return instant;
   }
+
+  // Thử dùng Teams internal translator (không cần API key ngoài)
+  if (_teamsToken) {
+    const teamsResult = await translateViaTeamsToken(text);
+    if (teamsResult && teamsResult !== text && !isLLMRefusal(teamsResult, text)) {
+      const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(teamsResult);
+      if (!hasJapanese) return teamsResult;
+    }
+  }
+
+  if (!_apiKey) return text;
   let result = null;
   try {
     switch (_provider) {
@@ -380,7 +498,8 @@ let _running = 0;
 const MAX_CONCURRENT = 3;
 
 function enqueueTranslate(text) {
-  if (!_apiKey) return Promise.resolve(text);
+  // Cho phép dịch nếu có Teams token (không cần _apiKey)
+  if (!_apiKey && !_teamsToken) return Promise.resolve(text);
   return new Promise(resolve => {
     _queue.push({ text, resolve });
     drainQueue();
@@ -438,7 +557,40 @@ function preprocessText(text) {
 
 // ────────────────────────────────────────────────────────────────────────────
 
+// Kiểm tra 1 port có phải CDP endpoint không (chỉ dùng làm fallback)
+async function isCDPPort(port) {
+  const raw = await httpGetLocal(port, '/json/version');
+  if (!raw) return false;
+  try { const j = JSON.parse(raw); return !!(j.Browser || j.webSocketDebuggerUrl); } catch { return false; }
+}
+
+// Phương pháp chính: dùng Get-NetTCPConnection tìm port mà ms-teams đang listen
+// → nhanh + chính xác, không cần đoán mò dãy port
+async function findTeamsCDPPorts() {
+  return new Promise(resolve => {
+    const script = [
+      '$pids = @(Get-Process ms-teams,MSTeams -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)',
+      'if (!$pids) { Write-Output ""; exit }',
+      '$ports = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |',
+      '  Where-Object { $_.OwningProcess -in $pids } |',
+      '  Select-Object -ExpandProperty LocalPort | Sort-Object -Unique',
+      'Write-Output ($ports -join ",")',
+    ].join('\n');
+    const encoded = Buffer.from(script, 'utf16le').toString('base64');
+    exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+      { timeout: 6000 }, (err, stdout) => {
+        const ports = (stdout || '').trim().split(',')
+          .map(p => parseInt(p.trim()))
+          .filter(p => p > 1023 && p < 65536);
+        resolve(ports);
+      }
+    );
+  });
+}
+
+// Không còn cần isTeamsOnPort (chỉ dùng trong fallback scan)
 async function isTeamsOnPort(port) {
+  if (!await isCDPPort(port)) return false;
   try {
     const b = await puppeteer.connect({ browserURL: `http://localhost:${port}`, defaultViewport: null });
     const pages = await b.pages().catch(() => []);
@@ -475,12 +627,27 @@ async function freePort9222IfNeeded() {
   }
 }
 
-// Kết nối tới browser có Teams (scan port 9222-9230)
+// Kết nối tới browser có Teams
 async function connectToTeamsBrowser() {
-  // App mode: scan ports
-  for (let port = 9222; port <= 9230; port++) {
+  // Phương pháp 1: tìm đúng port Teams đang listen qua Get-NetTCPConnection
+  const teamsPorts = await findTeamsCDPPorts();
+  if (teamsPorts.length) {
+    console.log('[CDP] Teams listen trên các port:', teamsPorts);
+    for (const port of teamsPorts) {
+      if (!await isCDPPort(port)) continue;
+      try {
+        const b = await puppeteer.connect({ browserURL: `http://localhost:${port}`, defaultViewport: null });
+        console.log('[CDP] Kết nối thành công qua port', port, '(process lookup)');
+        return b;
+      } catch { continue; }
+    }
+  }
+
+  // Phương pháp 2: fallback — scan port 9222-9240
+  console.log('[CDP] Không tìm thấy qua process, fallback scan 9222-9240...');
+  for (let port = 9222; port <= 9240; port++) {
     if (await isTeamsOnPort(port)) {
-      console.log('[CDP] Teams tìm thấy trên port', port);
+      console.log('[CDP] Teams tìm thấy trên port', port, '(scan)');
       try {
         return await puppeteer.connect({ browserURL: `http://localhost:${port}`, defaultViewport: null });
       } catch { continue; }
@@ -804,38 +971,68 @@ async function autoSetupCDP() {
 
 // ── end CDP auto-setup ───────────────────────────────────────────────────────
 
-// ── DOM Injection: chèn bản dịch ngay dưới từng dòng caption hoàn chỉnh ────────
+// ── DOM Injection ────────────────────────────────────────────────────────────
 
-// Tìm caption element khớp với text gốc, chèn bản dịch ngay bên dưới
-async function injectTranslationBelowCaption(page, originalText, translatedText) {
-  if (!page || !translatedText) return;
-  await page.evaluate(({ orig, trans }) => {
-    let textEls = [...document.querySelectorAll('[data-tid="closed-caption-text"]')];
-    if (!textEls.length) {
-      textEls = [...document.querySelectorAll('[data-tid="closed-caption-default-text"]')];
-    }
+// Inject MutationObserver vào page — tự re-inject span ngay khi React xoá (không flicker)
+async function injectCaptionObserver(page) {
+  if (!page) return;
+  await page.evaluate(() => {
+    if (window.__ctObserverActive) return;
+    window.__ctMap = window.__ctMap || {};
 
-    // Tìm element có text khớp với orig (bỏ qua span dịch đã inject)
-    const el = textEls.find(e => {
-      const clone = e.cloneNode(true);
-      clone.querySelectorAll('.__ct_trans').forEach(s => s.remove());
-      return clone.textContent.trim() === orig;
+    const SPAN_STYLE = 'display:block;color:#ff6b6b;font-style:italic;font-size:0.88em;margin-top:2px;line-height:1.4;';
+    const norm = s => s.replace(/[\u3002\u3001\uff01\uff1f!?.,\s]+$/, '').trim();
+
+    window.__ctReapply = function () {
+      let els = [...document.querySelectorAll('[data-tid="closed-caption-text"]')];
+      if (!els.length) els = [...document.querySelectorAll('[data-tid="closed-caption-default-text"]')];
+      for (const el of els) {
+        if (el.querySelector('.__ct_trans')) continue;
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll('.__ct_trans').forEach(s => s.remove());
+        const trans = window.__ctMap[norm(clone.textContent.trim())];
+        if (!trans) continue;
+        const span = document.createElement('span');
+        span.className = '__ct_trans';
+        span.style.cssText = SPAN_STYLE;
+        span.textContent = trans;
+        el.appendChild(span);
+      }
+    };
+
+    // Cập nhật bản dịch và gọi reapply ngay lập tức
+    window.__ctSet = function (origNorm, trans) {
+      window.__ctMap[origNorm] = trans;
+      window.__ctReapply();
+    };
+
+    const container =
+      document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
+      document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
+      document.body;
+
+    const obs = new MutationObserver(() => {
+      // debounce 30ms — batch React updates rồi reapply 1 lần
+      clearTimeout(window.__ctDebounce);
+      window.__ctDebounce = setTimeout(window.__ctReapply, 30);
     });
-    if (!el) return;
-
-    // Xóa bản dịch cũ nếu có
-    el.querySelectorAll('.__ct_trans').forEach(s => s.remove());
-
-    // Chèn bản dịch ngay dưới text gốc
-    const span = document.createElement('span');
-    span.className = '__ct_trans';
-    span.style.cssText = 'display:block;color:#ff6b6b;font-style:italic;font-size:0.88em;margin-top:2px;line-height:1.4;';
-    span.textContent = trans;
-    el.appendChild(span);
-  }, { orig: originalText, trans: translatedText }).catch(() => {});
+    obs.observe(container, { childList: true, subtree: true });
+    window.__ctObserverActive = true;
+  }).catch(() => {});
 }
 
-// ── end DOM Injection ─────────────────────────────────────────────────────────
+// Thêm bản dịch vào window.__ctMap và trigger reapply ngay
+async function injectTranslationBelowCaption(page, originalText, translatedText) {
+  if (!page || !translatedText) return;
+  const normKey = originalText.replace(/[\u3002\u3001\uff01\uff1f!?.,\s]+$/, '').trim();
+  await page.evaluate(({ key, trans }) => {
+    if (window.__ctSet) {
+      window.__ctSet(key, trans);
+    }
+  }, { key: normKey, trans: translatedText }).catch(() => {});
+}
+
+// ── end DOM Injection ────────────────────────────────────────────────────────────
 
 
 async function runService() {
@@ -869,20 +1066,45 @@ async function runService() {
 
   send('status', { type: 'running', msg: `Đang dịch sang ${targetLangLabel}` });
 
+  // Cài monitor để bắt Teams bearer token từ worker CDP targets
+  const wsEndpoint = browser.wsEndpoint?.() || '';
+  const portMatch  = wsEndpoint.match(/:(\d+)\//); 
+  const cdpPort    = portMatch ? parseInt(portMatch[1]) : 9222;
+  startTeamsTokenCapture(cdpPort);
+
   // 5 giây check 1 lần xem captions có đang bật → cập nhật nút CC trên renderer
   const ccStateInterval = setInterval(async () => {
     const active = await checkCaptionsActive();
     send('cc-state', { active });
   }, 5000);
 
-  const committed = new Set(); // normalized key của các entry đã commit
+  const committed = new Map(); // normalized key → timestamp lần cuối thấy trong DOM
+  const translationCache = new Map(); // normText → bản dịch (dùng để repopulate khi captionPage đổi)
   let isInit    = true;
   let entryId   = 0;
   let prevLastKey = null; // key của hàng cuối từ poll trước — để detect hàng đã ổn định
+  let captionPage = page; // page thực sự chứa caption DOM (có thể là popup window khác meeting page)
+  let _lastPageCount = 0;
+  let _captionCheckTick = 0; // chỉ re-scan findCaptionPage mỗi 10 poll (~2s)
+
+  // Inject observer ngay khi bắt đầu
+  await injectCaptionObserver(captionPage);
 
   // Chuẩn hóa key — bỏ dấu câu cuối (。、!?！？.) để "text" và "text。" không tạo 2 entry riêng biệt
   const toKey = (author, text) => `${author}::${text.replace(/[。、！？!?.,\s]+$/, '').trim()}`;
   const toLastKey = (author, text) => `${author}::${text}`; // raw key cho prevLastKey — cần exact match
+
+  // Tìm page nào đang chứa caption elements (meeting page hoặc popup window)
+  async function findCaptionPage(allPages) {
+    for (const p of allPages) {
+      const has = await p.evaluate(() => {
+        return !!(document.querySelector('[data-tid="closed-caption-text"]') ||
+                  document.querySelector('[data-tid="closed-caption-default-text"]'));
+      }).catch(() => false);
+      if (has) return p;
+    }
+    return null;
+  }
 
   // Polling loop
   while (true) {
@@ -924,7 +1146,31 @@ async function runService() {
       clearInterval(ccStateInterval);
       break;
     }
-    const rows = await page.evaluate(() => {
+
+    // Phát hiện caption page — chỉ re-scan mỗi 10 poll (~2s) hoặc khi số trang thay đổi
+    _captionCheckTick++;
+    let newCaptionPage = null;
+    if (_captionCheckTick >= 10 || pages.length !== _lastPageCount) {
+      _captionCheckTick = 0;
+      _lastPageCount = pages.length;
+      newCaptionPage = await findCaptionPage(pages);
+    }
+    if (newCaptionPage && newCaptionPage !== captionPage) {
+      console.log('[poll] caption chuyển sang page mới (popup/window thay đổi)');
+      captionPage = newCaptionPage;
+      isInit = true;
+      // Inject observer + repopulate __ctMap cho page mới
+      await injectCaptionObserver(captionPage);
+      if (translationCache.size > 0) {
+        const entries = [...translationCache.entries()];
+        captionPage.evaluate((map) => {
+          window.__ctMap = window.__ctMap || {};
+          for (const [k, v] of map) window.__ctMap[k] = v;
+          if (window.__ctReapply) window.__ctReapply();
+        }, entries).catch(() => {});
+      }
+    }
+    const rows = await captionPage.evaluate(() => {
       // Teams mới dùng closed-caption-text (v2), cũ dùng closed-caption-default-text
       let textEls = [...document.querySelectorAll('[data-tid="closed-caption-text"]')];
       if (!textEls.length) textEls = [...document.querySelectorAll('[data-tid="closed-caption-default-text"]')];
@@ -949,9 +1195,9 @@ async function runService() {
       return [];
     }).catch(() => []);
 
-    // Lần đầu: bỏ qua tất cả caption cũ (kể cả hàng cuối đang gõ dở)
+    // Lần đầu: commit tất cả rows đang visible (bỏ qua, không dịch để tránh block queue)
     if (isInit) {
-      rows.forEach(r => committed.add(toKey(r.author, r.text)));
+      rows.forEach(r => committed.set(toKey(r.author, r.text), Date.now()));
       prevLastKey = rows.length ? toLastKey(rows[rows.length-1].author, rows[rows.length-1].text) : null;
       isInit = false;
       await sleep(POLL_MS);
@@ -971,7 +1217,7 @@ async function runService() {
       if (!author) continue; // bỏ qua thông báo hệ thống (không có speaker)
       const k = toKey(author, text);
       if (!committed.has(k) && text) {
-        committed.add(k);
+        committed.set(k, Date.now());
         const id = ++entryId;
         const ts = timestamp();
         const cleaned = preprocessText(text);
@@ -982,16 +1228,23 @@ async function runService() {
           const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(translated);
           const isTranslated = translated !== cleaned && translated !== text && !hasJapanese;
           if (isTranslated) {
-            injectTranslationBelowCaption(page, text, translated).catch(() => {});
+            const normText = text.replace(/[\u3002\u3001\uff01\uff1f!?.,\s]+$/, '').trim();
+            translationCache.set(normText, translated);
+            injectTranslationBelowCaption(captionPage, text, translated).catch(() => {});
           }
         });
       }
     }
 
-    // Dọn committed: xóa các key không còn trong DOM (đã scroll off) → cho phép tái xử lý câu giống nhau sau này
+    // Dọn committed: chỉ xóa khi key vắng mặt khỏi DOM > 3s (tránh xóa nhầm lúc Teams replace element lúc finalize)
     const currentKeys = new Set(rows.map(r => toKey(r.author, r.text)));
-    for (const k of committed) {
-      if (!currentKeys.has(k)) committed.delete(k);
+    const now = Date.now();
+    for (const [k, ts] of committed) {
+      if (currentKeys.has(k)) {
+        committed.set(k, now); // refresh last-seen
+      } else if (now - ts > 3000) {
+        committed.delete(k);
+      }
     }
 
     await sleep(POLL_MS);
