@@ -552,7 +552,8 @@
         countEl.textContent = count + ' câu';
       }
 
-      const isPending = translated === '…';
+      const isPending  = translated === '…';
+      const isFailed   = translated === null;
       el.innerHTML = `
         <div class="entry-meta">
           <span class="entry-author">${esc(author)}</span>
@@ -561,7 +562,9 @@
         <div class="entry-original">${esc(original)}</div>
         <div class="entry-translated">${isPending
           ? '<span style="color:#555;font-style:italic">đang dịch…</span>'
-          : esc(translated)}</div>
+          : isFailed
+            ? '<span style="color:#444;font-style:italic">—</span>'
+            : esc(translated)}</div>
       `;
 
       if (autoScroll) listEl.scrollTop = listEl.scrollHeight;

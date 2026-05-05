@@ -795,6 +795,13 @@ async function checkCaptionsActive() {
   }
   if (!_meetingPage) return false;
 
+  const CAPTION_QUERY = () =>
+    !!(document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
+       document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
+       document.querySelector('[data-tid="captions-panel-dismiss-button"]') ||
+       document.querySelector('[data-tid="closed-caption-default-text"]') ||
+       document.querySelector('[data-tid="closed-caption-text"]'));
+
   const result = await _meetingPage.evaluate(() => {
     const tids = [...document.querySelectorAll('[data-tid]')]
       .map(el => el.getAttribute('data-tid'))
@@ -813,8 +820,35 @@ async function checkCaptionsActive() {
     return { found: false, tids: [] };
   });
 
-  console.log('[checkCaptions] found:', result.found, '| caption tids:', result.tids);
-  return result.found;
+  if (result.found) {
+    console.log('[checkCaptions] found: true | caption tids:', result.tids);
+    return true;
+  }
+
+  // Nếu _meetingPage không có caption elements → quét tất cả pages của browser
+  // Trường hợp này xảy ra khi Teams restart: _meetingPage trỏ vào lobby/page sai
+  // nhưng meeting thực sự và captions lại ở một window khác (popup)
+  if (_browser?.isConnected()) {
+    const allPages = await _browser.pages().catch(() => []);
+    for (const p of allPages) {
+      if (p === _meetingPage) continue;
+      const found = await p.evaluate(() =>
+        !!(document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
+           document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
+           document.querySelector('[data-tid="captions-panel-dismiss-button"]') ||
+           document.querySelector('[data-tid="closed-caption-default-text"]') ||
+           document.querySelector('[data-tid="closed-caption-text"]'))
+      ).catch(() => false);
+      if (found) {
+        console.log('[checkCaptions] caption found on different page → update _meetingPage');
+        _meetingPage = p;
+        return true;
+      }
+    }
+  }
+
+  console.log('[checkCaptions] found: false | caption tids:', result.tids);
+  return false;
 }
 
 // ──────────────────────────────────────────
@@ -907,8 +941,14 @@ function psExec(script, timeoutMs = 8000) {
 }
 
 function isTeamsRunning() {
-  return psExec('tasklist /FI "IMAGENAME eq ms-teams.exe" /FO CSV /NH 2>$null')
-    .then(out => out.toLowerCase().includes('ms-teams.exe'));
+  // Kiểm tra cả ms-teams.exe (old Teams) lẫn MSTeams.exe (new Teams 2.0+)
+  const script = [
+    '$found = @()',
+    'if (Get-Process ms-teams  -ErrorAction SilentlyContinue) { $found += "ms-teams" }',
+    'if (Get-Process MSTeams   -ErrorAction SilentlyContinue) { $found += "MSTeams" }',
+    'Write-Output ($found -join ",")',
+  ].join('\n');
+  return psExec(script).then(out => out.trim().length > 0);
 }
 
 function isCDPEnvSet() {
@@ -933,23 +973,40 @@ function restartTeams() {
   return psExec(script, 15000);
 }
 
-// Khi CDP không có: kiểm tra Teams, tự set env + restart để bật debug port
+// Khi CDP không có: đảm bảo env var đã set rồi restart Teams để bật debug port
 async function autoSetupCDP() {
-  const running = await isTeamsRunning();
-  if (!running) {
-    send('status', { type: 'error', msg: 'Không tìm thấy Teams — mở Teams và vào meeting' });
-    return null;
-  }
-
+  // 1. Đảm bảo env var WEBVIEW2 đã được ghi vào registry (chỉ cần làm 1 lần duy nhất)
   const cdpSet = await isCDPEnvSet();
   if (!cdpSet) {
-    send('status', { type: 'connecting', msg: '⚙️ Thiết lập CDP cho Teams...' });
+    send('status', { type: 'connecting', msg: '⚙️ Ghi debug port vào registry (1 lần duy nhất)...' });
     await setCDPEnv();
+    console.log('[autoSetupCDP] Đã ghi WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS vào registry');
   }
 
-  send('status', { type: 'connecting', msg: '🔄 Đang restart Teams để bật CDP...' });
+  // 2. Kiểm tra Teams có đang chạy không
+  const running = await isTeamsRunning();
+  if (!running) {
+    // Teams chưa mở: chờ user mở Teams (không tự mở vì cần user đăng nhập)
+    send('status', { type: 'waiting', msg: 'Mở Teams rồi vào meeting để bắt đầu' });
+    console.log('[autoSetupCDP] Teams chưa chạy — chờ user mở Teams...');
+    // Chờ tối đa 5 phút cho Teams xuất hiện
+    for (let i = 0; i < 300; i++) {
+      await sleep(1000);
+      if (_captureSourceChanged) return null;
+      if (await isTeamsRunning()) break;
+      if (i === 299) {
+        send('status', { type: 'error', msg: 'Không tìm thấy Teams — hãy mở Microsoft Teams trước' });
+        return null;
+      }
+    }
+  }
+
+  // 3. Teams đang chạy nhưng không có CDP port → tự restart để áp dụng env var
+  send('status', { type: 'connecting', msg: '🔄 Restart Teams để bật debug port 9222...' });
+  console.log('[autoSetupCDP] Restart Teams để áp dụng debug port...');
   await restartTeams();
 
+  // 4. Chờ Teams khởi động lại và CDP sẵn sàng
   send('status', { type: 'connecting', msg: '⏳ Chờ Teams khởi động...' });
   for (let i = 0; i < 90; i++) {
     await sleep(1000);
@@ -960,12 +1017,11 @@ async function autoSetupCDP() {
       console.log('[autoSetupCDP] CDP ready sau', i + 1, 'giây');
       return b;
     }
-    // Cập nhật đếm ngược mỗi 10s
     if ((i + 1) % 10 === 0) {
       send('status', { type: 'connecting', msg: `⏳ Chờ Teams... (${i + 1}s)` });
     }
   }
-  send('status', { type: 'error', msg: 'Không kết nối được CDP. Thử restart Teams thủ công.' });
+  send('status', { type: 'error', msg: 'Không kết nối được debug port. Thử tắt/mở Teams thủ công.' });
   return null;
 }
 
@@ -977,7 +1033,9 @@ async function autoSetupCDP() {
 async function injectCaptionObserver(page) {
   if (!page) return;
   await page.evaluate(() => {
-    if (window.__ctObserverActive) return;
+    // Luôn re-inject: disconnect observer/interval cũ trước khi tạo mới
+    if (window.__ctObserver) { window.__ctObserver.disconnect(); window.__ctObserver = null; }
+    clearInterval(window.__ctInterval);
     window.__ctMap = window.__ctMap || {};
 
     const SPAN_STYLE = 'display:block;color:#ff6b6b;font-style:italic;font-size:0.88em;margin-top:2px;line-height:1.4;';
@@ -1006,17 +1064,18 @@ async function injectCaptionObserver(page) {
       window.__ctReapply();
     };
 
-    const container =
-      document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
-      document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
-      document.body;
-
     const obs = new MutationObserver(() => {
       // debounce 30ms — batch React updates rồi reapply 1 lần
       clearTimeout(window.__ctDebounce);
       window.__ctDebounce = setTimeout(window.__ctReapply, 30);
     });
-    obs.observe(container, { childList: true, subtree: true });
+    // Observe document.body (luôn ổn định, không bị React thay thế)
+    // xử lý cả khi Teams thay thế toàn bộ container caption
+    obs.observe(document.body, { childList: true, subtree: true });
+    window.__ctObserver = obs;
+    // Interval backup: đảm bảo bản dịch luôn được reapply mỗi 800ms
+    // kể cả khi MutationObserver bỏ sót (Teams re-render container)
+    window.__ctInterval = setInterval(window.__ctReapply, 800);
     window.__ctObserverActive = true;
   }).catch(() => {});
 }
@@ -1038,10 +1097,20 @@ async function injectTranslationBelowCaption(page, originalText, translatedText)
 async function runService() {
   send('status', { type: 'connecting', msg: 'Đang kết nối CDP...' });
 
+  // Đảm bảo env var registry đã set — làm proactively khi app mở, không chờ fail
+  const cdpEnvReady = await isCDPEnvSet();
+  if (!cdpEnvReady) {
+    console.log('[runService] Env var chưa set → ghi registry trước khi kết nối');
+    await setCDPEnv();
+    console.log('[runService] Đã ghi WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS vào registry');
+  }
+
   // Giải phóng port nếu bị Widgets chiếm, rồi kết nối tới Teams
   await freePort9222IfNeeded();
   let browser = await connectToTeamsBrowser();
   if (!browser) {
+    // CDP không có → cần restart Teams để áp dụng debug port
+    // (lần đầu tiên: env var vừa được set; sau reboot: Teams auto-start chưa có port)
     browser = await autoSetupCDP();
     if (!browser) return;
   }
@@ -1051,15 +1120,29 @@ async function runService() {
   let page = await findMeetingPage();
   if (!page) {
     send('status', { type: 'waiting', msg: 'Chờ meeting Teams...' });
-    while (!page) { await sleep(3000); if (_captureSourceChanged) return; page = await findMeetingPage(); }
+    while (!page) {
+      await sleep(3000);
+      if (_captureSourceChanged) return;
+      page = await findMeetingPage();
+    }
   }
+  // Sync browser local var phòng findMeetingPage() đã reconnect _browser
+  if (_browser && _browser !== browser) browser = _browser;
   _meetingPage = page;
 
   // Chờ user bật Live Captions thủ công — app không tự bật
   if (!await checkCaptionsActive()) {
     send('status', { type: 'waiting-captions', msg: 'Bật Live Captions trong Teams để bắt đầu dịch' });
+    let _ccTick = 0;
     while (!await checkCaptionsActive()) {
       if (_captureSourceChanged) return;
+      // Mỗi 3 vòng (~6s): refresh _meetingPage phòng Teams chuyển từ lobby sang meeting window thực
+      // (sau restart Teams, page ban đầu tìm được có thể là pre-meeting/lobby)
+      if (++_ccTick % 3 === 0) {
+        const freshPage = await findMeetingPage();
+        if (freshPage) { page = freshPage; _meetingPage = freshPage; }
+        if (_browser && _browser !== browser) browser = _browser;
+      }
       await sleep(2000);
     }
   }
@@ -1078,21 +1161,23 @@ async function runService() {
     send('cc-state', { active });
   }, 5000);
 
-  const committed = new Map(); // normalized key → timestamp lần cuối thấy trong DOM
+  const committed = new Map(); // normalized key → { id, ts } (ts = timestamp lần cuối thấy trong DOM)
   const translationCache = new Map(); // normText → bản dịch (dùng để repopulate khi captionPage đổi)
   let isInit    = true;
   let entryId   = 0;
-  let prevLastKey = null; // key của hàng cuối từ poll trước — để detect hàng đã ổn định
   let captionPage = page; // page thực sự chứa caption DOM (có thể là popup window khác meeting page)
   let _lastPageCount = 0;
   let _captionCheckTick = 0; // chỉ re-scan findCaptionPage mỗi 10 poll (~2s)
+
+  // Regex dấu kết câu tiếng Nhật và chung — chỉ dịch khi có
+  const SENTENCE_END_RE = /[。！？!?]\s*$/;
+  const isSentenceComplete = t => SENTENCE_END_RE.test(t.trimEnd());
 
   // Inject observer ngay khi bắt đầu
   await injectCaptionObserver(captionPage);
 
   // Chuẩn hóa key — bỏ dấu câu cuối (。、!?！？.) để "text" và "text。" không tạo 2 entry riêng biệt
   const toKey = (author, text) => `${author}::${text.replace(/[。、！？!?.,\s]+$/, '').trim()}`;
-  const toLastKey = (author, text) => `${author}::${text}`; // raw key cho prevLastKey — cần exact match
 
   // Tìm page nào đang chứa caption elements (meeting page hoặc popup window)
   async function findCaptionPage(allPages) {
@@ -1197,52 +1282,81 @@ async function runService() {
 
     // Lần đầu: commit tất cả rows đang visible (bỏ qua, không dịch để tránh block queue)
     if (isInit) {
-      rows.forEach(r => committed.set(toKey(r.author, r.text), Date.now()));
-      prevLastKey = rows.length ? toLastKey(rows[rows.length-1].author, rows[rows.length-1].text) : null;
+      rows.forEach(r => committed.set(toKey(r.author, r.text), { id: 0, ts: Date.now() }));
       isInit = false;
       await sleep(POLL_MS);
       continue;
     }
 
-    // Hàng cuối: chỉ xử lý khi text đã ổn định qua 2 poll liên tiếp (không đang gõ)
-    const lastRow   = rows.length ? rows[rows.length - 1] : null;
-    const lastKey   = lastRow ? toLastKey(lastRow.author, lastRow.text) : null;
-    const stableLast = (lastRow && lastKey === prevLastKey) ? lastRow : null;
-    prevLastKey = lastKey;
-
-    // completedRows = tất cả trừ hàng cuối + hàng cuối nếu đã ổn định
+    // completedRows = tất cả trừ hàng cuối (hàng cuối = đang được nói, không dịch)
     const completedRows = rows.slice(0, -1);
-    if (stableLast) completedRows.push(stableLast);
-    for (const { author, text } of completedRows) {
+
+    // Same-poll prefix dedup: nếu cùng author có text T1 là prefix của T2 trong cùng batch → bỏ T1
+    // Tránh tạo entry riêng cho văn bản chưa hoàn chỉnh khi Teams đang cập nhật cùng câu
+    const rowsToCommit = completedRows.filter(({ author, text }) => {
+      if (!author || !text) return false;
+      const normThis = toKey(author, text).slice(author.length + 2);
+      if (!normThis) return false;
+      return !completedRows.some(other =>
+        other.author === author && other.text !== text &&
+        toKey(other.author, other.text).slice(other.author.length + 2).startsWith(normThis) &&
+        toKey(other.author, other.text).slice(other.author.length + 2).length > normThis.length
+      );
+    });
+
+    for (const { author, text } of rowsToCommit) {
       if (!author) continue; // bỏ qua thông báo hệ thống (không có speaker)
       const k = toKey(author, text);
       if (!committed.has(k) && text) {
-        committed.set(k, Date.now());
-        const id = ++entryId;
+        const normText = k.slice(author.length + 2);
+        // Cross-poll prefix dedup: nếu đã commit một text là prefix của text mới (cùng author) → reuse id
+        let reuseId = null;
+        if (normText.length >= 3) {
+          for (const [ck, cv] of committed) {
+            if (cv.id === 0) continue; // bỏ qua isInit entries
+            if (!ck.startsWith(author + '::')) continue;
+            const cNorm = ck.slice(author.length + 2);
+            if (cNorm.length >= 3 && normText.startsWith(cNorm) && normText.length > cNorm.length) {
+              reuseId = cv.id;
+              committed.delete(ck);
+              break;
+            }
+          }
+        }
+        const id = reuseId !== null ? reuseId : ++entryId;
+        committed.set(k, { id, ts: Date.now() });
         const ts = timestamp();
         const cleaned = preprocessText(text);
-        send('caption-live', { id, author, original: text, translated: '…', ts });
-        enqueueTranslate(cleaned).then(translated => {
-          send('caption-live', { id, author, original: text, translated, ts: timestamp() });
-          // Chỉ inject khi bản dịch thực sự khác input và không còn chứa ký tự Nhật
-          const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(translated);
-          const isTranslated = translated !== cleaned && translated !== text && !hasJapanese;
-          if (isTranslated) {
-            const normText = text.replace(/[\u3002\u3001\uff01\uff1f!?.,\s]+$/, '').trim();
-            translationCache.set(normText, translated);
-            injectTranslationBelowCaption(captionPage, text, translated).catch(() => {});
-          }
-        });
+
+        if (isSentenceComplete(text)) {
+          // Câu hoàn chỉnh (có dấu kết câu): hiển thị "đang dịch…" rồi gọi API dịch
+          send('caption-live', { id, author, original: text, translated: '…', ts });
+          enqueueTranslate(cleaned).then(translated => {
+            // Chỉ inject khi bản dịch thực sự khác input và không còn chứa ký tự Nhật
+            const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(translated);
+            const isTranslated = translated !== cleaned && translated !== text && !hasJapanese;
+            // Nếu không dịch được (trả về text gốc), gửi null để renderer hiển thị phù hợp
+            send('caption-live', { id, author, original: text, translated: isTranslated ? translated : null, ts: timestamp() });
+            if (isTranslated) {
+              const normText = text.replace(/[\u3002\u3001\uff01\uff1f!?.,\s]+$/, '').trim();
+              translationCache.set(normText, translated);
+              injectTranslationBelowCaption(captionPage, text, translated).catch(() => {});
+            }
+          });
+        } else {
+          // Câu chưa hoàn chỉnh (không có dấu kết câu): hiển thị nguyên gốc, không gọi API
+          send('caption-live', { id, author, original: text, translated: null, ts });
+        }
       }
     }
 
     // Dọn committed: chỉ xóa khi key vắng mặt khỏi DOM > 3s (tránh xóa nhầm lúc Teams replace element lúc finalize)
     const currentKeys = new Set(rows.map(r => toKey(r.author, r.text)));
     const now = Date.now();
-    for (const [k, ts] of committed) {
+    for (const [k, cv] of committed) {
       if (currentKeys.has(k)) {
-        committed.set(k, now); // refresh last-seen
-      } else if (now - ts > 3000) {
+        cv.ts = now; // refresh last-seen
+      } else if (now - cv.ts > 3000) {
         committed.delete(k);
       }
     }
@@ -1530,6 +1644,10 @@ ipcMain.on('toggle-captions', async () => {
   send('cc-state', { active });
 });
 
+// Dedup map cho STT: normalized text → timestamp lần cuối xuất hiện
+const _sttRecentTexts = new Map();
+const STT_DEDUP_MS = 8000; // bỏ qua nếu cùng text xuất hiện trong vòng 8s
+
 // Audio chunk: nhận audio từ renderer, gọi SenseVoice STT, dịch + broadcast
 ipcMain.on('audio-chunk', async (_, { buffer, mimeType }) => {
   if (_captureSource === 'teams' || _audioPaused) return;
@@ -1541,13 +1659,28 @@ ipcMain.on('audio-chunk', async (_, { buffer, mimeType }) => {
   if (!text || !text.trim()) return;
   // STT có thể trả nhiều câu cách nhau bằng \n — băng tải từng câu riêng
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const now = Date.now();
   for (const line of lines) {
+    // Dedup: bỏ qua nếu text này đã xuất hiện trong vòng STT_DEDUP_MS gần đây
+    const normLine = line.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (_sttRecentTexts.has(normLine) && now - _sttRecentTexts.get(normLine) < STT_DEDUP_MS) {
+      console.log('[STT dedup] bỏ qua trùng lặp:', line.slice(0, 50));
+      continue;
+    }
+    _sttRecentTexts.set(normLine, now);
+    // Dọn map tránh memory leak
+    for (const [k, ts_] of _sttRecentTexts) {
+      if (now - ts_ > STT_DEDUP_MS * 2) _sttRecentTexts.delete(k);
+    }
+
     const id = ++_audioEntryId;
     const ts = timestamp();
     const cleaned = preprocessText(line);
     send('caption-live', { id, author: 'STT', original: line, translated: '…', ts });
     enqueueTranslate(cleaned).then(translated => {
-      send('caption-live', { id, author: 'STT', original: line, translated, ts: timestamp() });
+      // Nếu translation trả về text gốc (không dịch được), gửi null để renderer hiển thị phù hợp
+      const isTranslated = translated !== line && translated !== cleaned;
+      send('caption-live', { id, author: 'STT', original: line, translated: isTranslated ? translated : null, ts: timestamp() });
     });
   }
 });
