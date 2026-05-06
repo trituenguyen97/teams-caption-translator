@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, dialog } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const puppeteer = require('puppeteer-core');
@@ -163,6 +163,26 @@ async function translateLLM(hostname, apiPath, apiKey, model, text, tgtLang) {
     ],
     max_tokens: 400,
     temperature: 0.1,
+  });
+  const r = await httpsPost(hostname, apiPath, {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  }, body);
+  if (!r.body) return null;
+  try {
+    const j = JSON.parse(r.body);
+    if (j.error) { console.warn('[llm] error:', j.error.message); return null; }
+    return j.choices?.[0]?.message?.content?.trim() || null;
+  } catch { return null; }
+}
+
+// Gọi LLM với user prompt tùy ý (không dùng hệ thống prompt dịch)
+async function callLLM(hostname, apiPath, apiKey, model, userPrompt, maxTokens = 4096) {
+  const body = JSON.stringify({
+    model,
+    messages: [{ role: 'user', content: userPrompt }],
+    max_tokens: maxTokens,
+    temperature: 0.3,
   });
   const r = await httpsPost(hostname, apiPath, {
     'Content-Type': 'application/json',
@@ -952,12 +972,30 @@ function isTeamsRunning() {
 }
 
 function isCDPEnvSet() {
-  return psExec('[System.Environment]::GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS","User")')
-    .then(out => out.includes('9222'));
+  // Kiểm tra cả 2 vị trí: User env var và WebView2 policy registry key
+  const script = [
+    '$envVar = [System.Environment]::GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS","User")',
+    '$regPath = "HKCU:\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments"',
+    '$regVal = if (Test-Path $regPath) {',
+    '  (Get-ItemProperty -Path $regPath -Name "*" -ErrorAction SilentlyContinue)."*"',
+    '} else { "" }',
+    'Write-Output (($envVar -like "*9222*") -and ($regVal -like "*9222*"))',
+  ].join('\n');
+  return psExec(script).then(out => out.trim().toLowerCase() === 'true');
 }
 
 function setCDPEnv() {
-  return psExec('[System.Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS","--remote-debugging-port=9222","User")');
+  // Ghi vào 2 vị trí:
+  // 1. User env var — để Teams mở thủ công cũng hoạt động
+  // 2. WebView2 policy registry key — được WebView2 runtime đọc trực tiếp khi khởi động,
+  //    không phụ thuộc vào cách Teams được launch (startup task, MSIX, thủ công)
+  const script = [
+    '[System.Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS","--remote-debugging-port=9222","User")',
+    '$regPath = "HKCU:\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments"',
+    'if (!(Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }',
+    'Set-ItemProperty -Path $regPath -Name "*" -Value "--remote-debugging-port=9222" -Type String',
+  ].join('\n');
+  return psExec(script);
 }
 
 function restartTeams() {
@@ -1606,7 +1644,10 @@ ipcMain.on('toggle-captions', async () => {
     return;
   }
 
-  if (!_meetingPage) _meetingPage = await findMeetingPage();
+  // Luôn refresh _meetingPage trước khi toggle — tránh dùng page cũ (lobby/home sau Teams restart)
+  // vì meeting thực sự có thể ở window khác mới được mở
+  const freshPage = await findMeetingPage();
+  if (freshPage) _meetingPage = freshPage;
 
   // Nếu không có CDP (meetingPage null) → dùng PowerShell SendKeys trực tiếp
   if (!_meetingPage) {
@@ -1779,6 +1820,62 @@ ipcMain.on('set-always-on-top', (_, v) => {
   win?.setAlwaysOnTop(v, v ? 'screen-saver' : 'normal');
   if (v) win?.focus();
 });
+
+// ── Summarize meeting ───────────────────────────────────────────────────────────────────────────────
+function buildSummarizePrompt(captions) {
+  const lines = captions
+    .filter(c => c.translated && c.translated !== '\u2026')
+    .map(c => `[${c.author}] ${c.translated}`)
+    .join('\n');
+  return `Bạn là trợ lý tổng hợp cuộc họn. Hãy tạo báo cáo cuộc họn chi tiết dạng Markdown từ nội dung dưới.
+
+Yêu cầu:
+- Viết hoàn toàn bằng tiếng Việt
+- Cấu trúc Markdown rõ ràng: tiêu đề, mổi đầu mục, danh sách
+- Bao gồm các phần: Tổng quan, Chủ đề chính, Đặc vấn đề/Vấn đề nổi bật, Quyết định/Hành động tiếp theo
+- Giữ nguyên thuật ngữ IT (bug, sprint, deploy, PR, API...)
+- Không thêm nội dung không có trong transcript
+
+Transcript cuộc họn:
+${lines}`;
+}
+
+ipcMain.handle('summarize-meeting', async (_, captions) => {
+  if (!captions || !captions.length) return { ok: false, error: 'Không có nội dung để tổng hợp' };
+  if (!_apiKey) return { ok: false, error: 'Chưa có API key — hãy thiết lập trong ⚙️ Cài đặt' };
+
+  const prompt = buildSummarizePrompt(captions);
+  try {
+    let result = null;
+    switch (_provider) {
+      case 'groq':
+        result = await callLLM('api.groq.com', '/openai/v1/chat/completions', _apiKey, _llmModel, prompt);
+        break;
+      case 'openai':
+        result = await callLLM('api.openai.com', '/v1/chat/completions', _apiKey, _llmModel, prompt);
+        break;
+      default:
+        return { ok: false, error: `Provider '${_provider}' không hỗ trợ tổng hợp (cần LLM)` };
+    }
+    if (!result) return { ok: false, error: 'LLM không trả về kết quả' };
+    return { ok: true, markdown: result };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('export-summary', async (_, { markdown, defaultName }) => {
+  const { filePath, canceled } = await dialog.showSaveDialog(win, {
+    title: 'Lưu báo cáo cuộc họn',
+    defaultPath: defaultName || `meeting-summary-${new Date().toISOString().slice(0,10)}.md`,
+    filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }],
+  });
+  if (canceled || !filePath) return { ok: false };
+  const fs = require('fs');
+  fs.writeFileSync(filePath, markdown, 'utf8');
+  return { ok: true, filePath };
+});
+// ── end Summarize ───────────────────────────────────────────────────────────────────────────────────────
 
 // ──────────────────────────────────────────
 // App lifecycle

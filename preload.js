@@ -24,4 +24,6 @@ contextBridge.exposeInMainWorld('__caption', {
   focusWindow:    ()   => ipcRenderer.send('focus-window'),
   toggleCaptions: ()   => ipcRenderer.send('toggle-captions'),
   openExternal:   url  => shell.openExternal(url),
+  summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),
+  exportSummary:    (data)     => ipcRenderer.invoke('export-summary', data),
 });

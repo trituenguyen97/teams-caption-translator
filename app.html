@@ -318,9 +318,59 @@
       color: #555;
     }
     .spacer { flex: 1; }
+
+    /* ── Summary modal ── */
+    .summary-body {
+      flex: 1;
+      overflow-y: auto;
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 5px;
+      padding: 12px 14px;
+      font-size: 12px;
+      line-height: 1.75;
+      color: #d4d4d4;
+      white-space: pre-wrap;
+      word-break: break-word;
+      user-select: text;
+      min-height: 200px;
+      max-height: calc(100vh - 220px);
+    }
+    .summary-body h1, .summary-body h2, .summary-body h3 {
+      color: #9cdcfe; margin: 10px 0 4px;
+    }
+    .summary-body h1 { font-size: 15px; }
+    .summary-body h2 { font-size: 13px; }
+    .summary-body h3 { font-size: 12px; }
+    .summary-body ul, .summary-body ol { padding-left: 18px; }
+    .summary-body li { margin: 2px 0; }
+    .summary-body strong { color: #dcdcaa; }
+    .summary-body em { color: #ce9178; }
+    .summary-body code { background:#2a2a2a; border-radius:3px; padding:1px 4px; font-family:monospace; font-size:11px; }
+    .summary-body hr { border-color: #3e3e42; margin: 10px 0; }
+    .summary-placeholder { color: #555; font-style: italic; text-align: center; padding: 40px 0; }
   </style>
 </head>
 <body>
+
+  <!-- Summary Modal -->
+  <div class="modal-overlay" id="summary-modal">
+    <div class="modal" style="width:520px;max-height:calc(100vh - 40px);display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-shrink:0">
+        <h3 style="flex:1;margin:0">📋 Tóm tắt cuộc họn</h3>
+        <button id="sum-export-btn" style="padding:4px 12px;font-size:12px;background:#1a4a1a;border-color:#4ec9b0;color:#4ec9b0" disabled>⬇ Xuất .md</button>
+        <button id="sum-copy-btn" style="padding:4px 12px;font-size:12px" disabled>&#x2398; Copy</button>
+        <button id="sum-close-btn" style="padding:4px 8px;font-size:12px">✕</button>
+      </div>
+      <div class="summary-body" id="sum-body">
+        <div class="summary-placeholder">Nhấn <b>✨ Tóm tắt</b> để tổng hợp nội dung cuộc họn bằng AI</div>
+      </div>
+      <div style="margin-top:10px;flex-shrink:0;display:flex;align-items:center;gap:8px">
+        <span id="sum-status" style="font-size:11px;color:#888;flex:1"></span>
+        <button id="sum-generate-btn" style="padding:5px 16px;background:#1a4a78;border-color:#3794ff;color:#fff">&#x2728; Tóm tắt</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Settings Modal -->
   <div class="modal-overlay" id="settings-modal">
@@ -450,6 +500,7 @@
     <span class="footer-count" id="count">0 câu</span>
     <div class="spacer"></div>
     <button id="scroll-btn" class="active" title="Tự cuộn xuống">↓ Auto</button>
+    <button id="sum-btn" title="Tóm tắt cuộc họn">📋 Tóm tắt</button>
     <button id="clear-btn">Xóa</button>
   </div>
 
@@ -485,6 +536,9 @@
         ccBtn.title = on ? 'Ghi âm đang chạy — click để tạm dừng' : 'Ghi âm tạm dừng — click để tiếp tục';
       }
     }
+
+    // Map: id → { author, original, translated } — lưu để tổng hợp cuộc họn
+    const captionData = new Map();
 
     // Map: id → div element (để cập nhật bản dịch in-place)
     const entryEls = new Map();
@@ -554,6 +608,10 @@
 
       const isPending  = translated === '…';
       const isFailed   = translated === null;
+
+      // Cập nhật captionData cho summary
+      if (!isPending) captionData.set(id, { author, original, translated });
+
       el.innerHTML = `
         <div class="entry-meta">
           <span class="entry-author">${esc(author)}</span>
@@ -930,9 +988,93 @@
     document.getElementById('clear-btn').addEventListener('click', () => {
       listEl.innerHTML = '<div class="empty">Đã xóa. Chờ captions mới...</div>';
       entryEls.clear();
+      captionData.clear();
       count = 0;
       countEl.textContent = '0 câu';
     });
+
+    // ── Summary modal ──
+    const summaryModal   = document.getElementById('summary-modal');
+    const sumBody        = document.getElementById('sum-body');
+    const sumStatus      = document.getElementById('sum-status');
+    const sumGenerateBtn = document.getElementById('sum-generate-btn');
+    const sumExportBtn   = document.getElementById('sum-export-btn');
+    const sumCopyBtn     = document.getElementById('sum-copy-btn');
+    let _lastMarkdown    = '';
+
+    // Simple Markdown → HTML renderer
+    function md2html(md) {
+      return md
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm,   '<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g,     '<em>$1</em>')
+        .replace(/`(.+?)`/g,       '<code>$1</code>')
+        .replace(/^---+$/gm,       '<hr>')
+        .replace(/^[*\-] (.+)$/gm, '<li>• $1</li>')
+        .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
+        .replace(/\n{2,}/g, '</p><p>')
+        .replace(/\n/g, '<br>')
+        .replace(/^(.)/,'<p>$1').replace(/(.)$/,'$1</p>');
+    }
+
+    document.getElementById('sum-btn').addEventListener('click', () => {
+      summaryModal.classList.add('open');
+    });
+    document.getElementById('sum-close-btn').addEventListener('click', () => {
+      summaryModal.classList.remove('open');
+    });
+    summaryModal.addEventListener('click', e => { if (e.target === summaryModal) summaryModal.classList.remove('open'); });
+
+    sumGenerateBtn.addEventListener('click', async () => {
+      if (!captionData.size) {
+        sumStatus.textContent = '⚠ Chưa có nội dung — bật Live Captions rồi thử lại';
+        return;
+      }
+      sumGenerateBtn.disabled = true;
+      sumGenerateBtn.textContent = '⏳ Đang tổng hợp...';
+      sumStatus.textContent = `Đang xử lý ${captionData.size} câu...`;
+      sumExportBtn.disabled = true;
+      sumCopyBtn.disabled = true;
+      sumBody.innerHTML = '<div class="summary-placeholder">AI đang tổng hợp… vui lòng chờ</div>';
+
+      const captions = [...captionData.values()];
+      const result = await api.summarizeMeeting(captions);
+
+      sumGenerateBtn.disabled = false;
+      sumGenerateBtn.textContent = '✨ Tóm tắt';
+
+      if (!result.ok) {
+        sumStatus.textContent = '❌ ' + result.error;
+        sumBody.innerHTML = `<div style="color:#f88;padding:20px;text-align:center">${esc(result.error)}</div>`;
+        return;
+      }
+
+      _lastMarkdown = result.markdown;
+      sumBody.innerHTML = md2html(result.markdown);
+      sumStatus.textContent = '✅ Hoàn thành — xuất file hoặc copy';
+      sumExportBtn.disabled = false;
+      sumCopyBtn.disabled = false;
+    });
+
+    sumExportBtn.addEventListener('click', async () => {
+      if (!_lastMarkdown) return;
+      const date = new Date().toISOString().slice(0,10);
+      const result = await api.exportSummary({ markdown: _lastMarkdown, defaultName: `meeting-${date}.md` });
+      if (result.ok) sumStatus.textContent = `✅ Đã lưu: ${result.filePath}`;
+    });
+
+    sumCopyBtn.addEventListener('click', async () => {
+      if (!_lastMarkdown) return;
+      await navigator.clipboard.writeText(_lastMarkdown);
+      const orig = sumCopyBtn.textContent;
+      sumCopyBtn.textContent = '✔ Đã copy';
+      setTimeout(() => { sumCopyBtn.textContent = orig; }, 1500);
+    });
+    // ── end Summary modal ──
 
     // Tắt auto-scroll khi user cuộn lên
     listEl.addEventListener('scroll', () => {
