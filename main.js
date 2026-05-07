@@ -196,6 +196,27 @@ async function callLLM(hostname, apiPath, apiKey, model, userPrompt, maxTokens =
   } catch { return null; }
 }
 
+// Gemini API (Google AI Studio — generativelanguage.googleapis.com)
+async function callGemini(apiKey, model, userPrompt, maxTokens = 4096, systemPrompt = null) {
+  const bodyObj = {
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3 },
+  };
+  if (systemPrompt) bodyObj.systemInstruction = { parts: [{ text: systemPrompt }] };
+  const r = await httpsPost(
+    'generativelanguage.googleapis.com',
+    `/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    { 'Content-Type': 'application/json' },
+    JSON.stringify(bodyObj)
+  );
+  if (!r.body) return null;
+  try {
+    const j = JSON.parse(r.body);
+    if (j.error) { console.warn('[gemini] error:', j.error.message); return null; }
+    return j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+  } catch { return null; }
+}
+
 // Google Cloud Translation (v2 Simple)
 async function translateGoogle(text, tgtLang, apiKey) {
   const LANG_CODES = { 'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-CN',
@@ -499,6 +520,11 @@ async function translateText(text) {
         break;
       case 'azure':
         result = await translateAzure(text, targetLang, _apiKey, _apiKey2);
+        break;
+      case 'gemini':
+        result = await callGemini(_apiKey, _llmModel,
+          `Translate the following text into ${targetLang}:\n${text}`, 400,
+          buildSystemPrompt(targetLang));
         break;
     }
   } catch (e) {
@@ -1832,10 +1858,10 @@ ipcMain.on('set-always-on-top', (_, v) => {
 // ── Summarize meeting ───────────────────────────────────────────────────────────────────────────────
 function buildSummarizePrompt(captions) {
   const lines = captions
-    .filter(c => c.translated && c.translated !== '\u2026')
-    .map(c => `[${c.author}] ${c.translated}`)
+    .filter(c => c.original && c.original.trim())
+    .map(c => `[${c.author}] ${c.original}`)
     .join('\n');
-  return `Bạn là trợ lý tổng hợp cuộc họn. Hãy tạo báo cáo cuộc họn chi tiết dạng Markdown từ nội dung dưới.
+  return `Bạn là trợ lý tổng hợp cuộc họn. Hãy tạo báo cáo cuộc họn chi tiết dạng Markdown từ transcript dưới (có thể bằng tiếng Nhật hoặc tiếng Anh).
 
 Yêu cầu:
 - Viết hoàn toàn bằng tiếng Việt
@@ -1870,19 +1896,26 @@ ipcMain.handle('summarize-meeting', async (_, captions) => {
     model    = Store.get('summaryModel',  '') || _llmModel;
   }
 
-  if (provider !== 'groq' && provider !== 'openai') {
-    return { ok: false, error: `Provider '${provider}' không hỗ trợ tóm tắt (cần LLM Groq hoặc OpenAI)` };
+  if (provider !== 'groq' && provider !== 'openai' && provider !== 'gemini') {
+    return { ok: false, error: `Provider '${provider}' không hỗ trợ tóm tắt (cần LLM)` };
   }
   if (!apiKey) return { ok: false, error: 'Chưa có API key — hãy thiết lập trong ⚙️ Cài đặt → Tóm tắt' };
+
+  if (!model) model = provider === 'gemini' ? 'gemini-2.0-flash' : provider === 'groq' ? 'llama-3.1-8b-instant' : 'gpt-4o-mini';
 
   const prompt          = buildSummarizePrompt(captions);
   const inputTokensEst  = estimateTokens(prompt);
   const t0              = Date.now();
 
   try {
-    const host = provider === 'groq' ? 'api.groq.com' : 'api.openai.com';
-    const path = provider === 'groq' ? '/openai/v1/chat/completions' : '/v1/chat/completions';
-    const result = await callLLM(host, path, apiKey, model, prompt);
+    let result;
+    if (provider === 'gemini') {
+      result = await callGemini(apiKey, model, prompt, 8192);
+    } else {
+      const host    = provider === 'groq' ? 'api.groq.com' : 'api.openai.com';
+      const llmPath = provider === 'groq' ? '/openai/v1/chat/completions' : '/v1/chat/completions';
+      result = await callLLM(host, llmPath, apiKey, model, prompt);
+    }
     if (!result) return { ok: false, error: 'LLM không trả về kết quả' };
 
     const elapsedMs    = Date.now() - t0;

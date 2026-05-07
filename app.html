@@ -393,6 +393,7 @@
             <option value="google">🌐 Google Cloud Translate</option>
             <option value="deepl">🌐 DeepL</option>
             <option value="azure">🌐 Azure Translator</option>
+            <option value="gemini">✨ Gemini (Google AI — free tier)</option>
           </select>
         </div>
 
@@ -462,6 +463,7 @@
             <option value="inherit">🔄 Dùng chung với tab Dịch thuật</option>
             <option value="groq">🤖 Groq (LLM — free tier)</option>
             <option value="openai">🤖 OpenAI (LLM)</option>
+            <option value="gemini">✨ Gemini (Google AI — free tier)</option>
           </select>
           <div class="hint" style="margin-top:6px">Tóm tắt cần LLM. Chọn "Dùng chung" để dùng cùng provider/key như dịch thuật.</div>
         </div>
@@ -678,6 +680,7 @@
       google: { label: 'Google Cloud API Key', placeholder: 'AIza...', hint: 'console.cloud.google.com → Cloud Translation API', link: 'https://console.cloud.google.com/apis/library/translate.googleapis.com', showModel: false },
       deepl:  { label: 'DeepL API Key', placeholder: '....:fx (free) hoặc không có :fx (pro)', hint: 'www.deepl.com/account/summary', link: 'https://www.deepl.com/account/summary', showModel: false },
       azure:  { label: 'Azure Subscr. Key', placeholder: '32-char hex key', hint: 'Azure Portal → Translator resource → Keys', link: 'https://portal.azure.com', showModel: false },
+      gemini: { label: 'Gemini API Key', placeholder: 'AIza...', hint: 'aistudio.google.com/apikey — Free: 1500 req/day, 1M ctx', link: 'https://aistudio.google.com/apikey', showModel: true },
     };
 
     const sProvider    = document.getElementById('s-provider');
@@ -724,6 +727,16 @@
             { value: 'gpt-4-turbo',  label: 'GPT-4 Turbo' },
             { value: 'o1',           label: 'O1' },
             { value: 'o3',           label: 'O3' },
+          ]},
+        ]
+      },
+      gemini: {
+        default: 'gemini-2.0-flash',
+        groups: [
+          { label: 'Gemini Models', models: [
+            { value: 'gemini-2.0-flash',    label: 'Gemini 2.0 Flash ⭐ (free, 1M ctx)' },
+            { value: 'gemini-1.5-flash',    label: 'Gemini 1.5 Flash (free, 1M ctx)' },
+            { value: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash-8B (nhanh nhất)' },
           ]},
         ]
       },
@@ -887,12 +900,13 @@
       const data = PROVIDER_MODELS[provider];
       sSumModel.innerHTML = '';
       if (data) {
-        data.options.forEach(o => {
+        const allModels = data.groups.flatMap(g => g.models);
+        allModels.forEach(o => {
           const opt = document.createElement('option');
           opt.value = o.value; opt.textContent = o.label;
           sSumModel.appendChild(opt);
         });
-        sSumModel.value = modelVal && data.options.some(o => o.value === modelVal)
+        sSumModel.value = modelVal && allModels.some(o => o.value === modelVal)
           ? modelVal : data.default;
       }
       sSumStatus.className   = 'api-status ' + (sSumApiKey.value.trim() ? 'ok' : 'warn');
