@@ -380,6 +380,7 @@
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="translate">🌐 Dịch thuật</button>
         <button class="tab-btn" data-tab="source">🎙 Nguồn dịch</button>
+        <button class="tab-btn" data-tab="summary">📋 Tóm tắt</button>
       </div>
 
       <!-- Tab 1: Dịch thuật -->
@@ -451,6 +452,36 @@
         <div id="s-stt-info" style="margin-bottom:4px;display:none;font-size:10px;color:#888;background:#1e1e1e;border:1px solid #3e3e42;border-radius:4px;padding:6px 9px">
           🎙️ STT: <strong style="color:#4ec9b0">faster-whisper base</strong> (chạy cục bộ, không cần API)
         </div>
+      </div>
+
+      <!-- Tab 3: Tóm tắt cuộc họp -->
+      <div class="tab-panel" id="tab-summary">
+        <div style="margin-bottom:12px">
+          <label>Dịch vụ tóm tắt</label>
+          <select id="s-sum-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
+            <option value="inherit">🔄 Dùng chung với tab Dịch thuật</option>
+            <option value="groq">🤖 Groq (LLM — free tier)</option>
+            <option value="openai">🤖 OpenAI (LLM)</option>
+          </select>
+          <div class="hint" style="margin-top:6px">Tóm tắt cần LLM. Chọn "Dùng chung" để dùng cùng provider/key như dịch thuật.</div>
+        </div>
+
+        <div id="s-sum-model-row" style="margin-bottom:12px;display:none">
+          <label>Model</label>
+          <select id="s-sum-model" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
+        </div>
+
+        <div id="s-sum-key-row" style="margin-bottom:12px;display:none">
+          <label id="s-sum-key-label">API Key</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="password" id="s-sum-apikey" placeholder="" autocomplete="off" spellcheck="false"
+              style="flex:1;padding:6px 9px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee;outline:none;font-family:monospace">
+            <button id="s-sum-toggle-vis" style="flex-shrink:0;padding:4px 8px;font-size:11px">Show</button>
+          </div>
+          <div class="hint" id="s-sum-key-hint"></div>
+        </div>
+
+        <div id="s-sum-status" class="api-status"></div>
       </div>
 
       <div class="modal-actions">
@@ -592,7 +623,7 @@
     });
 
     // ── Caption: hiển/cập nhật entry (pending rồi được dịch) ──
-    api.onCaptionLive(({ id, author, original, translated, ts }) => {
+    api.onCaptionLive(({ id, author, original, translated, ts, tsMs }) => {
       listEl.querySelector('.empty, .hint-banner')?.remove();
 
       let el = entryEls.get(id);
@@ -609,8 +640,15 @@
       const isPending  = translated === '…';
       const isFailed   = translated === null;
 
-      // Cập nhật captionData cho summary
-      if (!isPending) captionData.set(id, { author, original, translated });
+      // Cập nhật captionData cho summary (giữ tsMs lần đầu để tính duration meeting)
+      if (!isPending) {
+        const prev = captionData.get(id);
+        captionData.set(id, {
+          author, original, translated,
+          ts:   ts   || prev?.ts,
+          tsMs: prev?.tsMs || tsMs || Date.now(),
+        });
+      }
 
       el.innerHTML = `
         <div class="entry-meta">
@@ -780,6 +818,10 @@
         sCapture.value  = s.captureSource || 'teams';
         applyCaptureUI(sCapture.value);
         if (s.captureSource === 'mic') loadMicDevices(s.micDeviceId || '');
+        // Summary tab
+        sSumProvider.value = s.summaryProvider || 'inherit';
+        sSumApiKey.value   = s.summaryApiKey   || '';
+        applySumProviderUI(sSumProvider.value, s.summaryModel);
         apiStatus.className  = 'api-status';
         apiStatus.textContent = '';
         if (s.apiKey) {
@@ -804,13 +846,72 @@
 
     document.getElementById('settings-save').addEventListener('click', () => {
       api.saveSettings({
-        provider:      sProvider.value,
-        apiKey:        sApiKey.value.trim(),
-        apiKey2:       sApiKey2.value.trim(),
-        llmModel:      sModel.value,
-        captureSource: sCapture.value,
-        micDeviceId:   sMicDevice.value,
+        provider:        sProvider.value,
+        apiKey:          sApiKey.value.trim(),
+        apiKey2:         sApiKey2.value.trim(),
+        llmModel:        sModel.value,
+        captureSource:   sCapture.value,
+        micDeviceId:     sMicDevice.value,
+        summaryProvider: sSumProvider.value,
+        summaryApiKey:   sSumApiKey.value.trim(),
+        summaryModel:    sSumModel.value,
       });
+    });
+
+    // ── Summary settings tab ──
+    const sSumProvider   = document.getElementById('s-sum-provider');
+    const sSumModelRow   = document.getElementById('s-sum-model-row');
+    const sSumModel      = document.getElementById('s-sum-model');
+    const sSumKeyRow     = document.getElementById('s-sum-key-row');
+    const sSumKeyLabel   = document.getElementById('s-sum-key-label');
+    const sSumApiKey     = document.getElementById('s-sum-apikey');
+    const sSumKeyHint    = document.getElementById('s-sum-key-hint');
+    const sSumToggleVis  = document.getElementById('s-sum-toggle-vis');
+    const sSumStatus     = document.getElementById('s-sum-status');
+
+    function applySumProviderUI(provider, modelVal) {
+      if (provider === 'inherit') {
+        sSumModelRow.style.display = 'none';
+        sSumKeyRow.style.display   = 'none';
+        sSumStatus.className       = 'api-status ok';
+        sSumStatus.textContent     = `↪ Sẽ dùng cấu hình tab Dịch thuật (provider: ${sProvider.value})`;
+        return;
+      }
+      sSumModelRow.style.display = 'block';
+      sSumKeyRow.style.display   = 'block';
+      const info = PROVIDER_INFO[provider] || PROVIDER_INFO.groq;
+      sSumKeyLabel.textContent     = info.label;
+      sSumApiKey.placeholder       = info.placeholder;
+      sSumKeyHint.textContent      = info.hint;
+      // Build model dropdown từ PROVIDER_MODELS sẵn có
+      const data = PROVIDER_MODELS[provider];
+      sSumModel.innerHTML = '';
+      if (data) {
+        data.options.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o.value; opt.textContent = o.label;
+          sSumModel.appendChild(opt);
+        });
+        sSumModel.value = modelVal && data.options.some(o => o.value === modelVal)
+          ? modelVal : data.default;
+      }
+      sSumStatus.className   = 'api-status ' + (sSumApiKey.value.trim() ? 'ok' : 'warn');
+      sSumStatus.textContent = sSumApiKey.value.trim()
+        ? '✓ Đã có API key riêng cho tóm tắt'
+        : '⚠ Chưa có API key — nhập key hoặc chọn "Dùng chung"';
+    }
+
+    sSumProvider.addEventListener('change', () => applySumProviderUI(sSumProvider.value, sSumModel.value));
+    sSumApiKey.addEventListener('input', () => {
+      sSumStatus.className   = 'api-status ' + (sSumApiKey.value.trim() ? 'ok' : 'warn');
+      sSumStatus.textContent = sSumApiKey.value.trim()
+        ? '✓ Đã có API key riêng cho tóm tắt'
+        : '⚠ Chưa có API key — nhập key hoặc chọn "Dùng chung"';
+    });
+    sSumToggleVis.addEventListener('click', function() {
+      const isPass = sSumApiKey.type === 'password';
+      sSumApiKey.type = isPass ? 'text' : 'password';
+      this.textContent = isPass ? 'Hide' : 'Show';
     });
     api.onSettingsSaved(({ ok }) => {
       if (ok) {
@@ -1055,7 +1156,22 @@
 
       _lastMarkdown = result.markdown;
       sumBody.innerHTML = md2html(result.markdown);
-      sumStatus.textContent = '✅ Hoàn thành — xuất file hoặc copy';
+
+      // Hiển thị stats
+      if (result.stats) {
+        const s = result.stats;
+        const fmtTime = sec => sec >= 60 ? `${Math.floor(sec/60)}m${sec%60}s` : `${sec}s`;
+        const parts = [
+          s.durationMin > 0 ? `⏱ Meeting: ${s.durationMin}p` : null,
+          `🤖 ${s.provider}/${s.model}`,
+          `📥 ${s.inputTokens.toLocaleString()} tok`,
+          `📤 ${s.outputTokens.toLocaleString()} tok`,
+          `⌛ ${fmtTime(s.elapsedSec)}`,
+        ].filter(Boolean);
+        sumStatus.innerHTML = '✅ ' + parts.join(' · ');
+      } else {
+        sumStatus.textContent = '✅ Hoàn thành — xuất file hoặc copy';
+      }
       sumExportBtn.disabled = false;
       sumCopyBtn.disabled = false;
     });

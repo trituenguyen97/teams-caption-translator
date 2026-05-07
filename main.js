@@ -1368,13 +1368,14 @@ async function runService() {
 
         if (isSentenceComplete(text)) {
           // Câu hoàn chỉnh (có dấu kết câu): hiển thị "đang dịch…" rồi gọi API dịch
-          send('caption-live', { id, author, original: text, translated: '…', ts });
+          const tsMs = Date.now();
+          send('caption-live', { id, author, original: text, translated: '…', ts, tsMs });
           enqueueTranslate(cleaned).then(translated => {
             // Chỉ inject khi bản dịch thực sự khác input và không còn chứa ký tự Nhật
             const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(translated);
             const isTranslated = translated !== cleaned && translated !== text && !hasJapanese;
             // Nếu không dịch được (trả về text gốc), gửi null để renderer hiển thị phù hợp
-            send('caption-live', { id, author, original: text, translated: isTranslated ? translated : null, ts: timestamp() });
+            send('caption-live', { id, author, original: text, translated: isTranslated ? translated : null, ts: timestamp(), tsMs });
             if (isTranslated) {
               const normText = text.replace(/[\u3002\u3001\uff01\uff1f!?.,\s]+$/, '').trim();
               translationCache.set(normText, translated);
@@ -1383,7 +1384,7 @@ async function runService() {
           });
         } else {
           // Câu chưa hoàn chỉnh (không có dấu kết câu): hiển thị nguyên gốc, không gọi API
-          send('caption-live', { id, author, original: text, translated: null, ts });
+          send('caption-live', { id, author, original: text, translated: null, ts, tsMs: Date.now() });
         }
       }
     }
@@ -1716,12 +1717,13 @@ ipcMain.on('audio-chunk', async (_, { buffer, mimeType }) => {
 
     const id = ++_audioEntryId;
     const ts = timestamp();
+    const tsMs = Date.now();
     const cleaned = preprocessText(line);
-    send('caption-live', { id, author: 'STT', original: line, translated: '…', ts });
+    send('caption-live', { id, author: 'STT', original: line, translated: '…', ts, tsMs });
     enqueueTranslate(cleaned).then(translated => {
       // Nếu translation trả về text gốc (không dịch được), gửi null để renderer hiển thị phù hợp
       const isTranslated = translated !== line && translated !== cleaned;
-      send('caption-live', { id, author: 'STT', original: line, translated: isTranslated ? translated : null, ts: timestamp() });
+      send('caption-live', { id, author: 'STT', original: line, translated: isTranslated ? translated : null, ts: timestamp(), tsMs });
     });
   }
 });
@@ -1793,12 +1795,15 @@ ipcMain.handle('check-groq-quota', async (_, model) => {
 });
 // Settings IPC
 ipcMain.handle('get-settings', () => ({
-  provider:      Store.get('provider',      'groq'),
-  apiKey:        Store.get('apiKey',        ''),
-  apiKey2:       Store.get('apiKey2',       ''),
-  llmModel:      Store.get('llmModel',      'llama-3.1-8b-instant'),
-  captureSource: Store.get('captureSource', 'teams'),
-  micDeviceId:   Store.get('micDeviceId',   ''),
+  provider:        Store.get('provider',        'groq'),
+  apiKey:          Store.get('apiKey',          ''),
+  apiKey2:         Store.get('apiKey2',         ''),
+  llmModel:        Store.get('llmModel',        'llama-3.1-8b-instant'),
+  captureSource:   Store.get('captureSource',   'teams'),
+  micDeviceId:     Store.get('micDeviceId',     ''),
+  summaryProvider: Store.get('summaryProvider', 'inherit'), // 'inherit' | 'groq' | 'openai'
+  summaryApiKey:   Store.get('summaryApiKey',   ''),
+  summaryModel:    Store.get('summaryModel',    ''),
 }));
 ipcMain.on('save-settings', (_, s) => {
   if (s.provider      !== undefined) { Store.set('provider',      s.provider);      _provider  = s.provider; }
@@ -1810,7 +1815,10 @@ ipcMain.on('save-settings', (_, s) => {
     _captureSource = s.captureSource;
     Store.set('captureSource', s.captureSource);
   }
-  if (s.micDeviceId   !== undefined) { Store.set('micDeviceId',   s.micDeviceId); }
+  if (s.micDeviceId     !== undefined) { Store.set('micDeviceId',     s.micDeviceId); }
+  if (s.summaryProvider !== undefined) { Store.set('summaryProvider', s.summaryProvider); }
+  if (s.summaryApiKey   !== undefined) { Store.set('summaryApiKey',   s.summaryApiKey); }
+  if (s.summaryModel    !== undefined) { Store.set('summaryModel',    s.summaryModel); }
   send('settings-saved', { ok: true });
 });
 
@@ -1840,25 +1848,60 @@ Transcript cuộc họn:
 ${lines}`;
 }
 
+// Estimate token count cho text mixed CJK/Latin (~2.5 chars/token)
+function estimateTokens(text) { return Math.ceil((text || '').length / 2.5); }
+
 ipcMain.handle('summarize-meeting', async (_, captions) => {
   if (!captions || !captions.length) return { ok: false, error: 'Không có nội dung để tổng hợp' };
-  if (!_apiKey) return { ok: false, error: 'Chưa có API key — hãy thiết lập trong ⚙️ Cài đặt' };
 
-  const prompt = buildSummarizePrompt(captions);
+  // Tính duration meeting từ tsMs (epoch) của captions
+  const withTs = captions.filter(c => typeof c.tsMs === 'number').sort((a, b) => a.tsMs - b.tsMs);
+  const durationMs  = withTs.length >= 2 ? withTs[withTs.length - 1].tsMs - withTs[0].tsMs : 0;
+  const durationMin = Math.round(durationMs / 60000);
+
+  // Resolve provider/key/model: nếu summaryProvider === 'inherit' thì dùng từ tab Dịch thuật
+  const sumMode = Store.get('summaryProvider', 'inherit'); // 'inherit' | 'groq' | 'openai'
+  let provider, apiKey, model;
+  if (sumMode === 'inherit') {
+    provider = _provider; apiKey = _apiKey; model = _llmModel;
+  } else {
+    provider = sumMode;
+    apiKey   = Store.get('summaryApiKey', '') || _apiKey; // fallback nếu chưa nhập key riêng
+    model    = Store.get('summaryModel',  '') || _llmModel;
+  }
+
+  if (provider !== 'groq' && provider !== 'openai') {
+    return { ok: false, error: `Provider '${provider}' không hỗ trợ tóm tắt (cần LLM Groq hoặc OpenAI)` };
+  }
+  if (!apiKey) return { ok: false, error: 'Chưa có API key — hãy thiết lập trong ⚙️ Cài đặt → Tóm tắt' };
+
+  const prompt          = buildSummarizePrompt(captions);
+  const inputTokensEst  = estimateTokens(prompt);
+  const t0              = Date.now();
+
   try {
-    let result = null;
-    switch (_provider) {
-      case 'groq':
-        result = await callLLM('api.groq.com', '/openai/v1/chat/completions', _apiKey, _llmModel, prompt);
-        break;
-      case 'openai':
-        result = await callLLM('api.openai.com', '/v1/chat/completions', _apiKey, _llmModel, prompt);
-        break;
-      default:
-        return { ok: false, error: `Provider '${_provider}' không hỗ trợ tổng hợp (cần LLM)` };
-    }
+    const host = provider === 'groq' ? 'api.groq.com' : 'api.openai.com';
+    const path = provider === 'groq' ? '/openai/v1/chat/completions' : '/v1/chat/completions';
+    const result = await callLLM(host, path, apiKey, model, prompt);
     if (!result) return { ok: false, error: 'LLM không trả về kết quả' };
-    return { ok: true, markdown: result };
+
+    const elapsedMs    = Date.now() - t0;
+    const outputTokens = estimateTokens(result);
+    return {
+      ok: true,
+      markdown: result,
+      stats: {
+        provider,
+        model,
+        durationMin,
+        inputTokens:  inputTokensEst,
+        outputTokens,
+        totalTokens:  inputTokensEst + outputTokens,
+        elapsedMs,
+        elapsedSec:   Math.round(elapsedMs / 1000),
+        tokensPerSec: elapsedMs > 0 ? +((inputTokensEst + outputTokens) / (elapsedMs / 1000)).toFixed(1) : 0,
+      },
+    };
   } catch (e) {
     return { ok: false, error: e.message };
   }
