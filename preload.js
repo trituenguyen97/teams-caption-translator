@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, shell } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('__caption', {
   onStatus:        cb => ipcRenderer.on('status',                (_, d) => cb(d)),
@@ -19,11 +19,11 @@ contextBridge.exposeInMainWorld('__caption', {
   launchDebugBrowser: (opts)   => ipcRenderer.invoke('launch-debug-browser', opts || {}),
   scanAllTabs:        ()       => ipcRenderer.invoke('scan-all-tabs'),
   setWebTab:          t        => ipcRenderer.invoke('set-web-tab', t),
-  checkGroqQuota: (model) => ipcRenderer.invoke('check-groq-quota', model),
+  checkGroqQuota: (model, key) => ipcRenderer.invoke('check-groq-quota', model, key),
   setAlwaysOnTop: v    => ipcRenderer.send('set-always-on-top', v),
   focusWindow:    ()   => ipcRenderer.send('focus-window'),
   toggleCaptions: ()   => ipcRenderer.send('toggle-captions'),
-  openExternal:   url  => shell.openExternal(url),
+  openExternal:   url  => ipcRenderer.send('open-external', url),
   summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),
   exportSummary:    (data)     => ipcRenderer.invoke('export-summary', data),
 });

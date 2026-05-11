@@ -5,8 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder",
-    "probe": "node probe-meeting-deep.js"
+    "build": "electron-builder"
   },
   "dependencies": {
     "puppeteer-core": "^24.42.0"
@@ -25,13 +24,11 @@
       "main.js",
       "preload.js",
       "app.html",
-      "translate-worker.js",
-      "translate-server.py",
+      "stt-server.py",
       "node_modules/**/*"
     ],
     "asarUnpack": [
-      "translate-worker.js",
-      "translate-server.py"
+      "stt-server.py"
     ],
     "extraResources": [
       {

@@ -107,6 +107,11 @@
       border-color: #4ec9b0;
       color: #4ec9b0;
     }
+    #cc-btn.loading {
+      opacity: 0.6;
+      pointer-events: none;
+      animation: blink 0.8s infinite;
+    }
 
     /* ── Settings modal ── */
     .modal-overlay {
@@ -388,13 +393,17 @@
         <div style="margin-bottom:12px">
           <label>Dịch vụ</label>
           <select id="s-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
-            <option value="groq">🤖 Groq (LLM — free tier)</option>
-            <option value="openai">🤖 OpenAI (LLM)</option>
-            <option value="google">🌐 Google Cloud Translate</option>
-            <option value="deepl">🌐 DeepL</option>
-            <option value="azure">🌐 Azure Translator</option>
-            <option value="gemini">✨ Gemini (Google AI — free tier)</option>
+            <optgroup label="── Dịch từng câu (word-by-word) ──">
+              <option value="teams-token">MS Translator | Free | ⭐⭐⭐⭐</option>
+              <option value="deepl">DeepL | Free (500K Ký tự/tháng) | ⭐⭐⭐⭐⭐</option>
+            </optgroup>
+            <optgroup label="── Dịch ngữ cảnh (LLM) ──">
+              <option value="groq">Groq | Key (free) | ⭐⭐⭐⭐⭐</option>
+              <option value="gemini">Gemini | Key (free) | ⭐⭐⭐⭐⭐</option>
+              <option value="openai">OpenAI | Key (premium) | ⭐⭐⭐⭐⭐</option>
+            </optgroup>
           </select>
+          <div class="hint" id="s-provider-note" style="margin-top:4px"></div>
         </div>
 
         <div id="s-model-row" style="margin-bottom:12px">
@@ -402,7 +411,7 @@
           <select id="s-model" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
         </div>
 
-        <div style="margin-bottom:12px">
+        <div id="s-key-row" style="margin-bottom:12px">
           <label id="s-key-label">API Key</label>
           <div style="display:flex;gap:6px;align-items:center">
             <input type="password" id="s-apikey" placeholder="" autocomplete="off" spellcheck="false"
@@ -412,11 +421,7 @@
           <div class="hint" id="s-key-hint"></div>
         </div>
 
-        <div id="s-region-row" style="margin-bottom:12px;display:none">
-          <label>Azure Region <span style="color:#555">(ví dụ: eastasia, japaneast)</span></label>
-          <input type="text" id="s-apikey2" placeholder="eastasia"
-            style="width:100%;padding:6px 9px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee;outline:none">
-        </div>
+
 
         <div class="api-status" id="api-status"></div>
 
@@ -460,20 +465,19 @@
         <div style="margin-bottom:12px">
           <label>Dịch vụ tóm tắt</label>
           <select id="s-sum-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
-            <option value="inherit">🔄 Dùng chung với tab Dịch thuật</option>
-            <option value="groq">🤖 Groq (LLM — free tier)</option>
-            <option value="openai">🤖 OpenAI (LLM)</option>
-            <option value="gemini">✨ Gemini (Google AI — free tier)</option>
+            <option value="groq">Groq | Key (free) | ⭐⭐⭐⭐⭐</option>
+            <option value="gemini">Gemini | Key (free) | ⭐⭐⭐⭐⭐</option>
+            <option value="openai">OpenAI | Key (premium) | ⭐⭐⭐⭐⭐</option>
           </select>
-          <div class="hint" style="margin-top:6px">Tóm tắt cần LLM. Chọn "Dùng chung" để dùng cùng provider/key như dịch thuật.</div>
+          <div class="hint" id="s-sum-provider-note" style="margin-top:4px"></div>
         </div>
 
-        <div id="s-sum-model-row" style="margin-bottom:12px;display:none">
+        <div id="s-sum-model-row" style="margin-bottom:12px">
           <label>Model</label>
           <select id="s-sum-model" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
         </div>
 
-        <div id="s-sum-key-row" style="margin-bottom:12px;display:none">
+        <div id="s-sum-key-row" style="margin-bottom:12px">
           <label id="s-sum-key-label">API Key</label>
           <div style="display:flex;gap:6px;align-items:center">
             <input type="password" id="s-sum-apikey" placeholder="" autocomplete="off" spellcheck="false"
@@ -555,6 +559,11 @@
     let count       = 0;
     let captionsOn  = false;
     let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
+    let _currentProvider = 'groq';  // theo dõi provider hiện tại
+    const PROVIDER_NAMES = {
+      'teams-token': 'MS Translator', deepl: 'DeepL', groq: 'Groq',
+      gemini: 'Gemini', openai: 'OpenAI',
+    };
     let _mediaRecorder  = null;
     let _audioStream    = null;
     let _rawStream      = null;  // stream gốc từ getDisplayMedia (để cleanup đúng)
@@ -579,7 +588,11 @@
     // Kiểm tra API key và lấy nguồn dịch khi khởi động
     api.getSettings().then(s => {
       _currentSource = s.captureSource || 'teams';
-      if (!s.apiKey) {
+      const prov = s.provider || 'groq';
+      _currentProvider = prov;
+      const provInfo = PROVIDER_INFO[prov];
+      const needsKey = !(provInfo && provInfo.noKey);
+      if (needsKey && !s.apiKey && !(s.providerKeys && s.providerKeys[prov])) {
         settingsBtn.textContent = '⚠️';
         settingsBtn.title = 'Chưa có API key — click để cài đặt';
       }
@@ -675,22 +688,23 @@
 
     // ── Settings modal ──
     const PROVIDER_INFO = {
+      'teams-token': { label: '', placeholder: '', hint: 'Dùng Microsoft Edge Translator API miễn phí — không cần API key', link: '', showModel: false, noKey: true },
+      deepl:  { label: '', placeholder: '', hint: 'Free 500K ký tự/tháng — không cần API key', link: '', showModel: false, noKey: true },
       groq:   { label: 'Groq API Key', placeholder: 'gsk_...', hint: 'Free: 14,400 req/day', link: 'https://console.groq.com/keys', showModel: true },
-      openai: { label: 'OpenAI API Key', placeholder: 'sk-...', hint: 'platform.openai.com/api-keys', link: 'https://platform.openai.com/api-keys', showModel: true },
-      google: { label: 'Google Cloud API Key', placeholder: 'AIza...', hint: 'console.cloud.google.com → Cloud Translation API', link: 'https://console.cloud.google.com/apis/library/translate.googleapis.com', showModel: false },
-      deepl:  { label: 'DeepL API Key', placeholder: '....:fx (free) hoặc không có :fx (pro)', hint: 'www.deepl.com/account/summary', link: 'https://www.deepl.com/account/summary', showModel: false },
-      azure:  { label: 'Azure Subscr. Key', placeholder: '32-char hex key', hint: 'Azure Portal → Translator resource → Keys', link: 'https://portal.azure.com', showModel: false },
-      gemini: { label: 'Gemini API Key', placeholder: 'AIza...', hint: 'aistudio.google.com/apikey — Free: 1500 req/day, 1M ctx', link: 'https://aistudio.google.com/apikey', showModel: true },
+      openai: { label: 'OpenAI API Key', placeholder: 'sk-...', hint: 'Trả phí theo dùng', link: 'https://platform.openai.com/api-keys', showModel: true },
+      gemini: { label: 'Gemini API Key', placeholder: 'AIza...', hint: 'Free: 1500 req/day, 1M ctx', link: 'https://aistudio.google.com/apikey', showModel: true },
     };
+
+    // Per-provider key cache (lưu key riêng cho từng provider)
+    const _providerKeys = {};
+    const _providerModels = {};
 
     const sProvider    = document.getElementById('s-provider');
     const sModelRow    = document.getElementById('s-model-row');
     const sModel       = document.getElementById('s-model');
     const sKeyLabel    = document.getElementById('s-key-label');
     const sApiKey      = document.getElementById('s-apikey');
-    const sApiKey2     = document.getElementById('s-apikey2');
     const sKeyHint     = document.getElementById('s-key-hint');
-    const sRegionRow   = document.getElementById('s-region-row');
     const sToggleVis   = document.getElementById('s-toggle-vis');
     const sCapture     = document.getElementById('s-capture');
     const sMicRow      = document.getElementById('s-mic-row');
@@ -764,11 +778,39 @@
     function applyProviderUI(provider, modelVal) {
       const info = PROVIDER_INFO[provider] || PROVIDER_INFO.groq;
       sModelRow.style.display  = info.showModel ? '' : 'none';
-      sRegionRow.style.display = (provider === 'azure') ? '' : 'none';
+      const isNoKey = !!info.noKey;
+      document.getElementById('s-key-row').style.display = isNoKey ? 'none' : '';
       sKeyLabel.textContent    = info.label;
       sApiKey.placeholder      = info.placeholder;
-      sKeyHint.innerHTML       = info.hint ? `<a href="#" class="ext-link" data-url="${info.link}">${info.hint}</a>` : '';
-      rebuildModelSelect(provider, modelVal != null ? modelVal : sModel.value);
+      // Note dưới selector: link lấy key
+      const noteEl = document.getElementById('s-provider-note');
+      if (info.link) {
+        noteEl.innerHTML = `🔗 Lấy key: <a href="#" class="ext-link" data-url="${info.link}" style="color:#4ec9b0">${info.link.replace(/https?:\/\//, '').slice(0, 50)}...</a>`;
+      } else if (info.noKey) {
+        noteEl.innerHTML = '✅ ' + info.hint;
+      } else {
+        noteEl.innerHTML = '';
+      }
+      sKeyHint.textContent = info.hint || '';
+      // Load key/model đã lưu cho provider này
+      sApiKey.value = _providerKeys[provider] || '';
+      rebuildModelSelect(provider, modelVal != null ? modelVal : (_providerModels[provider] || null));
+      // Update status
+      updateTranslateStatus(provider);
+    }
+
+    function updateTranslateStatus(provider) {
+      const info = PROVIDER_INFO[provider];
+      if (info && info.noKey) {
+        apiStatus.className  = 'api-status ok';
+        apiStatus.textContent = '✅ ' + info.hint;
+      } else if (sApiKey.value.trim()) {
+        apiStatus.className  = 'api-status ok';
+        apiStatus.textContent = '✓ API key đã được lưu';
+      } else {
+        apiStatus.className  = 'api-status warn';
+        apiStatus.textContent = '⚠ Chưa có API key — captions sẽ hiển nguyên gốc không dịch';
+      }
     }
 
     function applyCaptureUI(source) {
@@ -801,7 +843,18 @@
       });
     });
 
-    sProvider.addEventListener('change', () => {
+    // Khi đổi provider: lưu key cũ, load key mới
+    sProvider.addEventListener('change', (e) => {
+      // Lưu key+model của provider trước đó
+      const prev = e.target._prevProvider;
+      if (prev) {
+        const prevInfo = PROVIDER_INFO[prev];
+        if (prevInfo && !prevInfo.noKey) {
+          _providerKeys[prev] = sApiKey.value.trim();
+          if (PROVIDER_MODELS[prev]) _providerModels[prev] = sModel.value;
+        }
+      }
+      e.target._prevProvider = sProvider.value;
       applyProviderUI(sProvider.value);
       document.getElementById('s-quota-row').style.display =
         sProvider.value === 'groq' ? '' : 'none';
@@ -820,9 +873,14 @@
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'translate'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-translate'));
       api.getSettings().then(s => {
+        // Load per-provider keys từ backend
+        const provKeys = s.providerKeys || {};
+        Object.assign(_providerKeys, provKeys);
+        const provModels = s.providerModels || {};
+        Object.assign(_providerModels, provModels);
+
         sProvider.value = s.provider || 'groq';
-        sApiKey.value   = s.apiKey   || '';
-        sApiKey2.value  = s.apiKey2  || '';
+        sProvider._prevProvider = sProvider.value;
         applyProviderUI(sProvider.value, s.llmModel || 'llama-3.1-8b-instant');
         document.getElementById('s-quota-row').style.display =
           ((s.provider || 'groq') === 'groq') ? '' : 'none';
@@ -832,18 +890,15 @@
         applyCaptureUI(sCapture.value);
         if (s.captureSource === 'mic') loadMicDevices(s.micDeviceId || '');
         // Summary tab
-        sSumProvider.value = s.summaryProvider || 'inherit';
-        sSumApiKey.value   = s.summaryApiKey   || '';
-        applySumProviderUI(sSumProvider.value, s.summaryModel);
-        apiStatus.className  = 'api-status';
-        apiStatus.textContent = '';
-        if (s.apiKey) {
-          apiStatus.className  = 'api-status ok';
-          apiStatus.textContent = '✓ API key đã được lưu';
-        } else {
-          apiStatus.className  = 'api-status warn';
-          apiStatus.textContent = '⚠ Chưa có API key — captions sẽ hiển nguyên gốc không dịch';
-        }
+        const sumProv = s.summaryProvider || 'groq';
+        sSumProvider.value = sumProv;
+        sSumProvider._prevProvider = sumProv;
+        // Load summary per-provider keys
+        const sumKeys = s.summaryKeys || {};
+        Object.assign(_sumProviderKeys, sumKeys);
+        const sumModels = s.summaryModels || {};
+        Object.assign(_sumProviderModels, sumModels);
+        applySumProviderUI(sumProv, s.summaryModel);
       });
       settingsModal.classList.add('open');
     }
@@ -858,16 +913,31 @@
     });
 
     document.getElementById('settings-save').addEventListener('click', () => {
+      // Lưu key hiện tại vào cache trước khi save
+      const curProv = sProvider.value;
+      const curInfo = PROVIDER_INFO[curProv];
+      if (curInfo && !curInfo.noKey) {
+        _providerKeys[curProv] = sApiKey.value.trim();
+        if (PROVIDER_MODELS[curProv]) _providerModels[curProv] = sModel.value;
+      }
+      // Lưu summary key
+      const curSum = sSumProvider.value;
+      _sumProviderKeys[curSum] = sSumApiKey.value.trim();
+      if (PROVIDER_MODELS[curSum]) _sumProviderModels[curSum] = sSumModel.value;
+
       api.saveSettings({
-        provider:        sProvider.value,
+        provider:        curProv,
         apiKey:          sApiKey.value.trim(),
-        apiKey2:         sApiKey2.value.trim(),
         llmModel:        sModel.value,
+        providerKeys:    { ..._providerKeys },
+        providerModels:  { ..._providerModels },
         captureSource:   sCapture.value,
         micDeviceId:     sMicDevice.value,
         summaryProvider: sSumProvider.value,
         summaryApiKey:   sSumApiKey.value.trim(),
         summaryModel:    sSumModel.value,
+        summaryKeys:     { ..._sumProviderKeys },
+        summaryModels:   { ..._sumProviderModels },
       });
     });
 
@@ -881,22 +951,26 @@
     const sSumKeyHint    = document.getElementById('s-sum-key-hint');
     const sSumToggleVis  = document.getElementById('s-sum-toggle-vis');
     const sSumStatus     = document.getElementById('s-sum-status');
+    const _sumProviderKeys = {};
+    const _sumProviderModels = {};
 
     function applySumProviderUI(provider, modelVal) {
-      if (provider === 'inherit') {
-        sSumModelRow.style.display = 'none';
-        sSumKeyRow.style.display   = 'none';
-        sSumStatus.className       = 'api-status ok';
-        sSumStatus.textContent     = `↪ Sẽ dùng cấu hình tab Dịch thuật (provider: ${sProvider.value})`;
-        return;
-      }
-      sSumModelRow.style.display = 'block';
-      sSumKeyRow.style.display   = 'block';
       const info = PROVIDER_INFO[provider] || PROVIDER_INFO.groq;
-      sSumKeyLabel.textContent     = info.label;
-      sSumApiKey.placeholder       = info.placeholder;
-      sSumKeyHint.textContent      = info.hint;
-      // Build model dropdown từ PROVIDER_MODELS sẵn có
+      sSumKeyLabel.textContent = info.label;
+      sSumApiKey.placeholder   = info.placeholder;
+      // Load key đã lưu: ưu tiên summary key riêng, fallback dùng key từ tab dịch thuật
+      const savedKey = _sumProviderKeys[provider];
+      const transKey = _providerKeys[provider];
+      sSumApiKey.value = savedKey || transKey || '';
+      // Note link
+      const noteEl = document.getElementById('s-sum-provider-note');
+      if (info.link) {
+        noteEl.innerHTML = `🔗 Lấy key: <a href="#" class="ext-link" data-url="${info.link}" style="color:#4ec9b0">${info.link.replace(/https?:\/\//, '').slice(0, 50)}...</a>`;
+      } else {
+        noteEl.innerHTML = '';
+      }
+      sKeyHint.textContent = info.hint || '';
+      // Build model dropdown
       const data = PROVIDER_MODELS[provider];
       sSumModel.innerHTML = '';
       if (data) {
@@ -907,20 +981,30 @@
           sSumModel.appendChild(opt);
         });
         sSumModel.value = modelVal && allModels.some(o => o.value === modelVal)
-          ? modelVal : data.default;
+          ? modelVal : (_sumProviderModels[provider] || data.default);
       }
+      // Status
       sSumStatus.className   = 'api-status ' + (sSumApiKey.value.trim() ? 'ok' : 'warn');
       sSumStatus.textContent = sSumApiKey.value.trim()
-        ? '✓ Đã có API key riêng cho tóm tắt'
-        : '⚠ Chưa có API key — nhập key hoặc chọn "Dùng chung"';
+        ? '✓ Đã có API key' + (savedKey ? '' : ' (dùng chung từ tab Dịch thuật)')
+        : '⚠ Chưa có API key — nhập key để sử dụng tóm tắt';
     }
 
-    sSumProvider.addEventListener('change', () => applySumProviderUI(sSumProvider.value, sSumModel.value));
+    // Khi đổi summary provider: lưu key cũ, load key mới
+    sSumProvider.addEventListener('change', (e) => {
+      const prev = e.target._prevProvider;
+      if (prev) {
+        _sumProviderKeys[prev] = sSumApiKey.value.trim();
+        if (PROVIDER_MODELS[prev]) _sumProviderModels[prev] = sSumModel.value;
+      }
+      e.target._prevProvider = sSumProvider.value;
+      applySumProviderUI(sSumProvider.value, sSumModel.value);
+    });
     sSumApiKey.addEventListener('input', () => {
       sSumStatus.className   = 'api-status ' + (sSumApiKey.value.trim() ? 'ok' : 'warn');
       sSumStatus.textContent = sSumApiKey.value.trim()
-        ? '✓ Đã có API key riêng cho tóm tắt'
-        : '⚠ Chưa có API key — nhập key hoặc chọn "Dùng chung"';
+        ? '✓ Đã có API key'
+        : '⚠ Chưa có API key — nhập key để sử dụng tóm tắt';
     });
     sSumToggleVis.addEventListener('click', function() {
       const isPass = sSumApiKey.type === 'password';
@@ -930,11 +1014,15 @@
     api.onSettingsSaved(({ ok }) => {
       if (ok) {
         _currentSource = sCapture.value;
-        apiStatus.className  = 'api-status ' + (sApiKey.value.trim() ? 'ok' : 'warn');
-        apiStatus.textContent = sApiKey.value.trim()
-          ? '✓ Đã lưu! Dịch bằng ' + sProvider.value
-          : '⚠ Đã xóa API key. Captions sẽ hiển nguyên gốc.';
-        settingsBtn.textContent = sApiKey.value.trim() ? '⚙️' : '⚠️';
+        _currentProvider = sProvider.value;
+        const prov = sProvider.value;
+        const provInfo = PROVIDER_INFO[prov];
+        const isNoKey = provInfo && provInfo.noKey;
+        apiStatus.className  = 'api-status ' + ((isNoKey || sApiKey.value.trim()) ? 'ok' : 'warn');
+        apiStatus.textContent = isNoKey
+          ? '✓ Đã lưu! Dùng ' + prov + ' (miễn phí)'
+          : (sApiKey.value.trim() ? '✓ Đã lưu! Dịch bằng ' + prov : '⚠ Đã xóa API key. Captions sẽ hiển nguyên gốc.');
+        settingsBtn.textContent = (isNoKey || sApiKey.value.trim()) ? '⚙️' : '⚠️';
         setTimeout(() => { settingsModal.classList.remove('open'); }, 900);
       }
     });
@@ -946,7 +1034,7 @@
       btn.disabled = true;
       btn.textContent = '⏳';
       infoEl.textContent = 'Đang kiểm tra...';
-      api.checkGroqQuota(document.getElementById('s-model').value).then(q => {
+      api.checkGroqQuota(document.getElementById('s-model').value, sApiKey.value.trim()).then(q => {
         btn.disabled = false;
         btn.textContent = '🔄 Refresh';
         if (q.error) {
@@ -975,8 +1063,15 @@
     // ── Nút ▶: toggle Live Captions (Teams) hoặc ghi âm (audio/mic) ──
     ccBtn.addEventListener('click', () => {
       ccBtn.disabled = true;
+      ccBtn.classList.add('loading');
+      const prevText = ccBtn.textContent;
+      ccBtn.textContent = '⏳';
       api.toggleCaptions();
-      setTimeout(() => { ccBtn.disabled = false; }, 2500);
+      setTimeout(() => {
+        ccBtn.disabled = false;
+        ccBtn.classList.remove('loading');
+        ccBtn.textContent = captionsOn ? '⏹' : '▶';
+      }, 2500);
     });
 
     // ── Audio capture (System Audio / Microphone) ──

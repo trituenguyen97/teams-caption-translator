@@ -15,7 +15,7 @@ const POLL_MS = 200;
 
 let win;
 let targetLang      = 'Vietnamese';  // tên ngôn ngữ cho Groq prompt
-let targetLangLabel = 'VI';
+let targetLangLabel = 'tiếng Việt';
 let _pinned         = false;
 let _meetingPage    = null;
 let _browser        = null;
@@ -27,9 +27,40 @@ let _sttProcess     = null;  // Python faster-whisper subprocess
 const STT_PORT      = 8765;
 
 // Teams Internal Translator — dùng token bắt được từ CDP worker
-let _teamsToken     = null;  // Bearer token từ Teams worker network request
+const _teamsTokens   = new Map(); // audience → { token, ts }
+let _teamsToken     = null;  // Bearer token ưu tiên (dùng cho MS Translator)
 let _teamsTokenTs   = 0;     // Timestamp lần capture (ms)
 const TEAMS_TOKEN_TTL = 55 * 60 * 1000; // 55 phút (token Teams thường 1h)
+
+// Decode JWT payload (không verify chữ ký)
+function parseJwtAudience(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+    return payload.aud || null;
+  } catch { return null; }
+}
+
+function storeTeamsToken(token, label) {
+  const aud = parseJwtAudience(token) || 'unknown';
+  const existing = _teamsTokens.get(aud);
+  if (existing && existing.token === token) return; // same token
+  _teamsTokens.set(aud, { token, ts: Date.now() });
+  // Ưu tiên token có audience là translator / cognitive
+  if (/translator|cognitive/i.test(aud)) {
+    _teamsToken = token;
+    _teamsTokenTs = Date.now();
+    console.log(`[teams-token] \u2713 Translator token từ ${label} | aud=${aud.slice(0,60)} | len:${token.length}`);
+  } else {
+    // Fallback: dùng token mới nhất làm default nếu chưa có translator token
+    if (!_teamsToken || Date.now() - _teamsTokenTs > TEAMS_TOKEN_TTL) {
+      _teamsToken = token;
+      _teamsTokenTs = Date.now();
+    }
+    console.log(`[teams-token] token từ ${label} | aud=${aud.slice(0,60)} | len:${token.length}`);
+  }
+}
 
 // Settings: lưu/đọc Groq API key
 const Store = (() => {
@@ -231,23 +262,38 @@ async function translateGoogle(text, tgtLang, apiKey) {
   } catch { return null; }
 }
 
-// DeepL
-async function translateDeepL(text, tgtLang, apiKey) {
-  const LANG_CODES = { 'Vietnamese': 'VI', 'English': 'EN-US', 'Simplified Chinese': 'ZH',
+// DeepL Free (web API, không cần key)
+async function translateDeepL(text, tgtLang) {
+  const LANG_CODES = { 'Vietnamese': 'VI', 'English': 'EN', 'Simplified Chinese': 'ZH',
     'Korean': 'KO', 'Japanese': 'JA', 'French': 'FR', 'German': 'DE', 'Spanish': 'ES' };
   const tgt = LANG_CODES[tgtLang] || 'VI';
-  // phân biệt free (.com) vs Pro (.com) bằng key suffix
-  const isFree = apiKey.endsWith(':fx');
-  const host = isFree ? 'api-free.deepl.com' : 'api.deepl.com';
-  const body = `text=${encodeURIComponent(text)}&target_lang=${tgt}`;
-  const r = await httpsPost(host, '/v2/translate', {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Authorization': `DeepL-Auth-Key ${apiKey}`,
+  const id = (Math.floor(Math.random() * 99999) + 8300000) * 1000 + 1;
+  const payload = {
+    jsonrpc: '2.0', method: 'LMT_handle_translations', id,
+    params: {
+      texts: [{ text, requestAlternatives: 0 }],
+      splitting: 'newlines',
+      lang: { source_lang_user_selected: 'auto', target_lang: tgt },
+    }
+  };
+  // DeepL timestamp trick: count 'i' in text
+  let iCount = (text.match(/i/g) || []).length;
+  let ts = Date.now();
+  if (iCount !== 0) ts = ts - (ts % (iCount + 1)) + (iCount + 1);
+  const raw = JSON.stringify(payload);
+  const body = (id + 3) % 13 === 0 || (id + 5) % 29 === 0
+    ? raw.replace('"method":"', '"method" : "')
+    : raw;
+  const r = await httpsPost('www2.deepl.com', '/jsonrpc', {
+    'Content-Type': 'application/json',
+    'User-Agent': 'DeepLBrowserExtension/1.28.0 Mozilla/5.0',
+    'Origin': 'chrome-extension://cofdbpoegempjloogbagkncekinflcnj',
+    'Referer': 'https://www.deepl.com/',
   }, body);
   if (!r.body) return null;
   try {
     const j = JSON.parse(r.body);
-    return j.translations?.[0]?.text || null;
+    return j.result?.texts?.[0]?.text || null;
   } catch { return null; }
 }
 
@@ -300,9 +346,8 @@ async function checkGroqQuota(apiKey, model) {
   };
 }
 
-let _provider  = 'groq';          // groq | openai | google | deepl | azure
+let _provider  = 'groq';          // teams-token | groq | openai | deepl | gemini
 let _apiKey    = '';
-let _apiKey2   = '';              // Azure: region
 // ── Bảng dịch sẵn cho các câu đơn nghĩa thường gặp trong meeting ────────────
 const PHRASE_MAP = {
   // Chào hỏi / kết thúc
@@ -428,13 +473,21 @@ function _monitorWorkerForToken(wsUrl, label) {
   try {
     const ws = new WebSocket(wsUrl);
     let msgId = 0;
+    let reqCount = 0;
     ws.on('open', () => {
-      ws.send(JSON.stringify({ id: ++msgId, method: 'Network.enable', params: { maxPostDataSize: 128 } }));
+      ws.send(JSON.stringify({ id: ++msgId, method: 'Network.enable', params: { maxPostDataSize: 256 } }));
+      console.log('[teams-token] WS connected:', label);
     });
     ws.on('message', raw => {
       try {
         const msg = JSON.parse(raw);
         if (msg.method !== 'Network.requestWillBeSent') return;
+        reqCount++;
+        // Log mỗi 20 requests để biết monitor hoạt động
+        if (reqCount <= 3 || reqCount % 20 === 0) {
+          const url = (msg.params?.request?.url || '').slice(0, 80);
+          console.log(`[teams-token] req #${reqCount} from ${label}: ${url}`);
+        }
         const auth = msg.params?.request?.headers?.authorization ||
                      msg.params?.request?.headers?.Authorization;
         if (!auth || !auth.startsWith('Bearer ')) return;
@@ -442,22 +495,23 @@ function _monitorWorkerForToken(wsUrl, label) {
         // Chỉ lấy JWT thực (dài > 100 ký tự, bắt đầu bằng eyJ)
         if (token.length > 100 && token.startsWith('eyJ')) {
           if (token !== _teamsToken) {
-            _teamsToken = token;
-            _teamsTokenTs = Date.now();
-            console.log('[teams-token] Bearer token mới từ', label);
+            storeTeamsToken(token, label);
           }
         }
       } catch {}
     });
-    ws.on('error', () => {});
+    ws.on('error', (e) => {
+      console.warn('[teams-token] WS error:', label, e.message);
+    });
     ws.on('close', () => {
+      console.log('[teams-token] WS closed:', label, '| reqs:', reqCount);
       // Thử reconnect sau 5s
       setTimeout(() => _monitorWorkerForToken(wsUrl, label), 5000);
     });
   } catch {}
 }
 
-// Lấy danh sách workers/service-workers từ CDP port và cài monitor
+// Lấy danh sách targets từ CDP port và cài monitor token trên TẤT CẢ (page + worker + service_worker)
 async function startTeamsTokenCapture(cdpPort) {
   if (!cdpPort) return;
   try {
@@ -471,14 +525,72 @@ async function startTeamsTokenCapture(cdpPort) {
     const targets = JSON.parse(raw);
     let count = 0;
     for (const t of targets) {
-      if ((t.type === 'worker' || t.type === 'service_worker') && t.webSocketDebuggerUrl) {
-        _monitorWorkerForToken(t.webSocketDebuggerUrl, `[${t.type}] ${(t.url||'').slice(0,50)}`);
+      if (t.webSocketDebuggerUrl) {
+        _monitorWorkerForToken(t.webSocketDebuggerUrl, `[${t.type}] ${(t.title||t.url||'').slice(0,50)}`);
         count++;
       }
     }
-    console.log(`[teams-token] Đang monitor ${count} worker targets trên port ${cdpPort}`);
+    console.log(`[teams-token] Đang monitor ${count} targets (page+worker) trên port ${cdpPort}`);
   } catch (e) {
     console.warn('[teams-token] Lỗi startTeamsTokenCapture:', e.message);
+  }
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ── Edge/Bing Translator (FREE, không cần API key) ──────────────────────────
+let _edgeAuthToken = null;
+let _edgeAuthTs    = 0;
+const EDGE_TOKEN_TTL = 9 * 60 * 1000; // 9 phút (token Edge thường 10 phút)
+
+async function getEdgeTranslateToken() {
+  if (_edgeAuthToken && Date.now() - _edgeAuthTs < EDGE_TOKEN_TTL) return _edgeAuthToken;
+  try {
+    const r = await httpsGet('edge.microsoft.com', '/translate/auth', {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0',
+    });
+    if (r.status === 200 && r.body && r.body.startsWith('eyJ')) {
+      _edgeAuthToken = r.body.trim();
+      _edgeAuthTs = Date.now();
+      console.log('[edge-translate] Auth token OK, len:', _edgeAuthToken.length);
+      return _edgeAuthToken;
+    }
+    console.warn('[edge-translate] Auth failed:', r.status);
+    return null;
+  } catch (e) {
+    console.warn('[edge-translate] Auth error:', e.message);
+    return null;
+  }
+}
+
+async function translateViaEdge(text) {
+  const to = _msTranslatorLangMap[targetLang];
+  if (!to) return null;
+  const authToken = await getEdgeTranslateToken();
+  if (!authToken) return null;
+  try {
+    const r = await httpsPost(
+      'api-edge.cognitive.microsofttranslator.com',
+      `/translate?api-version=3.0&to=${encodeURIComponent(to)}&textType=plain`,
+      {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      JSON.stringify([{ Text: text }])
+    );
+    if (r.status === 200) {
+      const result = JSON.parse(r.body)[0]?.translations?.[0]?.text;
+      if (result) console.log('[edge-translate] OK:', text.slice(0, 30), '→', result.slice(0, 30));
+      return result || null;
+    }
+    if (r.status === 401 || r.status === 403) {
+      _edgeAuthToken = null; // token hết hạn, lấy lại lần sau
+      console.warn('[edge-translate] 401/403, token expired');
+    }
+    return null;
+  } catch (e) {
+    console.warn('[edge-translate] error:', e.message);
+    return null;
   }
 }
 // ──────────────────────────────────────────────────────────────────────────────
@@ -491,8 +603,34 @@ async function translateText(text) {
     return instant;
   }
 
-  // Thử dùng Teams internal translator (không cần API key ngoài)
-  if (_teamsToken) {
+  // Provider = teams-token → dùng Edge Translator free, fallback sang Teams Bearer token
+  if (_provider === 'teams-token') {
+    // 1. Thử Edge Translator (free, không cần Teams token)
+    const edgeResult = await translateViaEdge(text);
+    if (edgeResult && edgeResult !== text && !isLLMRefusal(edgeResult, text)) {
+      const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(edgeResult);
+      if (!hasJapanese) return edgeResult;
+    }
+    // 2. Fallback: thử Teams Bearer token
+    if (_teamsToken || _teamsTokens.size > 0) {
+      const teamsResult = await translateViaTeamsToken(text);
+      if (teamsResult && teamsResult !== text && !isLLMRefusal(teamsResult, text)) {
+        const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(teamsResult);
+        if (!hasJapanese) return teamsResult;
+      }
+    }
+    return text;
+  }
+
+  // Các provider khác: thử Edge/Teams token trước nếu có, rồi fallback sang API key
+  {
+    const edgeResult = await translateViaEdge(text);
+    if (edgeResult && edgeResult !== text && !isLLMRefusal(edgeResult, text)) {
+      const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(edgeResult);
+      if (!hasJapanese) return edgeResult;
+    }
+  }
+  if (_teamsToken || _teamsTokens.size > 0) {
     const teamsResult = await translateViaTeamsToken(text);
     if (teamsResult && teamsResult !== text && !isLLMRefusal(teamsResult, text)) {
       const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(teamsResult);
@@ -500,10 +638,13 @@ async function translateText(text) {
     }
   }
 
-  if (!_apiKey) return text;
+  if (!_apiKey && _provider !== 'deepl') return text;
   let result = null;
   try {
     switch (_provider) {
+      case 'deepl':
+        result = await translateDeepL(text, targetLang);
+        break;
       case 'groq':
         result = await translateLLM('api.groq.com', '/openai/v1/chat/completions',
           _apiKey, _llmModel, text, targetLang);
@@ -511,15 +652,6 @@ async function translateText(text) {
       case 'openai':
         result = await translateLLM('api.openai.com', '/v1/chat/completions',
           _apiKey, _llmModel, text, targetLang);
-        break;
-      case 'google':
-        result = await translateGoogle(text, targetLang, _apiKey);
-        break;
-      case 'deepl':
-        result = await translateDeepL(text, targetLang, _apiKey);
-        break;
-      case 'azure':
-        result = await translateAzure(text, targetLang, _apiKey, _apiKey2);
         break;
       case 'gemini':
         result = await callGemini(_apiKey, _llmModel,
@@ -544,8 +676,12 @@ let _running = 0;
 const MAX_CONCURRENT = 3;
 
 function enqueueTranslate(text) {
-  // Cho phép dịch nếu có Teams token (không cần _apiKey)
-  if (!_apiKey && !_teamsToken) return Promise.resolve(text);
+  // teams-token & deepl dùng free API → luôn cho phép
+  if (_provider === 'teams-token' || _provider === 'deepl') {
+    // OK — không cần API key
+  } else if (!_apiKey && !_teamsToken && _teamsTokens.size === 0) {
+    return Promise.resolve(text);
+  }
   return new Promise(resolve => {
     _queue.push({ text, resolve });
     drainQueue();
@@ -611,20 +747,29 @@ async function isCDPPort(port) {
 }
 
 // Phương pháp chính: dùng Get-NetTCPConnection tìm port mà ms-teams đang listen
-// → nhanh + chính xác, không cần đoán mò dãy port
+// Teams dùng msedgewebview2 (WebView2) làm child process → cần tìm cả child processes
 async function findTeamsCDPPorts() {
   return new Promise(resolve => {
     const script = [
-      '$pids = @(Get-Process ms-teams,MSTeams -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)',
-      'if (!$pids) { Write-Output ""; exit }',
+      '# Tìm PID của Teams (ms-teams hoặc MSTeams)',
+      '$teamsPids = @(Get-Process ms-teams,MSTeams -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)',
+      'if (!$teamsPids) { Write-Output ""; exit }',
+      '# Tìm child processes (msedgewebview2 spawned bởi Teams)',
+      '$allPids = @($teamsPids)',
+      'try {',
+      '  $children = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |',
+      '    Where-Object { $_.ParentProcessId -in $teamsPids } |',
+      '    Select-Object -ExpandProperty ProcessId',
+      '  if ($children) { $allPids += @($children) }',
+      '} catch {}',
       '$ports = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |',
-      '  Where-Object { $_.OwningProcess -in $pids } |',
+      '  Where-Object { $_.OwningProcess -in $allPids } |',
       '  Select-Object -ExpandProperty LocalPort | Sort-Object -Unique',
       'Write-Output ($ports -join ",")',
     ].join('\n');
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
     exec(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
-      { timeout: 6000 }, (err, stdout) => {
+      { timeout: 8000 }, (err, stdout) => {
         const ports = (stdout || '').trim().split(',')
           .map(p => parseInt(p.trim()))
           .filter(p => p > 1023 && p < 65536);
@@ -649,32 +794,53 @@ async function isTeamsOnPort(port) {
   } catch { return false; }
 }
 
-// Nếu port 9222 bị Widgets/app khác chiếm → kill để Teams lấy lại
+// Nếu port 9222 bị Widgets/app khác chiếm → kill Widgets để Teams lấy lại
+// CDP /json/list trả TẤT CẢ WebView2 targets trên cùng port, nhưng Puppeteer WebSocket
+// chỉ connect được vào 1 browser instance (thằng nào chiếm endpoint trước).
+// Nếu Widgets chiếm trước, Teams pages vẫn thấy qua HTTP nhưng puppeteer KHÔNG truy cập được.
+// → LUÔN kill Widgets nếu phát hiện trên port 9222.
 async function freePort9222IfNeeded() {
-  try {
-    const b = await puppeteer.connect({ browserURL: CDP_URL, defaultViewport: null });
-    const pages = await b.pages().catch(() => []);
-    const titles = await Promise.all(pages.map(p => p.title().catch(() => '')));
-    const urls   = pages.map(p => { try { return p.url(); } catch { return ''; } });
-    const hasTeams = titles.some(t => /teams|meeting|call/i.test(t)) ||
-                     urls.some(u => /teams\.microsoft/i.test(u));
-    await b.disconnect().catch(() => {});
-    if (hasTeams) return; // Teams đang dùng port này — không làm gì
+  const raw = await httpGetLocal(9222, '/json/list');
+  if (!raw) return; // Không ai listen → OK
 
-    // Port bị chiếm bởi non-Teams (thường là Windows Widgets)
-    console.log('[CDP] Port 9222 bị chiếm bởi non-Teams, kill Widgets...');
-    send('status', { type: 'connecting', msg: 'Giải phóng CDP port (kill Widgets)...' });
-    await new Promise(resolve =>
-      exec('taskkill /F /IM widgets.exe /T 2>nul & taskkill /F /IM WidgetService.exe /T 2>nul & taskkill /F /IM msedgewebview2.exe /T 2>nul', () => resolve())
+  try {
+    const targets = JSON.parse(raw);
+
+    const hasWidgets = targets.some(t =>
+      /widgets/i.test(t.title || '') ||
+      /windows\.msn\.com/i.test(t.url || '')
     );
-    await sleep(2500);
+
+    if (hasWidgets) {
+      console.log('[CDP] Port 9222 có Widgets → kill Widgets...');
+      send('status', { type: 'connecting', msg: 'Giải phóng CDP port (kill Widgets)...' });
+      await new Promise(resolve =>
+        exec('taskkill /F /IM widgets.exe /T 2>nul & taskkill /F /IM WidgetService.exe /T 2>nul', () => resolve())
+      );
+      await sleep(2500);
+      return;
+    }
+
+    // Chỉ Teams hoặc app khác → giữ nguyên
+    const hasTeams = targets.some(t =>
+      /teams\.microsoft/i.test(t.url || '') ||
+      /microsoft teams/i.test(t.title || '')
+    );
+    if (hasTeams) {
+      console.log('[CDP] Port 9222 là Teams CDP → giữ nguyên');
+    } else {
+      console.log('[CDP] Port 9222 bị chiếm bởi app khác:', targets[0]?.title || 'unknown');
+    }
   } catch {
-    // Port 9222 không ai dùng → OK
+    // JSON parse fail → không phải CDP → OK
   }
 }
 
 // Kết nối tới browser có Teams
 async function connectToTeamsBrowser() {
+  // Bước 0: Kill Widgets nếu đang chiếm port 9222
+  await freePort9222IfNeeded();
+
   // Phương pháp 1: tìm đúng port Teams đang listen qua Get-NetTCPConnection
   const teamsPorts = await findTeamsCDPPorts();
   if (teamsPorts.length) {
@@ -683,8 +849,39 @@ async function connectToTeamsBrowser() {
       if (!await isCDPPort(port)) continue;
       try {
         const b = await puppeteer.connect({ browserURL: `http://localhost:${port}`, defaultViewport: null });
-        console.log('[CDP] Kết nối thành công qua port', port, '(process lookup)');
-        return b;
+        // Verify: puppeteer thực sự thấy Teams pages (không phải Widgets)
+        const pages = await b.pages().catch(() => []);
+        const titles = await Promise.all(pages.map(p => p.title().catch(() => '')));
+        const hasTeamsPage = titles.some(t => /microsoft teams/i.test(t)) ||
+          pages.some(p => { try { return /teams\.microsoft/i.test(p.url()); } catch { return false; } });
+        if (hasTeamsPage) {
+          console.log('[CDP] Kết nối thành công qua port', port, '(verified Teams)');
+          return b;
+        }
+        // Connect nhưng thấy Widgets/non-Teams → kill Widgets rồi thử lại
+        const hasWidgets = titles.some(t => /widgets/i.test(t));
+        console.log('[CDP] Port', port, 'thấy non-Teams pages:', titles.map(t => t.slice(0, 30)));
+        await b.disconnect().catch(() => {});
+        if (hasWidgets) {
+          console.log('[CDP] Kill Widgets và thử lại...');
+          await new Promise(resolve =>
+            exec('taskkill /F /IM widgets.exe /T 2>nul & taskkill /F /IM WidgetService.exe /T 2>nul', () => resolve())
+          );
+          await sleep(2000);
+          // Thử connect lại port
+          try {
+            const b2 = await puppeteer.connect({ browserURL: `http://localhost:${port}`, defaultViewport: null });
+            const pages2 = await b2.pages().catch(() => []);
+            const titles2 = await Promise.all(pages2.map(p => p.title().catch(() => '')));
+            const ok = titles2.some(t => /microsoft teams/i.test(t)) ||
+              pages2.some(p => { try { return /teams\.microsoft/i.test(p.url()); } catch { return false; } });
+            if (ok) {
+              console.log('[CDP] Kết nối thành công sau kill Widgets, port', port);
+              return b2;
+            }
+            await b2.disconnect().catch(() => {});
+          } catch {}
+        }
       } catch { continue; }
     }
   }
@@ -704,6 +901,10 @@ async function connectToTeamsBrowser() {
 
 // Tìm meeting page từ _browser (dùng được từ cả IPC handler lẫn startService)
 async function findMeetingPage() {
+  return _findMeetingPageInner(false);
+}
+
+async function _findMeetingPageInner(isRetry) {
   // Nếu browser chưa có hoặc bị disconnect → thử kết nối lại
   if (!_browser || !_browser.isConnected()) {
     console.log('[findMeeting] browser stale/null → kết nối lại CDP...');
@@ -722,7 +923,7 @@ async function findMeetingPage() {
     _browser = null; _meetingPage = null;
     return [];
   });
-  console.log('[findMeeting] total pages:', pages.length);
+  console.log('[findMeeting] total pages:', pages.length, isRetry ? '(retry)' : '');
 
   const titles = [];
   for (const p of pages) {
@@ -732,13 +933,15 @@ async function findMeetingPage() {
     titles.push({ p, t });
   }
 
-  // Ưu tiên 2 (App mode): title bắt đầu bằng "Meeting"
+  // Ưu tiên 1 (App mode): title bắt đầu bằng "Meeting"
   for (const { p, t } of titles) {
     if (/^Meeting[\s|]/i.test(t)) return p;
   }
   // Ưu tiên 2 (App mode): detect bằng DOM — có ubar hoặc call-duration (chỉ xuất hiện trong meeting window)
   for (const { p, t } of titles) {
-    if (/^Calendar/i.test(t)) continue; // bỏ qua calendar view
+    // Bỏ qua trang Calendar view thuần (title: "Calendar | Calendar | ...") — 
+    // KHÔNG bỏ qua meeting mở từ lịch (title: "Calendar | Tên meeting | ...")
+    if (/^Calendar\s*\|\s*Calendar\b/i.test(t)) continue;
     const isMeeting = await p.evaluate(() =>
       !!(document.querySelector('[data-tid="ubar-toolbar-wrapper"]') ||
          document.querySelector('[data-tid="call-duration"]') ||
@@ -746,7 +949,19 @@ async function findMeetingPage() {
     ).catch(() => false);
     if (isMeeting) return p;
   }
-  // Fallback: URL hợp lệ
+
+  // Puppeteer .pages() chỉ trả pages đã biết từ lúc connect.
+  // Khi Teams mở meeting window mới sau khi app đã connect, pages() không thấy nó.
+  // → Reconnect CDP để lấy danh sách pages fresh (chỉ thử 1 lần tránh loop vô hạn).
+  if (!isRetry) {
+    console.log('[findMeeting] không thấy meeting → reconnect CDP để refresh pages...');
+    try { await _browser.disconnect().catch(() => {}); } catch {}
+    _browser = null;
+    _meetingPage = null;
+    return _findMeetingPageInner(true);
+  }
+
+  // Fallback (chỉ khi retry vẫn không thấy): URL hợp lệ
   for (const { p } of titles) {
     try { const u = p.url(); if (!u.startsWith('devtools') && u !== 'about:blank') return p; } catch {}
   }
@@ -835,60 +1050,82 @@ async function injectToggleCaptionsKey() {
 }
 
 // Kiểm tra caption active — tự refresh _meetingPage nếu stale
+let _lastCaptionReconnect = 0;
+const CAPTION_RECONNECT_INTERVAL = 15000; // reconnect CDP tối đa mỗi 15s
+
 async function checkCaptionsActive() {
   if (!_meetingPage) {
     _meetingPage = await findMeetingPage();
   }
-  if (!_meetingPage) return false;
 
-  const CAPTION_QUERY = () =>
+  const CAPTION_EVAL = () =>
     !!(document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
        document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
        document.querySelector('[data-tid="captions-panel-dismiss-button"]') ||
        document.querySelector('[data-tid="closed-caption-default-text"]') ||
        document.querySelector('[data-tid="closed-caption-text"]'));
 
-  const result = await _meetingPage.evaluate(() => {
-    const tids = [...document.querySelectorAll('[data-tid]')]
-      .map(el => el.getAttribute('data-tid'))
-      .filter(t => /caption|closed|cc/i.test(t));
-    return {
-      found: !!(document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
-                document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
-                document.querySelector('[data-tid="captions-panel-dismiss-button"]') ||
-                document.querySelector('[data-tid="closed-caption-default-text"]') ||
-                document.querySelector('[data-tid="closed-caption-text"]')),
-      tids,
-    };
-  }).catch(async (e) => {
-    console.warn('[checkCaptions] page stale:', e.message, '— tìm lại...');
-    _meetingPage = await findMeetingPage();
-    return { found: false, tids: [] };
-  });
+  // Kiểm tra _meetingPage trước (nếu có)
+  let result = { found: false, tids: [] };
+  if (_meetingPage) {
+    result = await _meetingPage.evaluate(() => {
+      const tids = [...document.querySelectorAll('[data-tid]')]
+        .map(el => el.getAttribute('data-tid'))
+        .filter(t => /caption|closed|cc/i.test(t));
+      return {
+        found: !!(document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
+                  document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
+                  document.querySelector('[data-tid="captions-panel-dismiss-button"]') ||
+                  document.querySelector('[data-tid="closed-caption-default-text"]') ||
+                  document.querySelector('[data-tid="closed-caption-text"]')),
+        tids,
+      };
+    }).catch(async (e) => {
+      console.warn('[checkCaptions] page stale:', e.message, '— tìm lại...');
+      _meetingPage = await findMeetingPage();
+      return { found: false, tids: [] };
+    });
+  }
 
   if (result.found) {
     console.log('[checkCaptions] found: true | caption tids:', result.tids);
     return true;
   }
 
-  // Nếu _meetingPage không có caption elements → quét tất cả pages của browser
-  // Trường hợp này xảy ra khi Teams restart: _meetingPage trỏ vào lobby/page sai
-  // nhưng meeting thực sự và captions lại ở một window khác (popup)
+  // Quét tất cả pages hiện có của browser
   if (_browser?.isConnected()) {
     const allPages = await _browser.pages().catch(() => []);
     for (const p of allPages) {
       if (p === _meetingPage) continue;
-      const found = await p.evaluate(() =>
-        !!(document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
-           document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
-           document.querySelector('[data-tid="captions-panel-dismiss-button"]') ||
-           document.querySelector('[data-tid="closed-caption-default-text"]') ||
-           document.querySelector('[data-tid="closed-caption-text"]'))
-      ).catch(() => false);
+      const found = await p.evaluate(CAPTION_EVAL).catch(() => false);
       if (found) {
         console.log('[checkCaptions] caption found on different page → update _meetingPage');
         _meetingPage = p;
         return true;
+      }
+    }
+  }
+
+  // Pages hiện tại không có caption → reconnect CDP để lấy fresh pages
+  // (Meeting window mới mở sau khi app đã connect → puppeteer chưa biết)
+  // Throttle: chỉ reconnect tối đa mỗi 15s tránh spam
+  const now = Date.now();
+  if (now - _lastCaptionReconnect >= CAPTION_RECONNECT_INTERVAL) {
+    _lastCaptionReconnect = now;
+    console.log('[checkCaptions] not found → reconnecting CDP for fresh pages...');
+    try { await _browser?.disconnect().catch(() => {}); } catch {}
+    _browser = null;
+    _meetingPage = null;
+    _browser = await connectToTeamsBrowser();
+    if (_browser) {
+      const freshPages = await _browser.pages().catch(() => []);
+      for (const p of freshPages) {
+        const found = await p.evaluate(CAPTION_EVAL).catch(() => false);
+        if (found) {
+          console.log('[checkCaptions] caption found after reconnect → update _meetingPage');
+          _meetingPage = p;
+          return true;
+        }
       }
     }
   }
@@ -1065,7 +1302,22 @@ async function autoSetupCDP() {
     }
   }
 
-  // 3. Teams đang chạy nhưng không có CDP port → tự restart để áp dụng env var
+  // 3. Teams đang chạy nhưng connectToTeamsBrowser() fail
+  // Có thể do Widgets vừa bị kill và port 9222 chưa sẵn sàng → thử lại vài lần trước khi restart
+  send('status', { type: 'connecting', msg: '⏳ Chờ Teams CDP sẵn sàng...' });
+  console.log('[autoSetupCDP] Thử kết nối lại CDP (chờ Teams chiếm port 9222)...');
+  for (let i = 0; i < 15; i++) {
+    await sleep(1000);
+    if (_captureSourceChanged) return null;
+    await freePort9222IfNeeded();
+    const b = await connectToTeamsBrowser();
+    if (b) {
+      console.log('[autoSetupCDP] CDP ready sau', i + 1, 'giây (không cần restart)');
+      return b;
+    }
+  }
+
+  // Vẫn không được → restart Teams để áp dụng env var
   send('status', { type: 'connecting', msg: '🔄 Restart Teams để bật debug port 9222...' });
   console.log('[autoSetupCDP] Restart Teams để áp dụng debug port...');
   await restartTeams();
@@ -1211,13 +1463,33 @@ async function runService() {
     }
   }
 
-  send('status', { type: 'running', msg: `Đang dịch sang ${targetLangLabel}` });
+  const PROV_NAMES = { 'teams-token': 'MS Translator', deepl: 'DeepL', groq: 'Groq', gemini: 'Gemini', openai: 'OpenAI' };
+  const provLabel = PROV_NAMES[_provider] || _provider;
+  send('status', { type: 'running', msg: `Đang dịch sang ${targetLangLabel} bằng ${provLabel}` });
 
-  // Cài monitor để bắt Teams bearer token từ worker CDP targets
+// Cài monitor để bắt Teams bearer token từ TẤT CẢ CDP targets (page + worker)
   const wsEndpoint = browser.wsEndpoint?.() || '';
-  const portMatch  = wsEndpoint.match(/:(\d+)\//); 
+  const portMatch  = wsEndpoint.match(/:(\d+)\//);
   const cdpPort    = portMatch ? parseInt(portMatch[1]) : 9222;
   startTeamsTokenCapture(cdpPort);
+
+  // Cũng bắt token qua puppeteer CDP session trên meeting page (fallback)
+  try {
+    const cdpSession = await page.createCDPSession();
+    await cdpSession.send('Network.enable', { maxPostDataSize: 256 });
+    cdpSession.on('Network.requestWillBeSent', (params) => {
+      const auth = params.request?.headers?.authorization ||
+                   params.request?.headers?.Authorization;
+      if (!auth || !auth.startsWith('Bearer ')) return;
+      const token = auth.slice(7);
+      if (token.length > 100 && token.startsWith('eyJ') && token !== _teamsToken) {
+        storeTeamsToken(token, 'CDP session (meeting page)');
+      }
+    });
+    console.log('[teams-token] CDP session monitor cài trên meeting page');
+  } catch (e) {
+    console.warn('[teams-token] Không thể cài CDP session trên page:', e.message);
+  }
 
   // 5 giây check 1 lần xem captions có đang bật → cập nhật nút CC trên renderer
   const ccStateInterval = setInterval(async () => {
@@ -1442,7 +1714,8 @@ async function runService() {
         if (_captureSourceChanged) { clearInterval(ccStateInterval); return; }
         await sleep(2000);
       }
-      send('status', { type: 'running', msg: `Đang dịch sang ${targetLangLabel}` });
+      const provLabel2 = { 'teams-token': 'MS Translator', deepl: 'DeepL', groq: 'Groq', gemini: 'Gemini', openai: 'OpenAI' }[_provider] || _provider;
+      send('status', { type: 'running', msg: `Đang dịch sang ${targetLangLabel} bằng ${provLabel2}` });
       send('cc-state', { active: true });
     }
   }
@@ -1651,7 +1924,12 @@ async function setSttLanguage(langText) {
 // ──────────────────────────────────────────
 ipcMain.on('set-lang', (_, lang) => {
   targetLang      = LANG_NAMES[lang] || lang;
-  targetLangLabel = lang.toUpperCase();
+  const LANG_LABELS = {
+    'vi': 'tiếng Việt', 'en': 'tiếng Anh', 'zh-CN': 'tiếng Trung',
+    'ko': 'tiếng Hàn', 'ja': 'tiếng Nhật', 'fr': 'tiếng Pháp',
+    'de': 'tiếng Đức', 'es': 'tiếng Tây Ban Nha',
+  };
+  targetLangLabel = LANG_LABELS[lang] || lang.toUpperCase();
 });
 ipcMain.on('focus-window', () => { win?.show(); win?.focus(); });
 ipcMain.on('toggle-captions', async () => {
@@ -1813,29 +2091,38 @@ ipcMain.handle('scan-all-tabs', async () => {
   return await scanBrowserTabs();
 });
 
-ipcMain.handle('check-groq-quota', async (_, model) => {
-  const key = _apiKey || Store.get('apiKey', '');
+ipcMain.handle('check-groq-quota', async (_, model, uiKey) => {
+  const key = uiKey || _apiKey || Store.get('apiKey', '');
   if (!key) return { error: 'Chưa có API key' };
-  if (_provider !== 'groq') return { error: 'Chỉ hỗ trợ Groq' };
   return checkGroqQuota(key, model || _llmModel);
 });
 // Settings IPC
 ipcMain.handle('get-settings', () => ({
   provider:        Store.get('provider',        'groq'),
   apiKey:          Store.get('apiKey',          ''),
-  apiKey2:         Store.get('apiKey2',         ''),
   llmModel:        Store.get('llmModel',        'llama-3.1-8b-instant'),
+  providerKeys:    Store.get('providerKeys',    {}),
+  providerModels:  Store.get('providerModels',  {}),
   captureSource:   Store.get('captureSource',   'teams'),
   micDeviceId:     Store.get('micDeviceId',     ''),
-  summaryProvider: Store.get('summaryProvider', 'inherit'), // 'inherit' | 'groq' | 'openai'
+  summaryProvider: Store.get('summaryProvider', 'groq'),
   summaryApiKey:   Store.get('summaryApiKey',   ''),
   summaryModel:    Store.get('summaryModel',    ''),
+  summaryKeys:     Store.get('summaryKeys',     {}),
+  summaryModels:   Store.get('summaryModels',   {}),
 }));
+ipcMain.on('open-external', (_, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+    require('electron').shell.openExternal(url);
+  }
+});
+
 ipcMain.on('save-settings', (_, s) => {
   if (s.provider      !== undefined) { Store.set('provider',      s.provider);      _provider  = s.provider; }
   if (s.apiKey        !== undefined) { Store.set('apiKey',        s.apiKey);        _apiKey    = s.apiKey; }
-  if (s.apiKey2       !== undefined) { Store.set('apiKey2',       s.apiKey2);       _apiKey2   = s.apiKey2; }
   if (s.llmModel      !== undefined) { Store.set('llmModel',      s.llmModel);      _llmModel  = s.llmModel; }
+  if (s.providerKeys  !== undefined) { Store.set('providerKeys',  s.providerKeys); }
+  if (s.providerModels!== undefined) { Store.set('providerModels', s.providerModels); }
   if (s.captureSource !== undefined) {
     if (s.captureSource !== _captureSource) _captureSourceChanged = true;
     _captureSource = s.captureSource;
@@ -1845,6 +2132,8 @@ ipcMain.on('save-settings', (_, s) => {
   if (s.summaryProvider !== undefined) { Store.set('summaryProvider', s.summaryProvider); }
   if (s.summaryApiKey   !== undefined) { Store.set('summaryApiKey',   s.summaryApiKey); }
   if (s.summaryModel    !== undefined) { Store.set('summaryModel',    s.summaryModel); }
+  if (s.summaryKeys     !== undefined) { Store.set('summaryKeys',     s.summaryKeys); }
+  if (s.summaryModels   !== undefined) { Store.set('summaryModels',   s.summaryModels); }
   send('settings-saved', { ok: true });
 });
 
@@ -1885,16 +2174,13 @@ ipcMain.handle('summarize-meeting', async (_, captions) => {
   const durationMs  = withTs.length >= 2 ? withTs[withTs.length - 1].tsMs - withTs[0].tsMs : 0;
   const durationMin = Math.round(durationMs / 60000);
 
-  // Resolve provider/key/model: nếu summaryProvider === 'inherit' thì dùng từ tab Dịch thuật
-  const sumMode = Store.get('summaryProvider', 'inherit'); // 'inherit' | 'groq' | 'openai'
-  let provider, apiKey, model;
-  if (sumMode === 'inherit') {
-    provider = _provider; apiKey = _apiKey; model = _llmModel;
-  } else {
-    provider = sumMode;
-    apiKey   = Store.get('summaryApiKey', '') || _apiKey; // fallback nếu chưa nhập key riêng
-    model    = Store.get('summaryModel',  '') || _llmModel;
-  }
+  // Resolve provider/key/model: dùng summary settings, fallback key từ tab dịch thuật
+  const sumMode = Store.get('summaryProvider', 'groq');
+  let provider = sumMode;
+  const sumKeys = Store.get('summaryKeys', {});
+  const provKeys = Store.get('providerKeys', {});
+  let apiKey = sumKeys[provider] || Store.get('summaryApiKey', '') || provKeys[provider] || _apiKey;
+  let model = Store.get('summaryModel', '') || _llmModel;
 
   if (provider !== 'groq' && provider !== 'openai' && provider !== 'gemini') {
     return { ok: false, error: `Provider '${provider}' không hỗ trợ tóm tắt (cần LLM)` };
@@ -1960,7 +2246,6 @@ app.whenReady().then(() => {
   // Load settings ngay khi khởi động
   _provider      = Store.get('provider',      'groq');
   _apiKey        = Store.get('apiKey',        '');
-  _apiKey2       = Store.get('apiKey2',       '');
   _llmModel      = Store.get('llmModel',      'llama-3.1-8b-instant');
   _captureSource = Store.get('captureSource', 'teams');
   createWindow();
