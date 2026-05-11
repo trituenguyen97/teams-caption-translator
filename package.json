@@ -22,6 +22,7 @@
     },
     "files": [
       "main.js",
+      "src/**",
       "preload.js",
       "app.html",
       "stt-server.py",
