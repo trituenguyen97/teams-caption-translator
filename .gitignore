@@ -7,14 +7,6 @@ __pycache__/
 *.pyo
 *.pyd
 
-# AI Model files (large binary files - download separately)
-nllb-cache/
-nllb-ct2/
-nllb-onnx/
-nllb-xenova/
-qwen-ct2/
-qwen05-ct2/
-
 # Electron build output
 dist/
 out/

@@ -56,6 +56,10 @@ function createWindow() {
   });
 
   win.once('ready-to-show', () => win.show());
+  win.on('close', () => {
+    // Đóng các BrowserWindow webchat ẩn để 'window-all-closed' fire được
+    try { require('./src/webchat').destroyAllWindows(); } catch {}
+  });
   win.on('closed', () => { state.win = null; });
   win.on('minimize', () => {
     if (state.pinned) setTimeout(() => { win?.restore(); win?.setAlwaysOnTop(true, 'screen-saver'); }, 80);
@@ -92,13 +96,37 @@ async function startService() {
 
 // â”€â”€ App lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.whenReady().then(() => {
-  state.provider      = Store.get('provider',      'groq');
+  // Migrate: groq/gemini/openai đã bị loại khỏi translation → fallback google-free
+  const savedProvider = Store.get('provider', 'google-free');
+  if (['groq', 'gemini', 'openai'].includes(savedProvider)) {
+    console.log('[migrate] provider', savedProvider, '→ google-free (cloud LLM đã bị xóa khỏi translation)');
+    Store.set('provider', 'google-free');
+    state.provider = 'google-free';
+  } else {
+    state.provider = savedProvider;
+  }
   state.apiKey        = Store.get('apiKey',        '');
-  state.llmModel      = Store.get('llmModel',      'llama-3.1-8b-instant');
   state.captureSource = Store.get('captureSource', 'teams');
+  state.localBaseUrl       = Store.get('localBaseUrl',       state.localBaseUrl);
+  state.localModel         = Store.get('localModel',         state.localModel);
+  state.localDraftModel    = Store.get('localDraftModel',    state.localDraftModel);
+  state.localBinaryVariant = Store.get('localBinaryVariant', state.localBinaryVariant);
   registerAll(app);
   createWindow();
   startService();
+  // Auto-start local LLM server nếu provider=local + đã tải model
+  if (state.provider === 'local') {
+    setTimeout(() => {
+      try {
+        const localLlm = require('./src/local-llm');
+        const st = localLlm.serverStatus();
+        if (st.binaryReady && st.modelReady && !st.running) {
+          console.log('[boot] auto-start local LLM server...');
+          localLlm.startServer({ port: 8080 }).catch(e => console.warn('[boot] local server start:', e.message));
+        }
+      } catch (e) { console.warn('[boot] local-llm not ready:', e.message); }
+    }, 2000);
+  }
   app.on('activate', () => {
     if (!BrowserWindow.getAllWindows().length) createWindow();
   });
@@ -106,5 +134,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopSTTServer();
+  try { require('./src/local-llm').stopServer(); } catch {}
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  try { require('./src/local-llm').stopServer(); } catch {}
 });

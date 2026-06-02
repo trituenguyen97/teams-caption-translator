@@ -385,7 +385,6 @@
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="translate">🌐 Dịch thuật</button>
         <button class="tab-btn" data-tab="source">🎙 Nguồn dịch</button>
-        <button class="tab-btn" data-tab="summary">📋 Tóm tắt</button>
       </div>
 
       <!-- Tab 1: Dịch thuật -->
@@ -394,21 +393,15 @@
           <label>Dịch vụ</label>
           <select id="s-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
             <optgroup label="── Dịch từng câu (word-by-word) ──">
-              <option value="teams-token">MS Translator | Free | ⭐⭐⭐⭐</option>
-              <option value="deepl">DeepL | Free (500K Ký tự/tháng) | ⭐⭐⭐⭐⭐</option>
+              <option value="teams-token">MS Translator</option>
+              <option value="google-free">Google Translate</option>
+              <option value="deepl">DeepL</option>
             </optgroup>
-            <optgroup label="── Dịch ngữ cảnh (LLM) ──">
-              <option value="groq">Groq | Key (free) | ⭐⭐⭐⭐⭐</option>
-              <option value="gemini">Gemini | Key (free) | ⭐⭐⭐⭐⭐</option>
-              <option value="openai">OpenAI | Key (premium) | ⭐⭐⭐⭐⭐</option>
+            <optgroup label="── Dịch offline ──">
+              <option value="local">🖥️ LOCAL TRANSLATE</option>
             </optgroup>
           </select>
           <div class="hint" id="s-provider-note" style="margin-top:4px"></div>
-        </div>
-
-        <div id="s-model-row" style="margin-bottom:12px">
-          <label>Model</label>
-          <select id="s-model" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
         </div>
 
         <div id="s-key-row" style="margin-bottom:12px">
@@ -421,17 +414,53 @@
           <div class="hint" id="s-key-hint"></div>
         </div>
 
+        <!-- LOCAL TRANSLATE panel — minimal -->
+        <div id="s-local-row" style="margin-bottom:12px;display:none">
+          <div id="s-local-card" style="background:#1a2535;border:1px solid #264f78;border-radius:5px;padding:14px">
+            <div id="s-local-summary" style="font-size:11px;color:#9db4d8;margin-bottom:10px;line-height:1.6">
+              Đang kiểm tra…
+            </div>
+            <button id="s-dl-all" style="width:100%;padding:8px;font-size:12px;background:#1a4a78;border-color:#3794ff;color:#fff">
+              📥 Tải Local Translate
+            </button>
+            <div id="s-dl-progress-wrap" style="display:none;margin-top:10px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:#aaa;margin-bottom:3px">
+                <span id="s-dl-stage">Đang chuẩn bị…</span>
+                <span id="s-dl-pct">0%</span>
+              </div>
+              <div style="background:#0d0d0d;border-radius:3px;overflow:hidden;height:6px">
+                <div id="s-dl-bar" style="background:#4ec9b0;height:100%;width:0%;transition:width 0.2s"></div>
+              </div>
+              <div id="s-dl-bytes" style="font-size:10px;color:#777;margin-top:3px">0 B / 0 B</div>
+            </div>
+          </div>
 
+          <!-- HIDDEN elements giữ ref cho JS cũ — không hiển thị -->
+          <div style="display:none">
+            <span id="s-bin-status"></span>
+            <span id="s-model-status"></span>
+            <span id="s-draft-status"></span>
+            <span id="s-srv-status"></span>
+            <span id="s-gpu-info"></span>
+            <span id="s-dl-all-status"></span>
+            <select id="s-bin-variant"><option value="auto" selected>auto</option></select>
+            <button id="s-bin-download"></button>
+            <input id="s-model-url"><input id="s-local-model">
+            <button id="s-model-download"></button>
+            <input id="s-draft-url"><input id="s-local-draft">
+            <button id="s-draft-download"></button>
+            <input id="s-local-url" value="http://127.0.0.1:8080">
+            <button id="s-srv-start"></button><button id="s-srv-stop"></button>
+            <button id="s-local-test"></button><span id="s-local-test-status"></span>
+            <a id="s-toggle-advanced" href="#"></a>
+            <div id="s-local-advanced"></div>
+            <div id="s-bin-progress-wrap"><div id="s-bin-progress"></div><div id="s-bin-progress-text"></div></div>
+            <div id="s-model-progress-wrap"><div id="s-model-progress"></div><div id="s-model-progress-text"></div></div>
+            <div id="s-draft-progress-wrap"><div id="s-draft-progress"></div><div id="s-draft-progress-text"></div></div>
+          </div>
+        </div>
 
         <div class="api-status" id="api-status"></div>
-
-        <div id="s-quota-row" style="display:none;margin-bottom:4px">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-            <span style="font-size:11px;color:#888">Groq quota</span>
-            <button id="s-quota-refresh" style="padding:1px 7px;font-size:11px;margin-left:auto">🔄 Refresh</button>
-          </div>
-          <div id="s-quota-info" style="font-size:10px;color:#666;background:#1e1e1e;border:1px solid #333;border-radius:4px;padding:6px 8px;line-height:1.8"></div>
-        </div>
       </div>
 
       <!-- Tab 2: Nguồn dịch -->
@@ -458,36 +487,6 @@
         <div id="s-stt-info" style="margin-bottom:4px;display:none;font-size:10px;color:#888;background:#1e1e1e;border:1px solid #3e3e42;border-radius:4px;padding:6px 9px">
           🎙️ STT: <strong style="color:#4ec9b0">faster-whisper base</strong> (chạy cục bộ, không cần API)
         </div>
-      </div>
-
-      <!-- Tab 3: Tóm tắt cuộc họp -->
-      <div class="tab-panel" id="tab-summary">
-        <div style="margin-bottom:12px">
-          <label>Dịch vụ tóm tắt</label>
-          <select id="s-sum-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
-            <option value="groq">Groq | Key (free) | ⭐⭐⭐⭐⭐</option>
-            <option value="gemini">Gemini | Key (free) | ⭐⭐⭐⭐⭐</option>
-            <option value="openai">OpenAI | Key (premium) | ⭐⭐⭐⭐⭐</option>
-          </select>
-          <div class="hint" id="s-sum-provider-note" style="margin-top:4px"></div>
-        </div>
-
-        <div id="s-sum-model-row" style="margin-bottom:12px">
-          <label>Model</label>
-          <select id="s-sum-model" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
-        </div>
-
-        <div id="s-sum-key-row" style="margin-bottom:12px">
-          <label id="s-sum-key-label">API Key</label>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input type="password" id="s-sum-apikey" placeholder="" autocomplete="off" spellcheck="false"
-              style="flex:1;padding:6px 9px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee;outline:none;font-family:monospace">
-            <button id="s-sum-toggle-vis" style="flex-shrink:0;padding:4px 8px;font-size:11px">Show</button>
-          </div>
-          <div class="hint" id="s-sum-key-hint"></div>
-        </div>
-
-        <div id="s-sum-status" class="api-status"></div>
       </div>
 
       <div class="modal-actions">
@@ -522,6 +521,7 @@
     <div class="dot"></div>
     <span id="status-msg">Đang khởi động...</span>
       <button id="cc-btn" title="Bật/tắt Live Captions trên Teams">▶</button>
+      <button id="export-orig-btn" title="Xuất nội dung gốc (time + người nói + nội dung)" style="font-size:11px;padding:2px 7px;border-radius:3px;border:1px solid #3e3e42;background:#3c3c3c;color:#aaa;cursor:pointer;flex-shrink:0;margin-left:4px">💾</button>
   </div>
 
   <!-- Caption list -->
@@ -561,8 +561,8 @@
     let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
     let _currentProvider = 'groq';  // theo dõi provider hiện tại
     const PROVIDER_NAMES = {
-      'teams-token': 'MS Translator', deepl: 'DeepL', groq: 'Groq',
-      gemini: 'Gemini', openai: 'OpenAI',
+      'teams-token': 'MS Translator', 'google-free': 'Google Translate',
+      deepl: 'DeepL', local: 'LOCAL TRANSLATE',
     };
     let _mediaRecorder  = null;
     let _audioStream    = null;
@@ -689,19 +689,21 @@
     // ── Settings modal ──
     const PROVIDER_INFO = {
       'teams-token': { label: '', placeholder: '', hint: 'Dùng Microsoft Edge Translator API miễn phí — không cần API key', link: '', showModel: false, noKey: true },
+      'google-free': { label: '', placeholder: '', hint: 'Dùng Google Translate public endpoint — không cần API key (có thể bị rate-limit nếu dùng quá nhiều)', link: '', showModel: false, noKey: true },
       deepl:  { label: '', placeholder: '', hint: 'Free 500K ký tự/tháng — không cần API key', link: '', showModel: false, noKey: true },
-      groq:   { label: 'Groq API Key', placeholder: 'gsk_...', hint: 'Free: 14,400 req/day', link: 'https://console.groq.com/keys', showModel: true },
-      openai: { label: 'OpenAI API Key', placeholder: 'sk-...', hint: 'Trả phí theo dùng', link: 'https://platform.openai.com/api-keys', showModel: true },
-      gemini: { label: 'Gemini API Key', placeholder: 'AIza...', hint: 'Free: 1500 req/day, 1M ctx', link: 'https://aistudio.google.com/apikey', showModel: true },
+      groq:   { label: 'Groq API Key', placeholder: 'gsk_...', hint: 'Free: 14,400 req/day — tự fallback model premium → fast khi fail', link: 'https://console.groq.com/keys', showModel: false },
+      openai: { label: 'OpenAI API Key', placeholder: 'sk-...', hint: 'Trả phí theo dùng — tự fallback gpt-4o → gpt-3.5 khi fail', link: 'https://platform.openai.com/api-keys', showModel: false },
+      gemini: { label: 'Gemini API Key', placeholder: 'AIza...', hint: 'Free: 1500 req/day, 1M ctx — tự fallback 2.0 → 1.5 khi fail', link: 'https://aistudio.google.com/apikey', showModel: false },
+      local:  { label: '', placeholder: '', hint: 'LOCAL TRANSLATE — dịch hoàn toàn offline, mọi cấu hình tự động.', link: '', showModel: false, noKey: true, isLocal: true },
+      duckai:  { label: '', placeholder: '', hint: 'DuckDuckGo AI — embedded browser, không key. Lần đầu có thể hiện cửa sổ để dismiss cookie/popup, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
+      copilot: { label: '', placeholder: '', hint: 'Microsoft Copilot — embedded browser, không key. Lần đầu có thể hiện cửa sổ để dismiss cookie banner/welcome modal, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
+      chatgpt: { label: '', placeholder: '', hint: 'ChatGPT — embedded browser, không key (dùng chế độ logged-out). Lần đầu có thể hiện cửa sổ để dismiss "Stay logged out"/cookie banner, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
     };
 
     // Per-provider key cache (lưu key riêng cho từng provider)
     const _providerKeys = {};
-    const _providerModels = {};
 
     const sProvider    = document.getElementById('s-provider');
-    const sModelRow    = document.getElementById('s-model-row');
-    const sModel       = document.getElementById('s-model');
     const sKeyLabel    = document.getElementById('s-key-label');
     const sApiKey      = document.getElementById('s-apikey');
     const sKeyHint     = document.getElementById('s-key-hint');
@@ -710,79 +712,19 @@
     const sMicRow      = document.getElementById('s-mic-row');
     const sMicDevice   = document.getElementById('s-mic-device');
 
-    const PROVIDER_MODELS = {
-      groq: {
-        default: 'llama-3.1-8b-instant',
-        groups: [
-          { label: 'Groq Models', models: [
-            { value: 'llama-3.1-8b-instant',                     label: 'Llama 3.1 8B Instant ⭐ (nhanh, free)' },
-            { value: 'llama-3.3-70b-versatile',                  label: 'Llama 3.3 70B Versatile (chất lượng cao, free)' },
-            { value: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama 4 Scout 17B (mới nhất)' },
-            { value: 'groq/compound-mini',                        label: 'Groq Compound Mini' },
-            { value: 'groq/compound',                             label: 'Groq Compound' },
-            { value: 'qwen/qwen3-32b',                            label: 'Qwen3 32B' },
-            { value: 'openai/gpt-oss-20b',                        label: 'OpenAI GPT-OSS 20B (trên Groq)' },
-            { value: 'openai/gpt-oss-120b',                       label: 'OpenAI GPT-OSS 120B (trên Groq)' },
-            { value: 'allam-2-7b',                                label: 'Allam 2 7B' },
-          ]},
-        ]
-      },
-      openai: {
-        default: 'gpt-4o-mini',
-        groups: [
-          { label: '💰 Budget', models: [
-            { value: 'gpt-4o-mini',   label: 'GPT-4o Mini (rẻ, nhanh)' },
-            { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-            { value: 'o1-mini',       label: 'O1 Mini' },
-            { value: 'o3-mini',       label: 'O3 Mini' },
-          ]},
-          { label: '🎯 Standard / Premium', models: [
-            { value: 'gpt-4o',       label: 'GPT-4o' },
-            { value: 'gpt-4-turbo',  label: 'GPT-4 Turbo' },
-            { value: 'o1',           label: 'O1' },
-            { value: 'o3',           label: 'O3' },
-          ]},
-        ]
-      },
-      gemini: {
-        default: 'gemini-2.0-flash',
-        groups: [
-          { label: 'Gemini Models', models: [
-            { value: 'gemini-2.0-flash',    label: 'Gemini 2.0 Flash ⭐ (free, 1M ctx)' },
-            { value: 'gemini-1.5-flash',    label: 'Gemini 1.5 Flash (free, 1M ctx)' },
-            { value: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash-8B (nhanh nhất)' },
-          ]},
-        ]
-      },
-    };
-
-    function rebuildModelSelect(provider, currentVal) {
-      const data = PROVIDER_MODELS[provider];
-      sModel.innerHTML = '';
-      if (!data) return;
-      data.groups.forEach(g => {
-        const og = document.createElement('optgroup');
-        og.label = g.label;
-        g.models.forEach(m => {
-          const o = document.createElement('option');
-          o.value = m.value;
-          o.textContent = m.label;
-          og.appendChild(o);
-        });
-        sModel.appendChild(og);
-      });
-      sModel.value = (currentVal && [...sModel.options].some(o => o.value === currentVal))
-        ? currentVal : data.default;
-    }
-
-    function applyProviderUI(provider, modelVal) {
+    function applyProviderUI(provider) {
       const info = PROVIDER_INFO[provider] || PROVIDER_INFO.groq;
-      sModelRow.style.display  = info.showModel ? '' : 'none';
       const isNoKey = !!info.noKey;
+      const isLocal = !!info.isLocal;
       document.getElementById('s-key-row').style.display = isNoKey ? 'none' : '';
+      const localRow = document.getElementById('s-local-row');
+      if (localRow) localRow.style.display = isLocal ? '' : 'none';
+      if (isLocal) {
+        if (typeof fillDefaultUrls === 'function') fillDefaultUrls();
+        if (typeof refreshLocalStatus === 'function') refreshLocalStatus();
+      }
       sKeyLabel.textContent    = info.label;
       sApiKey.placeholder      = info.placeholder;
-      // Note dưới selector: link lấy key
       const noteEl = document.getElementById('s-provider-note');
       if (info.link) {
         noteEl.innerHTML = `🔗 Lấy key: <a href="#" class="ext-link" data-url="${info.link}" style="color:#4ec9b0">${info.link.replace(/https?:\/\//, '').slice(0, 50)}...</a>`;
@@ -792,10 +734,7 @@
         noteEl.innerHTML = '';
       }
       sKeyHint.textContent = info.hint || '';
-      // Load key/model đã lưu cho provider này
       sApiKey.value = _providerKeys[provider] || '';
-      rebuildModelSelect(provider, modelVal != null ? modelVal : (_providerModels[provider] || null));
-      // Update status
       updateTranslateStatus(provider);
     }
 
@@ -851,13 +790,10 @@
         const prevInfo = PROVIDER_INFO[prev];
         if (prevInfo && !prevInfo.noKey) {
           _providerKeys[prev] = sApiKey.value.trim();
-          if (PROVIDER_MODELS[prev]) _providerModels[prev] = sModel.value;
         }
       }
       e.target._prevProvider = sProvider.value;
       applyProviderUI(sProvider.value);
-      document.getElementById('s-quota-row').style.display =
-        sProvider.value === 'groq' ? '' : 'none';
     });
 
     sCapture.addEventListener('change', () => {
@@ -866,9 +802,6 @@
     });
 
     function openSettings() {
-      document.getElementById('s-quota-row').style.display =
-        sProvider.value === 'groq' ? '' : 'none';
-      document.getElementById('s-quota-info').textContent = '';
       // Reset to first tab
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'translate'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-translate'));
@@ -876,29 +809,20 @@
         // Load per-provider keys từ backend
         const provKeys = s.providerKeys || {};
         Object.assign(_providerKeys, provKeys);
-        const provModels = s.providerModels || {};
-        Object.assign(_providerModels, provModels);
+
+        // Load Local LLM config
+        sLocalUrl.value   = s.localBaseUrl    || 'http://127.0.0.1:8080';
+        sLocalModel.value = s.localModel      || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
+        sLocalDraft.value = s.localDraftModel || 'Qwen_Qwen3-0.6B-Q4_0.gguf';
+        sLocalTestStatus.textContent = '';
 
         sProvider.value = s.provider || 'groq';
         sProvider._prevProvider = sProvider.value;
-        applyProviderUI(sProvider.value, s.llmModel || 'llama-3.1-8b-instant');
-        document.getElementById('s-quota-row').style.display =
-          ((s.provider || 'groq') === 'groq') ? '' : 'none';
-        document.getElementById('s-quota-info').textContent = '';
+        applyProviderUI(sProvider.value);
         // Source tab
         sCapture.value  = s.captureSource || 'teams';
         applyCaptureUI(sCapture.value);
         if (s.captureSource === 'mic') loadMicDevices(s.micDeviceId || '');
-        // Summary tab
-        const sumProv = s.summaryProvider || 'groq';
-        sSumProvider.value = sumProv;
-        sSumProvider._prevProvider = sumProv;
-        // Load summary per-provider keys
-        const sumKeys = s.summaryKeys || {};
-        Object.assign(_sumProviderKeys, sumKeys);
-        const sumModels = s.summaryModels || {};
-        Object.assign(_sumProviderModels, sumModels);
-        applySumProviderUI(sumProv, s.summaryModel);
       });
       settingsModal.classList.add('open');
     }
@@ -918,99 +842,269 @@
       const curInfo = PROVIDER_INFO[curProv];
       if (curInfo && !curInfo.noKey) {
         _providerKeys[curProv] = sApiKey.value.trim();
-        if (PROVIDER_MODELS[curProv]) _providerModels[curProv] = sModel.value;
       }
-      // Lưu summary key
-      const curSum = sSumProvider.value;
-      _sumProviderKeys[curSum] = sSumApiKey.value.trim();
-      if (PROVIDER_MODELS[curSum]) _sumProviderModels[curSum] = sSumModel.value;
 
       api.saveSettings({
         provider:        curProv,
         apiKey:          sApiKey.value.trim(),
-        llmModel:        sModel.value,
         providerKeys:    { ..._providerKeys },
-        providerModels:  { ..._providerModels },
         captureSource:   sCapture.value,
         micDeviceId:     sMicDevice.value,
-        summaryProvider: sSumProvider.value,
-        summaryApiKey:   sSumApiKey.value.trim(),
-        summaryModel:    sSumModel.value,
-        summaryKeys:     { ..._sumProviderKeys },
-        summaryModels:   { ..._sumProviderModels },
+        localBaseUrl:    sLocalUrl.value.trim()   || 'http://127.0.0.1:8080',
+        localModel:      sLocalModel.value.trim() || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
+        localDraftModel: sLocalDraft.value.trim() || 'Qwen_Qwen3-0.6B-Q4_0.gguf',
       });
     });
 
-    // ── Summary settings tab ──
-    const sSumProvider   = document.getElementById('s-sum-provider');
-    const sSumModelRow   = document.getElementById('s-sum-model-row');
-    const sSumModel      = document.getElementById('s-sum-model');
-    const sSumKeyRow     = document.getElementById('s-sum-key-row');
-    const sSumKeyLabel   = document.getElementById('s-sum-key-label');
-    const sSumApiKey     = document.getElementById('s-sum-apikey');
-    const sSumKeyHint    = document.getElementById('s-sum-key-hint');
-    const sSumToggleVis  = document.getElementById('s-sum-toggle-vis');
-    const sSumStatus     = document.getElementById('s-sum-status');
-    const _sumProviderKeys = {};
-    const _sumProviderModels = {};
+    // ── Local LLM UI ──
+    const sLocalRow         = document.getElementById('s-local-row');
+    const sLocalUrl         = document.getElementById('s-local-url');
+    const sLocalModel       = document.getElementById('s-local-model');
+    const sLocalDraft       = document.getElementById('s-local-draft');
+    const sLocalTest        = document.getElementById('s-local-test');
+    const sLocalTestStatus  = document.getElementById('s-local-test-status');
+    const sBinStatus        = document.getElementById('s-bin-status');
+    const sBinVariant       = document.getElementById('s-bin-variant');
+    const sBinDownload      = document.getElementById('s-bin-download');
+    const sBinProgWrap      = document.getElementById('s-bin-progress-wrap');
+    const sBinProg          = document.getElementById('s-bin-progress');
+    const sBinProgText      = document.getElementById('s-bin-progress-text');
+    const sModelStatus      = document.getElementById('s-model-status');
+    const sModelUrl         = document.getElementById('s-model-url');
+    const sModelDl          = document.getElementById('s-model-download');
+    const sModelProgWrap    = document.getElementById('s-model-progress-wrap');
+    const sModelProg        = document.getElementById('s-model-progress');
+    const sModelProgText    = document.getElementById('s-model-progress-text');
+    const sDraftStatus      = document.getElementById('s-draft-status');
+    const sDraftUrl         = document.getElementById('s-draft-url');
+    const sDraftDl          = document.getElementById('s-draft-download');
+    const sDraftProgWrap    = document.getElementById('s-draft-progress-wrap');
+    const sDraftProg        = document.getElementById('s-draft-progress');
+    const sDraftProgText    = document.getElementById('s-draft-progress-text');
+    const sSrvStatus        = document.getElementById('s-srv-status');
+    const sSrvStart         = document.getElementById('s-srv-start');
+    const sSrvStop          = document.getElementById('s-srv-stop');
+    const sDlAll            = document.getElementById('s-dl-all');
+    const sDlAllStatus      = document.getElementById('s-dl-all-status');
 
-    function applySumProviderUI(provider, modelVal) {
-      const info = PROVIDER_INFO[provider] || PROVIDER_INFO.groq;
-      sSumKeyLabel.textContent = info.label;
-      sSumApiKey.placeholder   = info.placeholder;
-      // Load key đã lưu: ưu tiên summary key riêng, fallback dùng key từ tab dịch thuật
-      const savedKey = _sumProviderKeys[provider];
-      const transKey = _providerKeys[provider];
-      sSumApiKey.value = savedKey || transKey || '';
-      // Note link
-      const noteEl = document.getElementById('s-sum-provider-note');
-      if (info.link) {
-        noteEl.innerHTML = `🔗 Lấy key: <a href="#" class="ext-link" data-url="${info.link}" style="color:#4ec9b0">${info.link.replace(/https?:\/\//, '').slice(0, 50)}...</a>`;
-      } else {
-        noteEl.innerHTML = '';
-      }
-      sKeyHint.textContent = info.hint || '';
-      // Build model dropdown
-      const data = PROVIDER_MODELS[provider];
-      sSumModel.innerHTML = '';
-      if (data) {
-        const allModels = data.groups.flatMap(g => g.models);
-        allModels.forEach(o => {
-          const opt = document.createElement('option');
-          opt.value = o.value; opt.textContent = o.label;
-          sSumModel.appendChild(opt);
-        });
-        sSumModel.value = modelVal && allModels.some(o => o.value === modelVal)
-          ? modelVal : (_sumProviderModels[provider] || data.default);
-      }
-      // Status
-      sSumStatus.className   = 'api-status ' + (sSumApiKey.value.trim() ? 'ok' : 'warn');
-      sSumStatus.textContent = sSumApiKey.value.trim()
-        ? '✓ Đã có API key' + (savedKey ? '' : ' (dùng chung từ tab Dịch thuật)')
-        : '⚠ Chưa có API key — nhập key để sử dụng tóm tắt';
+    // Default URLs verified — bartowski Qwen3 family
+    const DEFAULT_URLS = {
+      main:  'https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf',
+      draft: 'https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/main/Qwen_Qwen3-0.6B-Q4_0.gguf',
+    };
+    function fillDefaultUrls() {
+      if (!sModelUrl.value.trim()) sModelUrl.value = DEFAULT_URLS.main;
+      if (!sDraftUrl.value.trim()) sDraftUrl.value = DEFAULT_URLS.draft;
+      if (!sLocalModel.value.trim()) sLocalModel.value = 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
+      if (!sLocalDraft.value.trim()) sLocalDraft.value = 'Qwen_Qwen3-0.6B-Q4_0.gguf';
     }
 
-    // Khi đổi summary provider: lưu key cũ, load key mới
-    sSumProvider.addEventListener('change', (e) => {
-      const prev = e.target._prevProvider;
-      if (prev) {
-        _sumProviderKeys[prev] = sSumApiKey.value.trim();
-        if (PROVIDER_MODELS[prev]) _sumProviderModels[prev] = sSumModel.value;
+    function fmtBytes(n) {
+      if (!n) return '0 B';
+      const u = ['B','KB','MB','GB','TB'];
+      let i = 0;
+      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+      return n.toFixed(n < 10 ? 2 : 1) + ' ' + u[i];
+    }
+
+    const sLocalSummary = document.getElementById('s-local-summary');
+    const sDlProgWrap   = document.getElementById('s-dl-progress-wrap');
+    const sDlStage      = document.getElementById('s-dl-stage');
+    const sDlPct        = document.getElementById('s-dl-pct');
+    const sDlBar        = document.getElementById('s-dl-bar');
+    const sDlBytes      = document.getElementById('s-dl-bytes');
+
+    async function refreshLocalStatus() {
+      try {
+        const st = await api.localStatus();
+        // Sync fuzzy filename về settings (giữ logic auto-match cũ)
+        if (st.modelFuzzy && sLocalModel) sLocalModel.value = st.modelFuzzy;
+        if (st.draftFuzzy && sLocalDraft) sLocalDraft.value = st.draftFuzzy;
+
+        const allReady = st.binaryReady && st.modelReady;
+        if (allReady) {
+          const draftLabel = st.draftReady ? ' + speculative decoding' : '';
+          const runLabel = st.running ? ` · ▶ server đang chạy (PID ${st.pid})` : '';
+          sLocalSummary.innerHTML = `✅ <b>Đã sẵn sàng</b>${draftLabel}${runLabel}<br><span style="color:#777">Mọi cấu hình tự động — chỉ bấm ▶ caption để dùng.</span>`;
+          sDlAll.disabled = true;
+          sDlAll.textContent = '✓ Đã tải xong';
+          sDlAll.style.background = '#1a4a1a';
+          sDlAll.style.borderColor = '#4ec9b0';
+        } else {
+          const missing = [];
+          if (!st.binaryReady) missing.push('llama-server');
+          if (!st.modelReady)  missing.push('model dịch');
+          sLocalSummary.innerHTML = `🖥️ <b>LOCAL TRANSLATE</b> — dịch offline, JP→VI<br>` +
+            `<span style="color:#dcdcaa">Cần tải: ${missing.join(' + ')} (~1.78 GB tổng)</span>`;
+          sDlAll.disabled = false;
+          sDlAll.textContent = '📥 Tải Local Translate';
+          sDlAll.style.background = '#1a4a78';
+          sDlAll.style.borderColor = '#3794ff';
+        }
+      } catch (e) { console.warn(e); }
+    }
+
+    function normalizeFilename(fn, defaultFn) {
+      fn = (fn || '').trim() || defaultFn;
+      if (!/\.gguf$/i.test(fn)) fn += '.gguf';
+      return fn;
+    }
+
+    // ESTIMATE size cho progress tổng (cập nhật khi nhận content-length thực)
+    const _dlSize = { binary: 60 * 1024 * 1024, 'model:main': 1.28 * 1024 ** 3, 'model:draft': 470 * 1024 ** 2 };
+    const _dlLoaded = { binary: 0, 'model:main': 0, 'model:draft': 0 };
+    let _dlActiveTask = null;
+
+    function updateProgressUI(task, p) {
+      // Reset wrap visible
+      sDlProgWrap.style.display = '';
+      _dlActiveTask = task;
+      const stageMap = { binary: '[1/3] Đang tải llama-server', 'model:main': '[2/3] Đang tải model chính', 'model:draft': '[3/3] Đang tải draft model' };
+      if (p.stage === 'metadata') { sDlStage.textContent = stageMap[task] + ' — lấy thông tin…'; return; }
+      if (p.stage === 'extracting') { sDlStage.textContent = '[1/3] Giải nén binary…'; sDlBar.style.background = '#dcdcaa'; return; }
+      if (p.stage === 'done') {
+        _dlLoaded[task] = _dlSize[task] || _dlLoaded[task];
+        sDlStage.textContent = stageMap[task] + ' ✓';
+      } else {
+        sDlStage.textContent = stageMap[task] || 'Đang tải…';
+        if (p.total) _dlSize[task] = p.total;
+        _dlLoaded[task] = p.loaded || 0;
       }
-      e.target._prevProvider = sSumProvider.value;
-      applySumProviderUI(sSumProvider.value, sSumModel.value);
+      // Aggregate
+      const totalSize   = _dlSize.binary + _dlSize['model:main'] + _dlSize['model:draft'];
+      const totalLoaded = _dlLoaded.binary + _dlLoaded['model:main'] + _dlLoaded['model:draft'];
+      const pct = totalSize > 0 ? (totalLoaded / totalSize) * 100 : 0;
+      sDlBar.style.width = pct.toFixed(1) + '%';
+      sDlBar.style.background = pct >= 99 ? '#4ec9b0' : '#3794ff';
+      sDlPct.textContent = pct.toFixed(1) + '%';
+      sDlBytes.textContent = `${fmtBytes(totalLoaded)} / ${fmtBytes(totalSize)}`;
+    }
+
+    api.onLocalProgress(({ task, ...p }) => updateProgressUI(task, p));
+
+    sBinDownload.addEventListener('click', async () => {
+      sBinDownload.disabled = true;
+      sBinProgWrap.style.display = '';
+      sBinProg.style.width = '0%';
+      sBinProgText.textContent = 'Bắt đầu…';
+      const r = await api.downloadLlamaBinary(sBinVariant.value);
+      sBinDownload.disabled = false;
+      if (!r.ok) { sBinProgText.textContent = '❌ ' + (r.error || 'lỗi'); sBinProg.style.background = '#f88'; }
+      refreshLocalStatus();
     });
-    sSumApiKey.addEventListener('input', () => {
-      sSumStatus.className   = 'api-status ' + (sSumApiKey.value.trim() ? 'ok' : 'warn');
-      sSumStatus.textContent = sSumApiKey.value.trim()
-        ? '✓ Đã có API key'
-        : '⚠ Chưa có API key — nhập key để sử dụng tóm tắt';
+
+    async function doDownloadModel(kind, urlInput, nameInput, dlBtn) {
+      const url = urlInput.value.trim();
+      if (!url) { sLocalTestStatus.style.color = '#f88'; sLocalTestStatus.textContent = '⚠ Paste URL GGUF vào ô trên'; return; }
+      const defaultName = kind === 'main' ? 'Qwen_Qwen3-1.7B-Q4_K_M.gguf' : 'Qwen_Qwen3-0.6B-Q4_0.gguf';
+      const filename = normalizeFilename(nameInput.value, defaultName);
+      nameInput.value = filename;  // reflect normalized name (auto-add .gguf)
+      // Lưu filename vào settings ngay để serverStatus dùng đúng tên
+      api.saveSettings(kind === 'main' ? { localModel: filename } : { localDraftModel: filename });
+      dlBtn.disabled = true;
+      const r = await api.downloadModel({ kind, url, filename });
+      dlBtn.disabled = false;
+      if (!r.ok) {
+        const wrap = kind === 'main' ? sModelProgWrap : sDraftProgWrap;
+        const txt  = kind === 'main' ? sModelProgText : sDraftProgText;
+        wrap.style.display = '';
+        txt.textContent = '❌ ' + (r.error || 'lỗi');
+      }
+      refreshLocalStatus();
+    }
+    sModelDl.addEventListener('click', () => doDownloadModel('main',  sModelUrl, sLocalModel, sModelDl));
+    sDraftDl.addEventListener('click', () => doDownloadModel('draft', sDraftUrl, sLocalDraft, sDraftDl));
+
+    // Auto-save filename khi user blur khỏi input (không cần bấm Lưu)
+    sLocalModel.addEventListener('change', () => {
+      const fn = normalizeFilename(sLocalModel.value, 'Qwen_Qwen3-1.7B-Q4_K_M.gguf');
+      sLocalModel.value = fn;
+      api.saveSettings({ localModel: fn });
+      refreshLocalStatus();
     });
-    sSumToggleVis.addEventListener('click', function() {
-      const isPass = sSumApiKey.type === 'password';
-      sSumApiKey.type = isPass ? 'text' : 'password';
-      this.textContent = isPass ? 'Hide' : 'Show';
+    sLocalDraft.addEventListener('change', () => {
+      const fn = normalizeFilename(sLocalDraft.value, 'Qwen_Qwen3-0.6B-Q4_0.gguf');
+      sLocalDraft.value = fn;
+      api.saveSettings({ localDraftModel: fn });
+      refreshLocalStatus();
     });
+
+    sDlAll.addEventListener('click', async () => {
+      fillDefaultUrls();
+      sDlAll.disabled = true;
+      sDlAll.textContent = '⏳ Đang tải…';
+      // Reset progress counters
+      _dlLoaded.binary = 0; _dlLoaded['model:main'] = 0; _dlLoaded['model:draft'] = 0;
+      sDlProgWrap.style.display = '';
+      sDlBar.style.width = '0%';
+      sDlPct.textContent = '0%';
+      sDlBytes.textContent = '0 B / ~1.78 GB';
+      sDlStage.textContent = 'Đang chuẩn bị…';
+
+      let failed = false;
+      try {
+        const st = await api.localStatus();
+        if (!st.binaryReady) {
+          sDlStage.textContent = '[1/3] Detecting GPU + tải llama-server…';
+          const r = await api.downloadLlamaBinary('auto');
+          if (!r.ok) { sDlStage.textContent = '❌ Binary: ' + r.error; failed = true; return; }
+        } else { _dlLoaded.binary = _dlSize.binary; }
+        if (!st.modelReady) {
+          const m = await api.downloadModel({ kind: 'main',  url: sModelUrl.value.trim() || DEFAULT_URLS.main,  filename: sLocalModel.value.trim() || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf' });
+          if (!m.ok) { sDlStage.textContent = '❌ Main: ' + m.error; failed = true; return; }
+        } else { _dlLoaded['model:main'] = _dlSize['model:main']; }
+        if (!st.draftReady) {
+          const d = await api.downloadModel({ kind: 'draft', url: sDraftUrl.value.trim() || DEFAULT_URLS.draft, filename: sLocalDraft.value.trim() || 'Qwen_Qwen3-0.6B-Q4_0.gguf' });
+          if (!d.ok) { sDlStage.textContent = '⚠ Draft fail (vẫn chạy được không có draft): ' + d.error; }
+        } else { _dlLoaded['model:draft'] = _dlSize['model:draft']; }
+        sDlStage.textContent = '✅ Hoàn tất — server sẽ tự khởi động khi bấm ▶ caption';
+        sDlBar.style.width = '100%';
+        sDlBar.style.background = '#4ec9b0';
+        sDlPct.textContent = '100%';
+        // Ẩn progress sau 3s khi success
+        setTimeout(() => { if (!failed) sDlProgWrap.style.display = 'none'; }, 3000);
+      } finally {
+        refreshLocalStatus();
+      }
+    });
+
+    sSrvStart.addEventListener('click', async () => {
+      sSrvStart.disabled = true;
+      sSrvStatus.style.color = '#dcdcaa';
+      sSrvStatus.textContent = '⏳ Khởi động llama-server…';
+      const r = await api.startLocalServer({ port: 8080 });
+      sSrvStart.disabled = false;
+      if (!r.ok) { sSrvStatus.style.color = '#f88'; sSrvStatus.textContent = '❌ ' + r.error; }
+      else if (r.threads) { sSrvStatus.style.color = '#4ec9b0'; sSrvStatus.textContent = `▶ Chạy với -t ${r.threads} (PID ${r.pid})`; }
+      refreshLocalStatus();
+    });
+    sSrvStop.addEventListener('click', async () => { await api.stopLocalServer(); refreshLocalStatus(); });
+
+    // Toggle "Cấu hình nâng cao"
+    document.getElementById('s-toggle-advanced').addEventListener('click', (e) => {
+      e.preventDefault();
+      const adv = document.getElementById('s-local-advanced');
+      const visible = adv.style.display !== 'none';
+      adv.style.display = visible ? 'none' : '';
+      e.target.textContent = visible ? '[⚙ Cấu hình nâng cao]' : '[× Đóng cấu hình nâng cao]';
+    });
+
+    sLocalTest.addEventListener('click', async () => {
+      sLocalTest.disabled = true;
+      sLocalTestStatus.style.color = '#dcdcaa';
+      sLocalTestStatus.textContent = '⏳ Kiểm tra ' + sLocalUrl.value.trim() + '…';
+      api.saveSettings({ localBaseUrl: sLocalUrl.value.trim() || 'http://127.0.0.1:8080' });
+      const r = await api.checkLocalLLM();
+      if (r.ok) {
+        sLocalTestStatus.style.color = '#4ec9b0';
+        sLocalTestStatus.textContent = '✅ OK' + (r.models?.length ? ' · ' + r.models.slice(0, 3).join(', ') : '');
+      } else {
+        sLocalTestStatus.style.color = '#f88';
+        sLocalTestStatus.textContent = '❌ ' + (r.error || 'không kết nối');
+      }
+      sLocalTest.disabled = false;
+    });
+
     api.onSettingsSaved(({ ok }) => {
       if (ok) {
         _currentSource = sCapture.value;
@@ -1025,31 +1119,6 @@
         settingsBtn.textContent = (isNoKey || sApiKey.value.trim()) ? '⚙️' : '⚠️';
         setTimeout(() => { settingsModal.classList.remove('open'); }, 900);
       }
-    });
-
-    // Quota refresh
-    document.getElementById('s-quota-refresh').addEventListener('click', () => {
-      const infoEl = document.getElementById('s-quota-info');
-      const btn    = document.getElementById('s-quota-refresh');
-      btn.disabled = true;
-      btn.textContent = '⏳';
-      infoEl.textContent = 'Đang kiểm tra...';
-      api.checkGroqQuota(document.getElementById('s-model').value, sApiKey.value.trim()).then(q => {
-        btn.disabled = false;
-        btn.textContent = '🔄 Refresh';
-        if (q.error) {
-          infoEl.innerHTML = `<span style="color:#f88">✗ ${esc(q.error)}</span>`;
-          return;
-        }
-        const fmt = v => v ?? '—';
-        infoEl.innerHTML =
-          `<b style="color:#9cdcfe">Requests</b>: ` +
-          `<span style="color:#4ec9b0">${fmt(q.reqRemaining)}</span> / ${fmt(q.reqLimit)} còn lại` +
-          (q.reqReset ? ` · reset sau <span style="color:#dcdcaa">${fmt(q.reqReset)}</span>` : '') +
-          `<br><b style="color:#9cdcfe">Tokens</b>: ` +
-          `<span style="color:#4ec9b0">${fmt(q.tokRemaining)}</span> / ${fmt(q.tokLimit)} còn lại` +
-          (q.tokReset ? ` · reset sau <span style="color:#dcdcaa">${fmt(q.tokReset)}</span>` : '');
-      });
     });
 
     // Ext links trong hint
@@ -1193,6 +1262,26 @@
       autoScroll = !autoScroll;
       this.classList.toggle('active', autoScroll);
       if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+    });
+
+    // Xuất bản gốc — time + người nói + nội dung (.txt)
+    document.getElementById('export-orig-btn').addEventListener('click', async () => {
+      if (!captionData.size) {
+        statusMsg.textContent = '⚠ Chưa có nội dung để xuất';
+        return;
+      }
+      const sorted = [...captionData.values()].sort((a, b) => (a.tsMs || 0) - (b.tsMs || 0));
+      const header = `=== Bản gốc cuộc họp — ${new Date().toLocaleString('vi-VN')} ===\n` +
+                     `Tổng số dòng: ${sorted.length}\n` +
+                     `${'='.repeat(60)}\n\n`;
+      const lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.original || ''}`).join('\n');
+      const content = header + lines + '\n';
+      const date = new Date().toISOString().slice(0, 10);
+      const r = await api.exportSummary({ markdown: content, defaultName: `transcript-${date}.txt` });
+      if (r.ok) {
+        statusMsg.textContent = `✅ Đã xuất ${sorted.length} dòng → ${r.filePath}`;
+        setTimeout(() => { statusMsg.textContent = ''; }, 4000);
+      }
     });
 
     document.getElementById('clear-btn').addEventListener('click', () => {

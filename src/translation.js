@@ -1,13 +1,21 @@
 /**
  * translation.js — Tất cả translation providers + orchestrator + queue
  */
-const { httpsPost, httpsGet } = require('./http-helpers');
+const { httpsPost, httpsGet, httpPostLocal, httpGetLocalUrl } = require('./http-helpers');
 const state = require('./state');
 
 // ── Constants ─────────────────────────────────────────
 const TEAMS_TOKEN_TTL = 55 * 60 * 1000;
 const EDGE_TOKEN_TTL = 9 * 60 * 1000;
-const MAX_CONCURRENT = 3;
+// Concurrent translation: cloud OK với 3 (rate limit), local CPU phải 1 (tránh chia BW RAM)
+const getMaxConcurrent = () => state.provider === 'local' ? 1 : 3;
+
+// Local LLM defaults — Qwen3-1.7B Q4_K_M (main) + Qwen3-0.6B Q4_0 (draft, same vocab)
+const LOCAL_DEFAULTS = {
+  baseUrl: 'http://127.0.0.1:8080',
+  model:   'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
+  draftModel: 'Qwen_Qwen3-0.6B-Q4_0.gguf',
+};
 
 const LANG_NAMES = {
   'vi': 'Vietnamese', 'en': 'English', 'zh-CN': 'Simplified Chinese',
@@ -23,7 +31,32 @@ const LANG_LABELS = {
 
 const PROV_NAMES = {
   'teams-token': 'MS Translator', deepl: 'DeepL',
+  'google-free': 'Google Translate',
   groq: 'Groq', gemini: 'Gemini', openai: 'OpenAI',
+  local: 'Local LLM',
+};
+
+// Cascade từ premium/quality cao xuống fast — try tuần tự, fail/empty/refusal thì chuyển model kế
+const PROVIDER_PRIORITY = {
+  groq: [
+    'llama-3.3-70b-versatile',
+    'openai/gpt-oss-120b',
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'qwen/qwen3-32b',
+    'openai/gpt-oss-20b',
+    'llama-3.1-8b-instant',
+  ],
+  openai: [
+    'gpt-4o',
+    'gpt-4-turbo',
+    'gpt-4o-mini',
+    'gpt-3.5-turbo',
+  ],
+  gemini: [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+  ],
 };
 
 const _msTranslatorLangMap = {
@@ -200,6 +233,34 @@ async function translateGoogle(text, tgtLang, apiKey) {
   try { return JSON.parse(r.body).data?.translations?.[0]?.translatedText || null; } catch { return null; }
 }
 
+// Google Translate (FREE) — endpoint công khai dùng bởi browser extensions, không cần API key
+async function translateGoogleFree(text, tgtLang) {
+  const LANG_CODES = { 'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-CN',
+    'Korean': 'ko', 'Japanese': 'ja', 'French': 'fr', 'German': 'de', 'Spanish': 'es' };
+  const tgt = LANG_CODES[tgtLang] || 'vi';
+  const path = `/translate_a/single?client=gtx&sl=auto&tl=${tgt}&dt=t&q=${encodeURIComponent(text)}`;
+  const r = await httpsGet('translate.googleapis.com', path, {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'Accept': 'application/json',
+  });
+  if (!r.body || r.status !== 200) {
+    if (r.status === 429 || r.status === 403) {
+      console.warn('[google-free] rate-limited hoặc bị chặn:', r.status);
+    }
+    return null;
+  }
+  try {
+    const j = JSON.parse(r.body);
+    if (!Array.isArray(j) || !Array.isArray(j[0])) return null;
+    const result = j[0].map(seg => seg && seg[0]).filter(Boolean).join('').trim();
+    if (result) console.log('[google-free] OK:', text.slice(0, 30), '→', result.slice(0, 30));
+    return result || null;
+  } catch (e) {
+    console.warn('[google-free] parse error:', e.message);
+    return null;
+  }
+}
+
 async function translateDeepL(text, tgtLang) {
   const LANG_CODES = { 'Vietnamese': 'VI', 'English': 'EN', 'Simplified Chinese': 'ZH',
     'Korean': 'KO', 'Japanese': 'JA', 'French': 'FR', 'German': 'DE', 'Spanish': 'ES' };
@@ -241,25 +302,6 @@ async function translateAzure(text, tgtLang, apiKey, region) {
     }, body);
   if (!r.body) return null;
   try { return JSON.parse(r.body)?.[0]?.translations?.[0]?.text || null; } catch { return null; }
-}
-
-async function checkGroqQuota(apiKey, model) {
-  const body = JSON.stringify({
-    model: model || state.llmModel || 'llama-3.1-8b-instant',
-    messages: [{ role: 'user', content: '1' }], max_tokens: 1,
-  });
-  const r = await httpsPost('api.groq.com', '/openai/v1/chat/completions', {
-    'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}`,
-  }, body);
-  if (r.status === 401) return { error: 'API key không hợp lệ' };
-  if (r.status === 0) return { error: 'Không kết nối được Groq' };
-  const h = r.headers;
-  return {
-    reqLimit: h['x-ratelimit-limit-requests'], reqRemaining: h['x-ratelimit-remaining-requests'],
-    reqReset: h['x-ratelimit-reset-requests'], tokLimit: h['x-ratelimit-limit-tokens'],
-    tokRemaining: h['x-ratelimit-remaining-tokens'], tokReset: h['x-ratelimit-reset-tokens'],
-    model: h['x-groq-model-id'] || 'llama-3.1-8b-instant',
-  };
 }
 
 // ── Edge Translator (FREE) ────────────────────────────
@@ -362,6 +404,111 @@ async function translateViaTeamsToken(text) {
   } catch (e) { console.warn('[teams-translate] lỗi:', e.message); return null; }
 }
 
+// ── Local LLM (OpenAI-compatible: llama.cpp server) ──
+
+let _localLastFailTs = 0;
+const LOCAL_FAIL_COOLDOWN_MS = 8000;
+
+// Prompt tối ưu cho small local LLM (1.7B-7B) — song ngữ ép đúng target language.
+// Mục tiêu: model 1.7B hay "lock" sang tiếng Anh khi system prompt toàn tiếng Anh.
+// Giải pháp: dùng tên ngôn ngữ ở cả 2 dạng (English + native label) + ví dụ rõ ràng.
+function buildLocalPrompt(tgtLang, targetLabel) {
+  return `Bạn là bộ máy dịch thuật. Bản dịch ra PHẢI là ${targetLabel} (${tgtLang}).
+You are a translation engine. The output MUST be in ${targetLabel} (${tgtLang}), NOT English (unless target = English).
+
+RULES:
+- Output ONLY the translation. NO prefix, suffix, explanation, apology.
+- Never refuse, never comment on input.
+- Keep IT terms English: bug, sprint, deploy, PR, API, DB, backend, frontend, pipeline, commit, branch, merge, repo.
+- Keep proper nouns unchanged.
+
+Examples (input → output in ${targetLabel}):
+よろしくお願いします → Rất mong được hợp tác.
+ありがとうございます → Cảm ơn bạn.
+お疲れ様でした → Bạn đã làm việc vất vả, cảm ơn.
+ブリッジ → Cầu nối (BrSE).
+ベトナムと日本をつなぐ会社 → Công ty kết nối Việt Nam và Nhật Bản.
+バグの修正をデプロイします → Sẽ deploy bản fix bug.`;
+}
+
+async function translateLocal(text, tgtLang) {
+  if (Date.now() - _localLastFailTs < LOCAL_FAIL_COOLDOWN_MS) return null;
+
+  const baseUrl = state.localBaseUrl || LOCAL_DEFAULTS.baseUrl;
+  const model   = state.localModel   || LOCAL_DEFAULTS.model;
+  const targetLabel = state.targetLangLabel || tgtLang;
+
+  const body = JSON.stringify({
+    model,
+    messages: [
+      { role: 'system', content: buildLocalPrompt(tgtLang, targetLabel) + '\n\n/no_think' },
+      { role: 'user',   content: `Dịch sang ${targetLabel} (output in ${targetLabel} only):\n${text}` },
+    ],
+    max_tokens: 200,
+    temperature: 0.1,
+    top_p: 0.9,
+    stream: false,
+    cache_prompt: true,
+    n_predict: 200,
+    stop: ['\n\n', 'Input:', 'Output:', 'English:', 'Translation:'],
+    chat_template_kwargs: { enable_thinking: false },
+  });
+
+  const r = await httpPostLocal(baseUrl, '/v1/chat/completions',
+    { 'Content-Type': 'application/json' }, body, 25000);
+
+  if (r.status === 0) {
+    _localLastFailTs = Date.now();
+    console.warn('[local-llm] không kết nối được', baseUrl, '|', r.error || 'unknown');
+    return null;
+  }
+  if (r.status !== 200) {
+    console.warn('[local-llm] HTTP', r.status, '|', (r.body || '').slice(0, 200));
+    return null;
+  }
+  try {
+    const j = JSON.parse(r.body);
+    if (j.error) { console.warn('[local-llm] error:', j.error.message || j.error); return null; }
+    let out = j.choices?.[0]?.message?.content;
+    // Strip <think>...</think> block (Qwen3/DeepSeek reasoning models)
+    out = (out || '')
+      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+      .replace(/<think>[\s\S]*$/i, '')
+      .replace(/^[\s\n]+/, '')
+      .trim();
+
+    // Bỏ prefix "Dịch:", "Translation:", "Output:", "Vietnamese:"... mà model có thể thêm
+    out = out.replace(/^(Dịch|Bản dịch|Translation|Output|Vietnamese|Tiếng Việt)\s*[:：]\s*/i, '').trim();
+
+    // Validate target language: nếu Vietnamese mà output không có ký tự Việt → reject
+    if (out && out.length > 10 && state.targetLang === 'Vietnamese') {
+      const hasViChars = /[ăâđêôơưĂÂĐÊÔƠƯạáàảãậấầẩẫắằẳẵặẹéèẻẽệếềểễọóòỏõộốồổỗợớờởỡụúùủũựứừửữỵýỳỷỹĐ]/.test(out);
+      if (!hasViChars) {
+        console.warn('[local-llm] Output không có dấu Việt — có thể model trả tiếng Anh:', out.slice(0, 80));
+        return null;  // → fallback Google Free
+      }
+    }
+    if (out) {
+      const usage = j.usage ? ` | usage: ${j.usage.prompt_tokens}+${j.usage.completion_tokens}` : '';
+      console.log('[local-llm] OK:', text.slice(0, 30), '→', out.slice(0, 30), usage);
+    }
+    return out || null;
+  } catch (e) {
+    console.warn('[local-llm] parse error:', e.message);
+    return null;
+  }
+}
+
+async function checkLocalServer() {
+  const baseUrl = state.localBaseUrl || LOCAL_DEFAULTS.baseUrl;
+  const r = await httpGetLocalUrl(baseUrl, '/v1/models', 2500);
+  if (r.status !== 200) return { ok: false, error: `HTTP ${r.status}` };
+  try {
+    const j = JSON.parse(r.body);
+    return { ok: true, models: (j.data || []).map(m => m.id) };
+  } catch { return { ok: true, models: [] }; }
+}
+
 // ── Translation Orchestrator ──────────────────────────
 
 async function translateText(text) {
@@ -382,6 +529,26 @@ async function translateText(text) {
     return text;
   }
 
+  if (state.provider === 'google-free') {
+    const gResult = await translateGoogleFree(text, state.targetLang);
+    if (gResult && gResult !== text && !isLLMRefusal(gResult, text)) {
+      if (!/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(gResult)) return gResult;
+    }
+    return text;
+  }
+
+  if (state.provider === 'local') {
+    const lResult = await translateLocal(text, state.targetLang);
+    if (lResult && lResult !== text && !isLLMRefusal(lResult, text)) {
+      if (!/[぀-ゟ゠-ヿ一-鿿]/.test(lResult)) return lResult;
+    }
+    const gResult = await translateGoogleFree(text, state.targetLang);
+    if (gResult && gResult !== text && !isLLMRefusal(gResult, text)) {
+      if (!/[぀-ゟ゠-ヿ一-鿿]/.test(gResult)) return gResult;
+    }
+    return text;
+  }
+
   // Các provider khác: thử Edge/Teams trước, fallback API key
   {
     const edgeResult = await translateViaEdge(text);
@@ -396,29 +563,17 @@ async function translateText(text) {
     }
   }
 
-  if (!state.apiKey && state.provider !== 'deepl') return text;
-  let result = null;
-  try {
-    switch (state.provider) {
-      case 'deepl':
-        result = await translateDeepL(text, state.targetLang); break;
-      case 'groq':
-        result = await translateLLM('api.groq.com', '/openai/v1/chat/completions',
-          state.apiKey, state.llmModel, text, state.targetLang); break;
-      case 'openai':
-        result = await translateLLM('api.openai.com', '/v1/chat/completions',
-          state.apiKey, state.llmModel, text, state.targetLang); break;
-      case 'gemini':
-        result = await callGemini(state.apiKey, state.llmModel,
-          `Translate the following text into ${state.targetLang}:\n${text}`, 400,
-          buildSystemPrompt(state.targetLang)); break;
-    }
-  } catch (e) { console.warn('[translate] error:', e.message); }
-  if (isLLMRefusal(result, text)) {
-    console.warn('[translate] phát hiện LLM refusal, bỏ kết quả:', result?.slice(0, 80));
-    return text;
+  if (state.provider === 'deepl') {
+    let result = null;
+    try { result = await translateDeepL(text, state.targetLang); }
+    catch (e) { console.warn('[deepl] error:', e.message); }
+    if (isLLMRefusal(result, text)) return text;
+    return result ?? text;
   }
-  return result ?? text;
+
+  // Cloud LLM (groq/gemini/openai) đã được loại khỏi UI dịch thuật.
+  // Nếu state vẫn còn provider cũ → fallback trả nguyên text (main.js sẽ migrate).
+  return text;
 }
 
 // ── Translation Queue ─────────────────────────────────
@@ -426,11 +581,7 @@ const _queue = [];
 let _running = 0;
 
 function enqueueTranslate(text) {
-  if (state.provider === 'teams-token' || state.provider === 'deepl') {
-    // OK — không cần API key
-  } else if (!state.apiKey && !state.teamsToken && state.teamsTokens.size === 0) {
-    return Promise.resolve(text);
-  }
+  // Tất cả translation providers còn lại (teams-token / google-free / deepl / local) không cần API key
   return new Promise(resolve => {
     _queue.push({ text, resolve });
     drainQueue();
@@ -438,7 +589,7 @@ function enqueueTranslate(text) {
 }
 
 function drainQueue() {
-  while (_running < MAX_CONCURRENT && _queue.length > 0) {
+  while (_running < getMaxConcurrent() && _queue.length > 0) {
     const { text, resolve } = _queue.shift();
     _running++;
     translateText(text)
@@ -453,9 +604,9 @@ module.exports = {
   lookupPhrase, isLLMRefusal, preprocessText,
   translateText, enqueueTranslate,
   translateLLM, callLLM, callGemini,
-  translateGoogle, translateDeepL, translateAzure,
-  checkGroqQuota,
-  translateViaEdge, translateViaTeamsToken,
+  translateGoogle, translateGoogleFree, translateDeepL, translateAzure,
+  translateViaEdge, translateViaTeamsToken, PROVIDER_PRIORITY,
   storeTeamsToken, parseJwtAudience,
   buildSystemPrompt,
+  translateLocal, checkLocalServer, LOCAL_DEFAULTS,
 };

@@ -30,12 +30,6 @@
     ],
     "asarUnpack": [
       "stt-server.py"
-    ],
-    "extraResources": [
-      {
-        "from": "nllb-ct2",
-        "to": "nllb-ct2"
-      }
     ]
   }
 }

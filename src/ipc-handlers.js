@@ -6,7 +6,8 @@ const { exec } = require('child_process');
 const fs = require('fs');
 const state = require('./state');
 const Store = require('./store');
-const { LANG_NAMES, LANG_LABELS, checkGroqQuota, preprocessText, enqueueTranslate } = require('./translation');
+const { LANG_NAMES, LANG_LABELS, preprocessText, enqueueTranslate, checkLocalServer, LOCAL_DEFAULTS } = require('./translation');
+const localLlm = require('./local-llm');
 const { scanBrowserTabs } = require('./http-helpers');
 const {
   findMeetingPage, tryToggleCaptionsViaDOM, injectToggleCaptionsKey,
@@ -36,8 +37,37 @@ function registerAll(app) {
     if (v) state.win?.focus();
   });
 
+  // Auto-start local LLM server (fire-and-forget, không block toggle-captions)
+  function ensureLocalServerStarted() {
+    if (state.provider !== 'local') return;
+    try {
+      const st = localLlm.serverStatus();
+      if (st.running) return;
+      if (!st.binaryReady || !st.modelReady) {
+        console.warn('[auto-start] thiếu binary/model — bỏ qua auto-start');
+        send('status', { type: 'error', msg: '⚠ Local LLM chưa cài đủ — vào ⚙️ → Local LLM → Tải tất cả' });
+        return;
+      }
+      console.log('[auto-start] khởi động local LLM server…');
+      send('status', { type: 'loading', msg: '⏳ Đang khởi động Local LLM server…' });
+      localLlm.startServer({ port: 8080 })
+        .then(r => {
+          if (r.ok) {
+            console.log('[auto-start] local server OK', r.pid);
+            send('status', { type: 'running', msg: `▶ Local LLM ready (PID ${r.pid}, -t ${r.threads || '?'})` });
+          } else {
+            console.warn('[auto-start] fail:', r.error);
+            send('status', { type: 'error', msg: '❌ Local LLM start: ' + r.error });
+          }
+        })
+        .catch(e => console.warn('[auto-start] error:', e.message));
+    } catch (e) { console.warn('[auto-start] exception:', e.message); }
+  }
+
   // ── Captions toggle ───────────────────
   ipcMain.on('toggle-captions', async () => {
+    // Khi user bấm ▶ caption và đang dùng local LLM → tự khởi động server
+    ensureLocalServerStarted();
     // Audio mode
     if (state.captureSource !== 'teams') {
       state.audioPaused = !state.audioPaused;
@@ -156,48 +186,62 @@ function registerAll(app) {
   // ── Browser tabs scan ─────────────────
   ipcMain.handle('scan-all-tabs', async () => scanBrowserTabs());
 
-  // ── Groq quota ────────────────────────
-  ipcMain.handle('check-groq-quota', async (_, model, uiKey) => {
-    const key = uiKey || state.apiKey || Store.get('apiKey', '');
-    if (!key) return { error: 'Chưa có API key' };
-    return checkGroqQuota(key, model || state.llmModel);
-  });
-
   // ── Settings ──────────────────────────
   ipcMain.handle('get-settings', () => ({
     provider:        Store.get('provider',        'groq'),
     apiKey:          Store.get('apiKey',          ''),
-    llmModel:        Store.get('llmModel',        'llama-3.1-8b-instant'),
     providerKeys:    Store.get('providerKeys',    {}),
-    providerModels:  Store.get('providerModels',  {}),
     captureSource:   Store.get('captureSource',   'teams'),
     micDeviceId:     Store.get('micDeviceId',     ''),
-    summaryProvider: Store.get('summaryProvider', 'groq'),
-    summaryApiKey:   Store.get('summaryApiKey',   ''),
-    summaryModel:    Store.get('summaryModel',    ''),
-    summaryKeys:     Store.get('summaryKeys',     {}),
-    summaryModels:   Store.get('summaryModels',   {}),
+    localBaseUrl:       Store.get('localBaseUrl',       LOCAL_DEFAULTS.baseUrl),
+    localModel:         Store.get('localModel',         LOCAL_DEFAULTS.model),
+    localDraftModel:    Store.get('localDraftModel',    LOCAL_DEFAULTS.draftModel),
+    localBinaryVariant: Store.get('localBinaryVariant', 'cpu'),
   }));
 
   ipcMain.on('save-settings', (_, s) => {
     if (s.provider      !== undefined) { Store.set('provider',      s.provider);      state.provider = s.provider; }
     if (s.apiKey        !== undefined) { Store.set('apiKey',        s.apiKey);        state.apiKey   = s.apiKey; }
-    if (s.llmModel      !== undefined) { Store.set('llmModel',      s.llmModel);      state.llmModel = s.llmModel; }
     if (s.providerKeys  !== undefined) { Store.set('providerKeys',  s.providerKeys); }
-    if (s.providerModels!== undefined) { Store.set('providerModels', s.providerModels); }
     if (s.captureSource !== undefined) {
       if (s.captureSource !== state.captureSource) state.captureSourceChanged = true;
       state.captureSource = s.captureSource;
       Store.set('captureSource', s.captureSource);
     }
     if (s.micDeviceId     !== undefined) { Store.set('micDeviceId',     s.micDeviceId); }
-    if (s.summaryProvider !== undefined) { Store.set('summaryProvider', s.summaryProvider); }
-    if (s.summaryApiKey   !== undefined) { Store.set('summaryApiKey',   s.summaryApiKey); }
-    if (s.summaryModel    !== undefined) { Store.set('summaryModel',    s.summaryModel); }
-    if (s.summaryKeys     !== undefined) { Store.set('summaryKeys',     s.summaryKeys); }
-    if (s.summaryModels   !== undefined) { Store.set('summaryModels',   s.summaryModels); }
+    if (s.localBaseUrl    !== undefined) { Store.set('localBaseUrl',    s.localBaseUrl);    state.localBaseUrl    = s.localBaseUrl; }
+    if (s.localModel      !== undefined) { Store.set('localModel',      s.localModel);      state.localModel      = s.localModel; }
+    if (s.localDraftModel !== undefined) { Store.set('localDraftModel', s.localDraftModel); state.localDraftModel = s.localDraftModel; }
     send('settings-saved', { ok: true });
+    // Auto-start nếu provider vừa đổi sang local + đã có model
+    if (state.provider === 'local') ensureLocalServerStarted();
   });
+
+  // ── Local LLM ─────────────────────────
+  ipcMain.handle('check-local-llm',           async () => checkLocalServer());
+  ipcMain.handle('local-llm-status',          () => localLlm.serverStatus());
+  ipcMain.handle('local-llm-detect-gpu',      async () => localLlm.detectGpu(true));
+  ipcMain.handle('local-llm-download-binary', async (_, { variant = 'vulkan' } = {}) => {
+    const r = await localLlm.downloadLlamaBinary({
+      variant,
+      onProgress: (p) => send('local-llm-progress', { task: 'binary', ...p }),
+    });
+    if (r.ok) {
+      Store.set('localBinaryVariant', variant);
+      state.localBinaryVariant = variant;
+    }
+    return r;
+  });
+  ipcMain.handle('local-llm-download-model', async (_, { kind, url, filename }) => {
+    const id = `model:${kind}`;
+    return localLlm.downloadModel({
+      id, url, filename,
+      onProgress: (p) => send('local-llm-progress', { task: id, ...p }),
+    });
+  });
+  ipcMain.handle('local-llm-cancel-download', (_, { task }) => ({ ok: localLlm.cancelDownload(task) }));
+  ipcMain.handle('local-llm-start', async (_, opts = {}) => localLlm.startServer(opts));
+  ipcMain.handle('local-llm-stop',  () => localLlm.stopServer());
 
   // ── External links ────────────────────
   ipcMain.on('open-external', (_, url) => {

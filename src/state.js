@@ -15,9 +15,16 @@ module.exports = {
   audioEntryId: 0,
   sttProcess: null,
 
-  provider: 'groq',
+  provider: 'google-free',
   apiKey: '',
-  llmModel: 'llama-3.1-8b-instant',
+
+  // Local LLM (llama.cpp server, OpenAI-compatible) — Qwen3 setup cho Japanese IT meetings
+  localBaseUrl: 'http://127.0.0.1:8080',
+  localModel:      'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
+  localDraftModel: 'Qwen_Qwen3-0.6B-Q4_0.gguf',
+  localServerProc: null,
+  localServerPort: 8080,
+  localBinaryVariant: 'cpu',   // cpu | vulkan | cuda | sycl — để biết có offload GPU không
 
   // Teams token state
   teamsTokens: new Map(),

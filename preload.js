@@ -19,11 +19,21 @@ contextBridge.exposeInMainWorld('__caption', {
   launchDebugBrowser: (opts)   => ipcRenderer.invoke('launch-debug-browser', opts || {}),
   scanAllTabs:        ()       => ipcRenderer.invoke('scan-all-tabs'),
   setWebTab:          t        => ipcRenderer.invoke('set-web-tab', t),
-  checkGroqQuota: (model, key) => ipcRenderer.invoke('check-groq-quota', model, key),
   setAlwaysOnTop: v    => ipcRenderer.send('set-always-on-top', v),
   focusWindow:    ()   => ipcRenderer.send('focus-window'),
   toggleCaptions: ()   => ipcRenderer.send('toggle-captions'),
   openExternal:   url  => ipcRenderer.send('open-external', url),
   summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),
   exportSummary:    (data)     => ipcRenderer.invoke('export-summary', data),
+
+  // Local LLM
+  checkLocalLLM:       ()        => ipcRenderer.invoke('check-local-llm'),
+  localStatus:         ()        => ipcRenderer.invoke('local-llm-status'),
+  detectGpu:           ()        => ipcRenderer.invoke('local-llm-detect-gpu'),
+  downloadLlamaBinary: (variant) => ipcRenderer.invoke('local-llm-download-binary', { variant }),
+  downloadModel:       (opts)    => ipcRenderer.invoke('local-llm-download-model',  opts),
+  cancelDownload:      (task)    => ipcRenderer.invoke('local-llm-cancel-download', { task }),
+  startLocalServer:    (opts)    => ipcRenderer.invoke('local-llm-start', opts || {}),
+  stopLocalServer:     ()        => ipcRenderer.invoke('local-llm-stop'),
+  onLocalProgress:     cb        => ipcRenderer.on('local-llm-progress', (_, d) => cb(d)),
 });
