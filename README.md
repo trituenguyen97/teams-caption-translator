@@ -1,6 +1,10 @@
 # Teams Caption Translator
 
-Ứng dụng desktop (Electron) dịch hội thoại meeting theo thời gian thực, hỗ trợ **3 nguồn đầu vào** và **5 provider dịch thuật** tùy chọn.
+Ứng dụng **desktop (Electron)** dịch hội thoại meeting theo thời gian thực, hỗ trợ **3 nguồn đầu vào** và **4 provider dịch thuật** (gồm cả dịch **offline** bằng LLM cục bộ), kèm **tóm tắt cuộc họp bằng AI** và **xuất transcript**.
+
+> Tối ưu cho context **IT / BrSE** (meeting Nhật ↔ Việt): giữ nguyên thuật ngữ kỹ thuật tiếng Anh (bug, deploy, PR, API, sprint…).
+
+---
 
 ## Tính năng
 
@@ -8,23 +12,35 @@
 
 | Chế độ | Mô tả |
 |--------|-------|
-| 📹 **Teams Live Captions** | Đọc subtitle trực tiếp từ Teams Web qua CDP (Chrome DevTools Protocol) — không cần mic, không delay |
-| 🔊 **System Audio** | Ghi âm âm thanh hệ thống → nhận dạng giọng nói cục bộ bằng **SenseVoice-Small** (sherpa-onnx) |
-| 🎤 **Microphone** | Ghi âm từ mic bất kỳ → nhận dạng giọng nói cục bộ bằng **SenseVoice-Small** (sherpa-onnx) |
+| 📹 **Teams Live Captions** | Đọc subtitle trực tiếp từ Teams desktop (WebView2) qua CDP (Chrome DevTools Protocol) — không cần mic, không tốn tài nguyên nhận dạng. App còn **chèn bản dịch ngay dưới mỗi caption gốc** trong cửa sổ Teams. |
+| 🔊 **System Audio** | Ghi âm âm thanh hệ thống (loopback) → nhận dạng giọng nói **cục bộ** bằng SenseVoice-Small (sherpa-onnx). |
+| 🎤 **Microphone** | Ghi âm từ mic bất kỳ → nhận dạng giọng nói cục bộ bằng SenseVoice-Small. |
 
-> Chế độ System Audio / Microphone dùng **SenseVoice-Small** chạy hoàn toàn offline, tự tải model ~110MB lần đầu. Hỗ trợ: Tiếng Nhật, Trung, Anh, Hàn, Quảng Đông.
+> Chế độ System Audio / Microphone dùng **SenseVoice-Small** chạy hoàn toàn offline (CPU), tự tải model ~110MB lần đầu. Hỗ trợ: Tiếng Nhật, Trung, Anh, Hàn, Quảng Đông. Tích hợp lọc im lặng (RMS gating) + lọc ảo giác (hallucination filter).
 
-### Provider dịch thuật
+### Provider dịch thuật (4 lựa chọn, không cần API key)
 
 | Provider | Loại | Yêu cầu |
 |----------|------|---------|
-| 🤖 **Groq** | LLM — tối ưu cho IT/BrSE | API key miễn phí (14.400 req/ngày) |
-| 🤖 **OpenAI** | LLM | API key (trả phí) |
-| 🌐 **Google Cloud Translate** | Neural MT | API key |
-| 🌐 **DeepL** | Neural MT | API key |
-| 🌐 **Azure Translator** | Neural MT | API key |
+| 🌐 **MS Translator** | Microsoft Edge / Teams translator API | Không cần key (token lấy tự động) |
+| 🌐 **Google Translate** | Endpoint công khai (browser extension API) | Không cần key (có thể bị rate-limit) |
+| 🌐 **DeepL** | Endpoint extension không chính thức | Không cần key |
+| 🖥️ **LOCAL TRANSLATE** | LLM cục bộ — llama.cpp + Qwen3 | Tải model trong app (~1.78 GB), chạy offline |
 
-> Provider LLM (Groq, OpenAI) được tối ưu cho context IT/BrSE: giữ nguyên thuật ngữ kỹ thuật tiếng Anh (bug, deploy, PR, API…).
+> Cloud LLM (Groq / OpenAI / Gemini) **đã được loại bỏ** khỏi phần dịch thuật. Nếu cấu hình cũ còn lưu một trong các provider này, app sẽ tự migrate về `google-free`.
+
+**LOCAL TRANSLATE** dùng llama.cpp server (OpenAI-compatible) với:
+- **Qwen3-1.7B-Q4_K_M** (model chính) + **Qwen3-0.6B-Q4_0** (draft model cho *speculative decoding* → tăng tốc).
+- **Tự phát hiện GPU**: NVIDIA → CUDA · AMD/Intel → Vulkan · không có → CPU.
+- Mọi thứ tự động: tải binary `llama-server` từ GitHub Releases, tải model GGUF, chọn số thread = P-core, tự khởi động server khi bấm ▶.
+- Nếu LLM cục bộ trả kết quả không hợp lệ (vd: không đúng ngôn ngữ đích) → tự **fallback sang Google Translate**.
+
+### Tóm tắt & xuất file
+
+| Tính năng | Mô tả |
+|-----------|-------|
+| 📋 **Tóm tắt cuộc họp** | Tổng hợp transcript thành báo cáo Markdown (Tổng quan, Chủ đề, Vấn đề, Quyết định/Hành động) qua **ChatGPT** chạy trong cửa sổ ẩn — **không cần API key**. Xuất `.md` hoặc copy. |
+| 💾 **Xuất bản gốc** | Lưu transcript gốc (thời gian + người nói + nội dung) ra file `.txt`. |
 
 ### Ngôn ngữ đích hỗ trợ
 
@@ -34,8 +50,12 @@
 
 ## Yêu cầu hệ thống
 
-- **Node.js** 18+
-- **Microsoft Teams** bản desktop (New Teams — dùng WebView2) — chỉ cần cho chế độ Teams CDP
+- **Windows 10/11** (auto-setup CDP, GPU detect, loopback audio dùng API Windows)
+- **Node.js** 18+ (để dev / build)
+- **Microsoft Teams** bản desktop (New Teams — dùng WebView2) — chỉ cần cho chế độ **Teams Live Captions**
+- **Python 3** + `pip install sherpa-onnx av` — chỉ cần cho chế độ **System Audio / Microphone** (chạy `stt-server.py`)
+
+> Chế độ **LOCAL TRANSLATE** và **Tóm tắt** không cần cài thêm gì — model LLM tải trong app, ChatGPT chạy qua cửa sổ embedded.
 
 ---
 
@@ -43,13 +63,44 @@
 
 ```bash
 npm install
+npm start
 ```
 
 ---
 
-## Thiết lập CDP cho Teams (chỉ cần làm một lần)
+## Cách dùng
 
-> *Chỉ cần thiết nếu dùng chế độ **Teams Live Captions**.*
+### Chế độ Teams Live Captions
+
+1. Mở **Microsoft Teams desktop** và vào meeting.
+2. Chạy app: `npm start`.
+3. Bấm nút **▶** ở thanh trạng thái (hoặc bật thủ công trong Teams: **More (...)** → **Language and speech** → **Turn on live captions**, hoặc phím tắt <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd>).
+
+App sẽ tự kết nối CDP, phát hiện meeting, theo dõi caption và hiển thị bản dịch (đồng thời chèn ngay dưới caption gốc trong Teams).
+
+### Chế độ System Audio / Microphone
+
+1. Cài Python deps: `pip install sherpa-onnx av`.
+2. Trong app → **⚙️ Cài đặt** → tab **🎙 Nguồn dịch** → chọn **Audio System** hoặc **Microphone** (chọn thiết bị mic nếu cần) → **Lưu**.
+3. Bấm **▶** để bắt đầu ghi âm. Lần đầu tự tải model SenseVoice (~110MB).
+
+### Chọn provider dịch / ngôn ngữ
+
+- Dropdown ngôn ngữ ở header chọn ngôn ngữ đích.
+- **⚙️ Cài đặt** → tab **🌐 Dịch thuật** → chọn provider. Với **LOCAL TRANSLATE**, bấm **📥 Tải Local Translate** để tải binary + model (1 lần).
+
+---
+
+## Thiết lập CDP cho Teams (tự động)
+
+> *Chỉ liên quan tới chế độ **Teams Live Captions**.*
+
+App **tự động** thiết lập debug port khi chạy lần đầu:
+1. Ghi biến môi trường `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` + registry key tương ứng.
+2. Tự **restart Teams** nếu cần để debug port có hiệu lực.
+3. Tự quét CDP port theo PID của process Teams (và fallback scan **9222–9240**), tránh xung đột với app khác (vd: Widgets).
+
+### Thiết lập thủ công (nếu auto-setup thất bại)
 
 Mở **PowerShell** và chạy:
 
@@ -61,42 +112,25 @@ Mở **PowerShell** và chạy:
 )
 ```
 
-Sau đó **đóng Teams hoàn toàn** (kể cả system tray) và mở lại.
+Sau đó **đóng Teams hoàn toàn** (kể cả system tray) rồi mở lại.
 
-> Để tắt: chạy lại lệnh trên và đổi value thành `""`.
-
-App tự quét các port CDP từ **9222–9240**, không xung đột nếu nhiều ứng dụng cùng mở.
-
----
-
-## Cách dùng
-
-### Chế độ Teams Live Captions
-
-1. Vào meeting → **More (...)** → **Language and speech** → **Turn on live captions**
-2. Chạy app: `npm start`
-
-### Chế độ System Audio / Microphone
-
-1. Vào **Settings** trong app → tab **Source** → chọn nguồn
-2. Chạy app: `npm start` — model STT tự tải lần đầu (~110MB)
-
-```bash
-npm start
-```
+> Để tắt: chạy lại lệnh trên với value `""` và restart Teams.
 
 ---
 
 ## Giao diện
 
-Cửa sổ luôn hiển thị trên đầu màn hình (có thể tắt).
+Cửa sổ có thể ghim luôn trên đầu màn hình (📌).
 
 | Điều khiển | Chức năng |
 |------------|-----------|
-| Dropdown ngôn ngữ | Chọn ngôn ngữ dịch đích |
-| ⚙️ Settings | Chọn provider, API key, nguồn đầu vào |
-| 📌 | Bật/tắt luôn trên đầu màn hình |
+| Dropdown ngôn ngữ | Chọn ngôn ngữ dịch đích (8 ngôn ngữ) |
+| ⚙️ Settings | Provider dịch + tải Local Translate + nguồn âm thanh |
+| 📌 Pin | Bật/tắt luôn trên đầu màn hình |
+| ▶ / ⏹ | Bật/tắt Live Captions (Teams) hoặc ghi âm (audio/mic) |
+| 💾 Export | Xuất transcript gốc ra `.txt` |
 | ↓ Auto | Bật/tắt tự cuộn xuống entry mới nhất |
+| 📋 Tóm tắt | Tổng hợp cuộc họp bằng AI |
 | Xóa | Xóa danh sách captions |
 
 ### Output mẫu
@@ -119,192 +153,85 @@ Cơm trắng bình thường, thực sự bình thường mà rất ngon phải 
 npm run build
 ```
 
-File installer sẽ được tạo trong thư mục `dist/`.
-
----
-
-## CLI thay thế (không cần Electron)
-
-```bash
-node caption-cdp.js vi     # dịch sang tiếng Việt
-node caption-cdp.js en     # dịch sang tiếng Anh
-```
-
----
-
-## Công cụ chẩn đoán
-
-```bash
-npm run probe    # khám phá DOM meeting, tìm caption selectors khi Teams cập nhật
-```
-
----
-
-## Cách hoạt động
-
-```
-Teams (WebView2)
-    └─ CDP port 9222  ←──  Electron main process (puppeteer-core)
-                              ├─ poll [data-tid="closed-caption-text"] mỗi 800ms
-                              ├─ chờ câu ổn định 2s rồi mới dịch
-                              ├─ các provider dịch (Groq, OpenAI, Google, DeepL, Azure)
-                              └─ IPC → Electron renderer (app.html)
-```
-
-1. `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` khiến WebView2 mở debug port
-2. Puppeteer kết nối WebSocket vào port này
-3. Câu hoàn thành → dịch qua provider tùy chọn → hiển thị trong cửa sổ Electron
-
----
-
-## Teams Tab App (ACS approach — tùy chọn)
-
-Ngoài chế độ Electron, ứng dụng cũng hỗ trợ cài đặt như một **Tab App trong Teams** thông qua **Azure Communication Services**.
-
-### Bước 1: Tạo ACS resource
-
-1. Vào [Azure Portal](https://portal.azure.com) → **Create a resource** → tìm "Communication Services"
-2. Tạo resource (có free tier, không tốn phí nếu dùng ít)
-3. Vào resource → **Keys** → copy **Connection String**
-
-### Bước 2: Tạo file `.env`
-
-```bash
-cp .env.example .env
-```
-
-Sửa file `.env`:
-
-```
-ACS_CONNECTION_STRING=endpoint=https://YOUR_RESOURCE.communication.azure.com/;accesskey=YOUR_KEY
-```
-
-### Bước 3: Chạy dev server
-
-```bash
-npm install
-npm start
-```
-
-Lệnh này chạy **song song** hai process:
-- `node server.js` — Backend Express (port 3001) — cấp ACS tokens
-- `webpack serve` — Frontend (port 53000, HTTPS)
-
-Mở browser: `https://localhost:53000`
-
-### Bước 4: Thêm vào Teams Meeting
-
-1. Mở **Teams** → **Apps** (góc dưới trái)
-2. Chọn **Manage your apps** → **Upload an app** → **Upload a custom app**
-3. Chọn file `teams-caption-translator.zip` (sau khi chạy `npm run package`)
-4. Vào meeting → Click **+** trên thanh tab → tìm "Caption Translator" → **Save**
+Dùng `electron-builder` (target NSIS). File installer được tạo trong thư mục `dist/`. `stt-server.py` được đóng gói kèm và unpack ra ngoài asar.
 
 ---
 
 ## Cấu trúc project
 
 ```
-server.js                      # Backend Express: cấp ACS tokens
-.env                           # ACS_CONNECTION_STRING (không commit)
-.env.example                   # Template cho .env
+main.js                       # Entry point: Electron lifecycle, createWindow, vòng lặp service tự-restart
+app.html                      # Toàn bộ UI renderer (header, caption list, settings, summary modal)
+preload.js                    # contextBridge: cầu nối an toàn renderer ↔ main (window.__caption)
+stt-server.py                 # STT server Python (SenseVoice-Small qua sherpa-onnx)
+package.json                  # electron + puppeteer-core; scripts: start / build
+
 src/
-├── App.tsx                    # Root component, khởi tạo Teams SDK + theme
-├── index.tsx                  # Entry point (main panel)
-├── config.tsx                 # Entry point (config page)
-├── types.ts                   # Types + constants (ngôn ngữ, settings)
+├── state.js                  # State chia sẻ (singleton): provider, nguồn, config local LLM…
+├── store.js                  # Đọc/ghi settings.json trong userData
+├── ipc-handlers.js           # Toàn bộ IPC main ↔ renderer
 │
-├── pages/
-│   ├── MeetingSidePanel.tsx   # Trang chính: kết nối ACS + caption list
-│   └── ConfigPage.tsx         # Trang config (Teams gọi khi thêm tab)
+├── caption-service.js        # runService(): vòng lặp poll caption Teams + chèn bản dịch vào DOM
+├── cdp-browser.js            # Kết nối CDP, tìm Teams/meeting, toggle caption, auto-setup CDP,
+│                             #   capture Teams token (WebSocket), tự động đổi ngôn ngữ STT
 │
-├── components/
-│   ├── CaptionList.tsx        # Container danh sách captions + header
-│   ├── CaptionEntryRow.tsx    # Một dòng: [Speaker] original | translated
-│   ├── LanguageSelector.tsx   # Dropdown chọn ngôn ngữ
-│   └── SettingsPanel.tsx      # Form cài đặt ngôn ngữ + display name
+├── translation.js            # Các provider dịch + orchestrator + queue + phrase map + tiền xử lý
+├── local-llm.js              # llama.cpp: tải binary, GPU detect, tải model GGUF, vòng đời server
+├── audio-stt.js              # Quản lý stt-server.py + xử lý audio chunk
 │
-├── hooks/
-│   ├── useAcsCaptions.ts      # ACS Calling SDK: join meeting + TeamsCaptions
-│   └── useTranslation.ts      # Queue dịch tuần tự
+├── summary.js                # Tóm tắt cuộc họp (ChatGPT) + xuất file
+├── webchat.js                # BrowserWindow embedded điều khiển ChatGPT/Copilot/DuckAI (no key)
+├── webchat-preload.js        # Override anti-bot-detection cho webchat
 │
-└── services/
-    ├── translationService.ts  # Gọi các provider dịch thuật
-    ├── teamsService.ts        # Teams JS SDK init + getMeetingJoinUrl
-    └── settingsService.ts     # Lưu/đọc settings từ localStorage
+└── http-helpers.js           # HTTP/HTTPS client helpers (cloud + local LLM keep-alive)
 ```
 
 ---
 
-## Các con đường truy cập Live Captions của Teams
+## Cách hoạt động
 
-### 1. Teams JS SDK (Tab App / Side Panel) — ❌ KHÔNG CÓ CAPTION API
+### Chế độ Teams (CDP)
 
-Đã kiểm tra SDK v2.52.0 (mới nhất tới 04/2026):
-- Toàn bộ `meeting` module chỉ có: livestream, stage sharing, speaking state, reactions, mic control
-- `registerSpeakingStateChangeHandler` → chỉ boolean (ai đang nói), **không có text**
-- Tìm kiếm cả private/internal modules: **0 file chứa "caption"** hay "transcript"
-- **Kết luận**: Teams JS SDK không expose caption text data cho tab apps
-
-### 2. Azure Communication Services (ACS) — ✅ CÓ CAPTION API (REAL-TIME)
-
-**Đây là con đường DUY NHẤT để nhận live captions programmatically + Teams interop.**
-
-ACS Calling SDK cung cấp `CaptionsCallFeature` với:
-
-```typescript
-// Lấy caption feature từ call object
-let captionsFeature = call.feature(SDK.Features.Captions);
-let captions = captionsFeature.captions as SDK.TeamsCaptions;
-
-// Bật captions
-await captions.startCaptions({ spokenLanguage: 'en-us' });
-
-// Nhận caption data real-time (cả interim + final)
-captions.on('CaptionsReceived', (data: CaptionsInfo) => {
-  // data.speaker — ai đang nói
-  // data.spokenText — nội dung caption
-  // data.resultType — 'Partial' hoặc 'Final'
-  // data.timestamp
-});
+```
+Teams (WebView2)
+    └─ CDP port 9222  ←──  Electron main (puppeteer-core)
+                              ├─ poll [data-tid="closed-caption-text"] mỗi 200ms
+                              ├─ chờ câu hoàn chỉnh (kết câu) rồi mới dịch
+                              ├─ dịch qua provider (MS / Google / DeepL / Local LLM)
+                              ├─ chèn bản dịch dưới caption gốc trong Teams (MutationObserver)
+                              └─ IPC → renderer (app.html) hiển thị danh sách
 ```
 
-**Yêu cầu**:
-- Azure Communication Services resource (có free tier)
-- ACS user phải join Teams meeting qua ACS Calling SDK
-- Kiến trúc phức tạp hơn: cần backend để tạo ACS identity + token
-- Hỗ trợ dịch built-in với **Teams Premium license**
+### Chế độ Audio / Mic (STT)
 
-### 3. Microsoft Graph API — ⚠️ CHỈ SAU MEETING (KHÔNG REAL-TIME)
+```
+getDisplayMedia (loopback) / getUserMedia (mic)
+    └─ MediaRecorder cycle 4s → WebM chunk
+            └─ IPC → main → POST → stt-server.py (SenseVoice-Small)
+                                        ├─ decode WebM → PCM 16kHz (PyAV)
+                                        ├─ RMS gating + hallucination filter
+                                        └─ trả text → dịch → IPC → renderer
+```
 
-Graph API có `callTranscript` resource:
-- Chỉ lấy được transcript **sau khi meeting kết thúc**
-- Không phải real-time stream
-- Cần bật "Transcription" trong meeting
-- Phù hợp cho: post-meeting summary, review
+### Tóm tắt cuộc họp
 
-### 4. Bot Framework + Real-time Media — ⚠️ PHỨC TẠP NHẤT
+```
+captions → prompt Markdown → webchat.js mở BrowserWindow ẩn (ChatGPT)
+                                ├─ stealth UA + override navigator (webchat-preload.js)
+                                ├─ tự dismiss cookie/popup
+                                ├─ inject prompt → submit → chờ response ổn định
+                                └─ trích Markdown → hiển thị + xuất .md
+```
 
-Teams Bot có thể subscribe vào audio stream của meeting:
-- Cần: Azure Bot Service, Azure Speech Service, backend server
-- Linh hoạt nhất nhưng phức tạp nhất
-
----
-
-## So sánh các hướng tiếp cận
-
-| Hướng tiếp cận | Real-time? | Tất cả speakers? | Độ phức tạp | Chi phí |
-|---|---|---|---|---|
-| **Teams Live Captions (CDP)** | ✅ | ❌ Chỉ Teams captions | Thấp | Free |
-| **System/Mic Audio (STT)** | ✅ | ✅ | Thấp | Free |
-| **ACS Calling SDK** | ✅ | ✅ | Trung bình-cao | ACS resource (có free tier) |
-| **Graph Transcript API** | ❌ Sau meeting | ✅ | Thấp | M365 license |
-| **Bot Media Platform** | ✅ | ✅ | Rất cao | Azure Bot + Speech Services |
+> Debug webchat: chạy với biến môi trường `WEBCHAT_DEBUG=1` để hiện cửa sổ + DevTools + log chi tiết.
 
 ---
 
 ## Lưu ý
 
-- CDP port 9222 **không có xác thực** — chỉ mở khi đang dùng, tắt bằng cách xóa env var và restart Teams
-- Google Translate unofficial API không có SLA, nhưng stable cho personal use
-- `ACS_CONNECTION_STRING` không được commit lên git — đã thêm vào `.gitignore`
-- ACS user join meeting với tên **"Caption Translator"** — sẽ xuất hiện trong participants list như một guest
+- **CDP port 9222 không có xác thực** — chỉ mở khi đang dùng; tắt bằng cách xóa env var/registry và restart Teams.
+- **Google Translate / DeepL** dùng endpoint công khai (browser-extension style), không có SLA nhưng ổn định cho cá nhân; có thể bị rate-limit (429/403) nếu dùng quá nhiều.
+- **MS Translator** dùng token lấy tự động từ Edge translator API hoặc capture từ phiên Teams; token có TTL nên app tự refresh.
+- **LOCAL TRANSLATE** chạy hoàn toàn offline sau khi tải model — phù hợp khi cần bảo mật nội dung hoặc không có mạng ổn định.
+- **Tóm tắt qua ChatGPT** dùng chế độ logged-out trong cửa sổ ẩn; lần đầu có thể hiện cửa sổ để dismiss "Stay logged out"/cookie banner, sau đó chạy ngầm.
+- STT chạy trên CPU; câu được dịch tuần tự qua hàng đợi (cloud tối đa 3 song song, local LLM giới hạn 1 để tránh nghẽn RAM bandwidth).
