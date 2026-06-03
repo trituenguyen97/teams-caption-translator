@@ -31,9 +31,9 @@
 
 **LOCAL TRANSLATE** dùng llama.cpp server (OpenAI-compatible) với:
 - **Qwen3-1.7B-Q4_K_M** (model chính) + **Qwen3-0.6B-Q4_0** (draft model cho *speculative decoding* → tăng tốc).
-- **Tự phát hiện GPU**: NVIDIA → CUDA · AMD/Intel → Vulkan · không có → CPU.
-- Mọi thứ tự động: tải binary `llama-server` từ GitHub Releases, tải model GGUF, chọn số thread = P-core, tự khởi động server khi bấm ▶.
-- Nếu LLM cục bộ trả kết quả không hợp lệ (vd: không đúng ngôn ngữ đích) → tự **fallback sang Google Translate**.
+- **Tải sẵn nhiều binary 1 lần** từ GitHub Releases (`ggml-org/llama.cpp`) vào thư mục riêng theo backend: **cpu + vulkan** (luôn) và **cuda** (chỉ khi có GPU NVIDIA). Mỗi backend nằm ở `llama-server/{cpu,vulkan,cuda}/`.
+- **Tự chọn backend khi khởi động server** theo GPU phát hiện được — NVIDIA → CUDA · AMD/Intel Arc/iGPU → Vulkan · không có → CPU — **không phải tải lại** khi đổi máy/GPU.
+- Tự động: tải model GGUF, chọn số thread = P-core, tự khởi động server khi bấm ▶.
 
 ### Tóm tắt & xuất file
 

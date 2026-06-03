@@ -221,14 +221,14 @@ function registerAll(app) {
   ipcMain.handle('check-local-llm',           async () => checkLocalServer());
   ipcMain.handle('local-llm-status',          () => localLlm.serverStatus());
   ipcMain.handle('local-llm-detect-gpu',      async () => localLlm.detectGpu(true));
-  ipcMain.handle('local-llm-download-binary', async (_, { variant = 'vulkan' } = {}) => {
-    const r = await localLlm.downloadLlamaBinary({
-      variant,
+  ipcMain.handle('local-llm-download-binary', async () => {
+    // Tải SẴN tất cả binary phù hợp (cpu + vulkan [+ cuda nếu có NVIDIA]) — start sẽ tự chọn
+    const r = await localLlm.downloadAllBinaries({
       onProgress: (p) => send('local-llm-progress', { task: 'binary', ...p }),
     });
-    if (r.ok) {
-      Store.set('localBinaryVariant', variant);
-      state.localBinaryVariant = variant;
+    if (r.ok && r.selected) {
+      Store.set('localBinaryVariant', r.selected);
+      state.localBinaryVariant = r.selected;
     }
     return r;
   });

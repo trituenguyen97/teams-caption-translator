@@ -111,6 +111,15 @@ app.whenReady().then(() => {
   state.localModel         = Store.get('localModel',         state.localModel);
   state.localDraftModel    = Store.get('localDraftModel',    state.localDraftModel);
   state.localBinaryVariant = Store.get('localBinaryVariant', state.localBinaryVariant);
+  // Migrate: model Llama3-8B 1.58-bit (ternary TQ1_0/TQ2_0) đã bị gỡ → ép về Qwen3 1.7B Q4
+  const _isRemovedModel = f => /1\.58|tq1_0|tq2_0|bitnet/i.test(f || '');
+  if (_isRemovedModel(state.localModel) || _isRemovedModel(state.localDraftModel)) {
+    console.log('[migrate] local model', state.localModel, '→ Qwen3-1.7B Q4 (Llama3-8B 1.58-bit đã bị gỡ)');
+    state.localModel      = 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
+    state.localDraftModel = 'Qwen_Qwen3-0.6B-Q4_0.gguf';
+    Store.set('localModel',      state.localModel);
+    Store.set('localDraftModel', state.localDraftModel);
+  }
   registerAll(app);
   createWindow();
   startService();

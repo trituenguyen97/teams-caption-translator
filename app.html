@@ -420,6 +420,7 @@
             <div id="s-local-summary" style="font-size:11px;color:#9db4d8;margin-bottom:10px;line-height:1.6">
               Đang kiểm tra…
             </div>
+            <div id="s-gpu-line" style="font-size:11px;margin-bottom:10px;line-height:1.5;color:#9db4d8"></div>
             <button id="s-dl-all" style="width:100%;padding:8px;font-size:12px;background:#1a4a78;border-color:#3794ff;color:#fff">
               📥 Tải Local Translate
             </button>
@@ -908,6 +909,7 @@
     }
 
     const sLocalSummary = document.getElementById('s-local-summary');
+    const sGpuLine      = document.getElementById('s-gpu-line');
     const sDlProgWrap   = document.getElementById('s-dl-progress-wrap');
     const sDlStage      = document.getElementById('s-dl-stage');
     const sDlPct        = document.getElementById('s-dl-pct');
@@ -916,6 +918,7 @@
 
     async function refreshLocalStatus() {
       try {
+        try { await api.detectGpu(); } catch {}   // warm cache GPU để serverStatus chọn đúng variant
         const st = await api.localStatus();
         // Sync fuzzy filename về settings (giữ logic auto-match cũ)
         if (st.modelFuzzy && sLocalModel) sLocalModel.value = st.modelFuzzy;
@@ -925,7 +928,7 @@
         if (allReady) {
           const draftLabel = st.draftReady ? ' + speculative decoding' : '';
           const runLabel = st.running ? ` · ▶ server đang chạy (PID ${st.pid})` : '';
-          sLocalSummary.innerHTML = `✅ <b>Đã sẵn sàng</b>${draftLabel}${runLabel}<br><span style="color:#777">Mọi cấu hình tự động — chỉ bấm ▶ caption để dùng.</span>`;
+          sLocalSummary.innerHTML = `✅ <b>Đã sẵn sàng</b>${draftLabel}${runLabel}<br><span style="color:#777">Binary tự chọn theo GPU khi start — chỉ bấm ▶ caption để dùng.</span>`;
           sDlAll.disabled = true;
           sDlAll.textContent = '✓ Đã tải xong';
           sDlAll.style.background = '#1a4a1a';
@@ -941,6 +944,46 @@
           sDlAll.style.background = '#1a4a78';
           sDlAll.style.borderColor = '#3794ff';
         }
+
+        // ── Dòng trạng thái GPU: backend đã tải sẵn + backend sẽ tự chọn khi start ──
+        if (sGpuLine) {
+          try {
+            const gpu = await api.detectGpu();                 // { vendor, name, variant, hint }
+            const installed = st.installedVariants || [];      // các backend đã tải: cpu/vulkan/cuda
+            const selected = st.binaryVariant || 'cpu';        // backend sẽ dùng theo GPU hiện tại
+            const gpuName = gpu.name || '(không thấy GPU)';
+            let msg, color;
+            if (!st.binaryReady) {
+              color = '#777';
+              msg = `🎮 Phát hiện: <b>${gpuName}</b> → sẽ dùng <b>${gpu.variant}</b> (bấm Tải để cài sẵn cpu + gpu)`;
+            } else {
+              const onGpu = selected !== 'cpu';
+              color = onGpu ? '#4ec9b0' : '#9db4d8';
+              msg = `🎮 GPU: <b>${gpuName}</b><br>` +
+                `<span style="color:#9db4d8">Đã cài sẵn: <b>${installed.join(', ') || 'none'}</b> · ` +
+                `tự chọn khi start → đang dùng <b>${selected}</b> ${onGpu ? '(offload GPU)' : '(CPU)'}</span>`;
+            }
+            sGpuLine.style.color = color;
+            const reLink = st.binaryReady
+              ? `<br><a href="#" id="s-gpu-redl" style="color:#4ec9b0">↻ Tải lại tất cả binary</a>`
+              : '';
+            sGpuLine.innerHTML = msg + reLink;
+            const re = document.getElementById('s-gpu-redl');
+            if (re) re.addEventListener('click', async (e) => {
+              e.preventDefault();
+              sGpuLine.innerHTML = '⏳ Dừng server + tải lại tất cả binary…';
+              try { await api.stopLocalServer(); } catch {}    // unlock llama-server.exe trước khi ghi đè
+              _binOnly = true;
+              const r = await api.downloadLlamaBinary('auto');  // → tải tất cả (cpu + vulkan [+ cuda nếu NVIDIA])
+              _binOnly = false;
+              sDlProgWrap.style.display = 'none';
+              sGpuLine.innerHTML = (r && r.ok)
+                ? `✅ Đã cài: <b>${(r.installed || []).join(', ')}</b> · sẽ dùng <b>${r.selected || '?'}</b> — bấm ▶ caption.`
+                : `❌ Tải lại lỗi: ${r ? r.error : 'unknown'}`;
+              refreshLocalStatus();
+            });
+          } catch { sGpuLine.textContent = ''; }
+        }
       } catch (e) { console.warn(e); }
     }
 
@@ -951,14 +994,40 @@
     }
 
     // ESTIMATE size cho progress tổng (cập nhật khi nhận content-length thực)
-    const _dlSize = { binary: 60 * 1024 * 1024, 'model:main': 1.28 * 1024 ** 3, 'model:draft': 470 * 1024 ** 2 };
+    const _dlSize = { binary: 120 * 1024 * 1024, 'model:main': 1.28 * 1024 ** 3, 'model:draft': 470 * 1024 ** 2 };
     const _dlLoaded = { binary: 0, 'model:main': 0, 'model:draft': 0 };
     let _dlActiveTask = null;
+    let _binOnly = false;   // true khi chỉ tải lại mỗi binary (link "↻ Tải lại binary") → % theo riêng binary
 
     function updateProgressUI(task, p) {
       // Reset wrap visible
       sDlProgWrap.style.display = '';
       _dlActiveTask = task;
+
+      // Tải xong tất cả binary (cpu + vulkan [+ cuda])
+      if (p.stage === 'all-done') {
+        if (_binOnly) {
+          sDlStage.textContent = '✅ Đã cài: ' + ((p.installed || []).join(', '));
+          sDlBar.style.width = '100%'; sDlBar.style.background = '#4ec9b0'; sDlPct.textContent = '100%';
+        } else { _dlLoaded.binary = _dlSize.binary; }  // đánh dấu binary xong cho aggregate
+        return;
+      }
+
+      // Tải lại CHỈ binary: hiển thị % theo từng variant (không gộp vào tổng → tránh kẹt ~2%)
+      if (_binOnly && task === 'binary') {
+        const vlabel = p.variant ? ` [${p.variant}${p.sub ? '/' + p.sub : ''}]` : '';
+        if (p.stage === 'metadata') { sDlStage.textContent = 'Tải binaries (cpu + GPU) — lấy thông tin…'; return; }
+        if (p.stage === 'extracting') { sDlStage.textContent = 'Giải nén binary' + vlabel + '…'; sDlBar.style.background = '#dcdcaa'; return; }
+        if (p.stage === 'done') { sDlStage.textContent = 'Tải binary' + vlabel + ' ✓'; sDlBar.style.background = '#4ec9b0'; return; }
+        const pctB = p.total ? (p.loaded / p.total) * 100 : 0;
+        sDlStage.textContent = 'Đang tải binary' + vlabel + '…';
+        sDlBar.style.width = pctB.toFixed(1) + '%';
+        sDlBar.style.background = '#3794ff';
+        sDlPct.textContent = pctB.toFixed(1) + '%';
+        sDlBytes.textContent = `${fmtBytes(p.loaded || 0)} / ${fmtBytes(p.total || 0)}`;
+        return;
+      }
+
       const stageMap = { binary: '[1/3] Đang tải llama-server', 'model:main': '[2/3] Đang tải model chính', 'model:draft': '[3/3] Đang tải draft model' };
       if (p.stage === 'metadata') { sDlStage.textContent = stageMap[task] + ' — lấy thông tin…'; return; }
       if (p.stage === 'extracting') { sDlStage.textContent = '[1/3] Giải nén binary…'; sDlBar.style.background = '#dcdcaa'; return; }
@@ -1045,8 +1114,8 @@
       try {
         const st = await api.localStatus();
         if (!st.binaryReady) {
-          sDlStage.textContent = '[1/3] Detecting GPU + tải llama-server…';
-          const r = await api.downloadLlamaBinary('auto');
+          sDlStage.textContent = '[1/3] Tải binaries (cpu + GPU — tự chọn khi start)…';
+          const r = await api.downloadLlamaBinary('auto');   // → tải tất cả binary phù hợp
           if (!r.ok) { sDlStage.textContent = '❌ Binary: ' + r.error; failed = true; return; }
         } else { _dlLoaded.binary = _dlSize.binary; }
         if (!st.modelReady) {

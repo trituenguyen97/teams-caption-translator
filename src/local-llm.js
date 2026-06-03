@@ -1,9 +1,10 @@
 /**
  * local-llm.js — Quản lý llama.cpp binary + model download + server lifecycle
  *
- * - Tải llama-server.exe từ GitHub Releases (ggml-org/llama.cpp)
+ * - Tải SẴN nhiều binary (cpu + vulkan [+ cuda nếu có NVIDIA]) vào thư mục con theo variant
+ * - Lúc start TỰ CHỌN binary phù hợp theo GPU phát hiện được (không phải tải lại)
  * - Tải model GGUF từ URL bất kỳ (HuggingFace, hỗ trợ multi-part split)
- * - Spawn / kill llama-server child process với flag tối ưu CPU
+ * - Spawn / kill llama-server child process với flag tối ưu CPU/GPU
  */
 const http = require('http');
 const https = require('https');
@@ -16,23 +17,60 @@ const { app } = require('electron');
 const state = require('./state');
 
 // ── Paths ─────────────────────────────────────────────
+// binRoot chứa các thư mục con theo variant: llama-server/cpu/, /vulkan/, /cuda/
 function dirs() {
   const root = path.join(app.getPath('userData'), 'local-llm');
   return {
     root,
-    binary:    path.join(root, 'llama-server'),
-    binaryExe: path.join(root, 'llama-server', 'llama-server.exe'),
-    models:    path.join(root, 'models'),
-    tmp:       path.join(root, 'tmp'),
+    binRoot: path.join(root, 'llama-server'),
+    models:  path.join(root, 'models'),
+    tmp:     path.join(root, 'tmp'),
   };
 }
 
 function ensureDirs() {
   const d = dirs();
-  for (const p of [d.root, d.binary, d.models, d.tmp]) {
+  for (const p of [d.root, d.binRoot, d.models, d.tmp]) {
     try { fs.mkdirSync(p, { recursive: true }); } catch {}
   }
   return d;
+}
+
+// Ưu tiên backend: cuda > vulkan > cpu
+const VARIANTS = ['cuda', 'vulkan', 'cpu'];
+function variantDir(v) { return path.join(dirs().binRoot, v); }
+function variantExe(v) { return path.join(variantDir(v), 'llama-server.exe'); }
+
+// Các variant đã cài (có llama-server.exe)
+function listInstalledVariants() {
+  return VARIANTS.filter(v => { try { return fs.existsSync(variantExe(v)); } catch { return false; } });
+}
+
+// Chọn variant tối ưu theo GPU trong số đã cài (KHÔNG tải lại). gpu lấy từ detectGpu.
+function pickVariant(available, gpu) {
+  available = (available && available.length) ? available : listInstalledVariants();
+  if (!available.length) return 'cpu';
+  if (gpu) {
+    if (gpu.vendor === 'nvidia' && available.includes('cuda')) return 'cuda';
+    if (gpu.variant !== 'cpu' && available.includes('vulkan')) return 'vulkan';
+    if (gpu.variant === 'cpu' && available.includes('cpu'))    return 'cpu';
+  }
+  // Chưa biết GPU → theo thứ tự ưu tiên VARIANTS trong số đã cài
+  return available[0];
+}
+
+// Bản chọn hiện tại (sync, dùng cache GPU cho UI)
+function selectedVariant() { return pickVariant(listInstalledVariants(), _gpuCache); }
+
+// Dọn layout cũ: binary phẳng ở binRoot/llama-server.exe (trước khi có thư mục con theo variant)
+function cleanupFlatBinary() {
+  try {
+    const binRoot = dirs().binRoot;
+    if (!fs.existsSync(binRoot)) return;
+    for (const e of fs.readdirSync(binRoot, { withFileTypes: true })) {
+      if (e.isFile()) { try { fs.unlinkSync(path.join(binRoot, e.name)); } catch {} }
+    }
+  } catch {}
 }
 
 // ── HTTP với follow redirect ──────────────────────────
@@ -118,7 +156,7 @@ async function downloadFile(url, destPath, onProgress, cancelToken) {
 // ── GPU detection ─────────────────────────────────────
 
 /**
- * Detect GPU trên máy → chọn variant llama.cpp tối ưu.
+ * Detect GPU trên máy → gợi ý variant llama.cpp tối ưu.
  * NVIDIA → cuda · AMD/Intel → vulkan · không có → cpu
  */
 let _gpuCache = null;
@@ -170,18 +208,25 @@ async function detectGpu(force = false) {
   });
 }
 
-// ── llama-server binary download ──────────────────────
+// ── llama-server binary download (multi-variant) ──────
 
 const LLAMA_REPO = 'ggml-org/llama.cpp';
 
-async function findLlamaAsset(variant = 'vulkan') {
+// Tìm asset cho từng variant + gói cudart (CUDA runtime) trong release mới nhất.
+async function findLlamaAssets(variants) {
   const info = await fetchJson(`https://api.github.com/repos/${LLAMA_REPO}/releases/latest`);
   const assets = info.assets || [];
-  const want = new RegExp(`llama-.*-bin-win-${variant}-x64\\.zip$`, 'i');
-  let asset = assets.find(a => want.test(a.name));
-  if (!asset) asset = assets.find(a => /llama-.*-bin-win-.*-x64\.zip$/i.test(a.name));
-  if (!asset) throw new Error('Không tìm thấy asset Windows x64 trong release');
-  return { tag: info.tag_name, name: asset.name, url: asset.browser_download_url, size: asset.size };
+  const byVariant = {};
+  for (const v of variants) {
+    // Cho phép hậu tố version (vd cuda-12.4-x64). Loại trừ asset 'cudart-...'
+    const re = new RegExp('^llama-.*-bin-win-' + v + '[^/]*-x64\\.zip$', 'i');
+    const a = assets.find(x => re.test(x.name));
+    if (a) byVariant[v] = { name: a.name, url: a.browser_download_url, size: a.size };
+  }
+  let cudart = null;
+  const c = assets.find(x => /^cudart-.*-x64\.zip$/i.test(x.name));
+  if (c) cudart = { name: c.name, url: c.browser_download_url, size: c.size };
+  return { tag: info.tag_name, byVariant, cudart };
 }
 
 function expandZip(zipPath, destDir) {
@@ -194,6 +239,7 @@ function expandZip(zipPath, destDir) {
   });
 }
 
+// Nếu zip giải nén ra thư mục con (không có llama-server.exe ở gốc) → kéo file lên gốc
 function flattenBinaryDir(binaryDir) {
   try {
     const entries = fs.readdirSync(binaryDir, { withFileTypes: true });
@@ -208,43 +254,76 @@ function flattenBinaryDir(binaryDir) {
   } catch (e) { console.warn('[local-llm] flatten:', e.message); }
 }
 
-async function downloadLlamaBinary({ variant = 'auto', onProgress } = {}) {
+// Tải + giải nén 1 variant vào thư mục riêng. CUDA kèm cudart DLLs.
+async function downloadOneBinary(variant, asset, cudartAsset, onProgress) {
   const d = ensureDirs();
-  // Auto-detect nếu variant='auto'
-  let resolvedVariant = variant;
-  let detected = null;
-  if (variant === 'auto') {
-    onProgress?.({ stage: 'metadata', pct: 0, msg: 'Đang detect GPU…' });
-    detected = await detectGpu(true);
-    resolvedVariant = detected.variant;
-    onProgress?.({ stage: 'metadata', pct: 0, msg: `${detected.hint} (${detected.name || 'CPU'})`, detected });
-  }
-  let asset;
-  try {
-    onProgress?.({ stage: 'metadata', pct: 0 });
-    asset = await findLlamaAsset(resolvedVariant);
-  } catch (e) { return { ok: false, error: 'Tìm release: ' + e.message }; }
-  // Lưu variant đã resolve
-  state.localBinaryVariant = resolvedVariant;
-
+  const vdir = variantDir(variant);
   const zipPath = path.join(d.tmp, asset.name);
-  onProgress?.({ stage: 'downloading', pct: 0, tag: asset.tag, name: asset.name, total: asset.size });
-  const dl = await downloadFile(asset.url, zipPath, (p) => onProgress?.({ stage: 'downloading', ...p }));
+  onProgress?.({ variant, stage: 'downloading', total: asset.size, loaded: 0 });
+  const dl = await downloadFile(asset.url, zipPath, (p) => onProgress?.({ variant, stage: 'downloading', ...p }));
   if (!dl.ok) return { ok: false, error: 'Tải binary: ' + dl.error };
 
-  onProgress?.({ stage: 'extracting', pct: 1 });
+  onProgress?.({ variant, stage: 'extracting' });
   try {
-    try { fs.rmSync(d.binary, { recursive: true, force: true }); } catch {}
-    fs.mkdirSync(d.binary, { recursive: true });
-    await expandZip(zipPath, d.binary);
-    flattenBinaryDir(d.binary);
+    try { fs.rmSync(vdir, { recursive: true, force: true }); } catch {}
+    fs.mkdirSync(vdir, { recursive: true });
+    await expandZip(zipPath, vdir);
+    flattenBinaryDir(vdir);
     try { fs.unlinkSync(zipPath); } catch {}
   } catch (e) { return { ok: false, error: 'Giải nén: ' + e.message }; }
 
-  if (!fs.existsSync(d.binaryExe)) return { ok: false, error: 'Không tìm thấy llama-server.exe sau giải nén' };
-  onProgress?.({ stage: 'done', pct: 1, path: d.binaryExe, tag: asset.tag, variant: resolvedVariant });
-  return { ok: true, path: d.binaryExe, tag: asset.tag, variant: resolvedVariant, detected };
+  // CUDA cần cudart DLLs đặt cạnh exe mới chạy được
+  if (variant === 'cuda' && cudartAsset) {
+    const czip = path.join(d.tmp, cudartAsset.name);
+    onProgress?.({ variant, sub: 'cudart', stage: 'downloading', total: cudartAsset.size, loaded: 0 });
+    const cdl = await downloadFile(cudartAsset.url, czip, (p) => onProgress?.({ variant, sub: 'cudart', stage: 'downloading', ...p }));
+    if (cdl.ok) {
+      try { await expandZip(czip, vdir); fs.unlinkSync(czip); } catch (e) { console.warn('[local-llm] cudart:', e.message); }
+    }
+  }
+
+  if (!fs.existsSync(variantExe(variant))) return { ok: false, error: 'Không thấy llama-server.exe sau giải nén' };
+  onProgress?.({ variant, stage: 'done' });
+  return { ok: true, path: variantExe(variant) };
 }
+
+/**
+ * Tải SẴN tất cả binary phù hợp 1 lần: cpu + vulkan (+ cuda nếu có NVIDIA).
+ * Sau khi tải, chọn variant tối ưu theo GPU hiện tại. Lúc start sẽ tự chọn lại nên không cần tải lại.
+ */
+async function downloadAllBinaries({ onProgress } = {}) {
+  ensureDirs();
+  cleanupFlatBinary();
+  onProgress?.({ stage: 'metadata', msg: 'Đang detect GPU…' });
+  const gpu = await detectGpu(true);
+  // cpu + vulkan luôn (vulkan phủ AMD/Intel/Arc + fallback GPU). cuda chỉ khi có NVIDIA
+  // (binary CUDA cần GPU NVIDIA + cudart mới chạy → tải trên máy không NVIDIA là vô ích).
+  const variants = ['cpu', 'vulkan'];
+  if (gpu.vendor === 'nvidia') variants.push('cuda');
+
+  let assets;
+  try { onProgress?.({ stage: 'metadata', msg: `Tải binaries: ${variants.join(', ')}` }); assets = await findLlamaAssets(variants); }
+  catch (e) { return { ok: false, error: 'Tìm release: ' + e.message }; }
+
+  const results = {};
+  for (const v of variants) {
+    const a = assets.byVariant[v];
+    if (!a) { results[v] = { ok: false, error: 'không có asset trong release' }; continue; }
+    results[v] = await downloadOneBinary(v, a, assets.cudart, onProgress);
+  }
+
+  const installed = listInstalledVariants();
+  state.localBinaryVariant = pickVariant(installed, gpu);
+  onProgress?.({ stage: 'all-done', installed, selected: state.localBinaryVariant });
+  return {
+    ok: installed.length > 0,
+    gpu, tag: assets.tag, variants, results, installed,
+    selected: state.localBinaryVariant,
+  };
+}
+
+// Wrapper tương thích IPC cũ (api.downloadLlamaBinary) → giờ tải tất cả
+async function downloadLlamaBinary(opts = {}) { return downloadAllBinaries(opts); }
 
 // ── Model download (single + multi-part split) ────────
 
@@ -361,14 +440,17 @@ function resolveModelPath(name) {
 }
 
 function serverStatus() {
-  const d = dirs();
   const modelName = state.localModel || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
   const draftName = state.localDraftModel || 'Qwen_Qwen3-0.6B-Q4_0.gguf';
   const m = resolveModelPath(modelName);
   const dr = resolveModelPath(draftName);
+  const installed = listInstalledVariants();
+  const selected = pickVariant(installed, _gpuCache);
   return {
-    binaryReady: fs.existsSync(d.binaryExe),
-    binaryPath:  d.binaryExe,
+    binaryReady:      installed.length > 0,
+    installedVariants: installed,                                 // các backend đã tải sẵn
+    binaryVariant:    selected,                                   // backend sẽ dùng theo GPU hiện tại
+    binaryPath:       installed.length ? variantExe(selected) : null,
     modelReady:  m.found,
     modelPath:   m.path,
     modelFuzzy:  m.fuzzy ? m.actualName : null,
@@ -398,10 +480,18 @@ async function startServer({ port = 8080, ctxSize = 4096, threads, draftMax = 8,
   if (!st.binaryReady) return { ok: false, error: 'Chưa tải llama-server binary' };
   if (!st.modelReady)  return { ok: false, error: `Chưa tải model: ${path.basename(st.modelPath)}` };
 
+  // ── TỰ CHỌN binary theo GPU phát hiện được (không tải lại) ──
+  const gpu = await detectGpu();
+  const installed = listInstalledVariants();
+  const variant = pickVariant(installed, gpu);
+  state.localBinaryVariant = variant;
+  const exe = variantExe(variant);
+  if (!fs.existsSync(exe)) return { ok: false, error: `Binary '${variant}' chưa tải` };
+
   const t = threads || detectPCores();
-  // ngl: offload N layer lên GPU. Variant CPU → 0; còn lại → 99 (offload tất cả)
-  const variant = state.localBinaryVariant || 'cpu';
   const gpuLayers = (ngl !== undefined) ? ngl : (variant === 'cpu' ? 0 : 99);
+  const onGpu = gpuLayers > 0;
+  console.log(`[local-llm] auto-select: GPU="${gpu.name || 'none'}" (${gpu.vendor}) | đã cài=[${installed.join(', ')}] → dùng '${variant}', -ngl=${gpuLayers}`);
 
   const args = [
     '-m',  st.modelPath,
@@ -410,21 +500,25 @@ async function startServer({ port = 8080, ctxSize = 4096, threads, draftMax = 8,
     '-c',  String(ctxSize),
     '-t',  String(t),       // số thread = P-core (KHÔNG dùng SMT/HT)
     '-tb', String(t),
-    '-ngl', String(gpuLayers),  // 0 = CPU only, 99 = offload tất cả lên Vulkan/SYCL/CUDA
-    '-fa', 'on',            // flash-attention
+    '-ngl', String(gpuLayers),  // 0 = CPU only, 99 = offload tất cả lên Vulkan/CUDA
     '--no-mmap',            // load thẳng vào RAM
-    '-ctk', 'q8_0',
-    '-ctv', 'q8_0',
   ];
-  if (st.draftReady) {
-    // llama.cpp mới: --draft-max/--draft-min → --spec-draft-n-max/--spec-draft-n-min
-    args.push('-md', st.draftPath, '--spec-draft-n-max', String(draftMax), '--spec-draft-n-min', String(draftMin));
+  // Flash-attention + KV cache quant: chỉ ép trên CPU.
+  // Trên Vulkan/CUDA, KV q8_0 hỗ trợ hạn chế → ép attention rớt về CPU → dùng -fa auto + KV f16.
+  if (onGpu) {
+    args.push('-fa', 'auto');
+  } else {
+    args.push('-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0');
   }
-  console.log(`[local-llm] spawn (variant=${variant}, -ngl=${gpuLayers}, -t=${t}):`, st.binaryPath);
+  if (st.draftReady) {
+    args.push('-md', st.draftPath, '--spec-draft-n-max', String(draftMax), '--spec-draft-n-min', String(draftMin));
+    if (onGpu) args.push('-ngld', String(gpuLayers));  // offload draft model lên GPU luôn
+  }
+  console.log(`[local-llm] spawn (variant=${variant}, -ngl=${gpuLayers}${onGpu && st.draftReady ? ', -ngld=' + gpuLayers : ''}, -t=${t}, fa=${onGpu ? 'auto' : 'on'}, kv=${onGpu ? 'f16' : 'q8_0'}):`, exe);
 
   return new Promise((resolve) => {
-    const proc = spawn(st.binaryPath, args, {
-      cwd: path.dirname(st.binaryPath),
+    const proc = spawn(exe, args, {
+      cwd: variantDir(variant),   // để DLL của variant resolve đúng
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -455,7 +549,7 @@ async function startServer({ port = 8080, ctxSize = 4096, threads, draftMax = 8,
     setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        resolve({ ok: true, pid: proc.pid, port, threads: t, note: 'Đang load model, có thể chưa sẵn sàng' });
+        resolve({ ok: true, pid: proc.pid, port, threads: t, variant, note: 'Đang load model, có thể chưa sẵn sàng' });
       }
     }, 30000);
   });
@@ -478,7 +572,8 @@ function stopServer() {
 
 module.exports = {
   dirs, ensureDirs,
-  downloadLlamaBinary, downloadModel, cancelDownload,
+  downloadLlamaBinary, downloadAllBinaries, downloadModel, cancelDownload,
   startServer, stopServer, serverStatus,
   detectPCores, detectGpu,
+  listInstalledVariants, selectedVariant, pickVariant,
 };

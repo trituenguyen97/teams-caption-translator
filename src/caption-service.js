@@ -140,9 +140,10 @@ async function runService() {
   let isInit = true, entryId = 0;
   let captionPage = page;
   let _lastPageCount = 0, _captionCheckTick = 0;
+  // Theo dõi dòng cuối (dòng đang nói): chỉ dịch khi nó đứng yên ≥10s (người nói đã dừng)
+  let _lastRowKey = '', _lastRowSince = 0;
+  const LAST_ROW_SETTLE_MS = 10000;
 
-  const SENTENCE_END_RE = /[。！？!?]\s*$/;
-  const isSentenceComplete = t => SENTENCE_END_RE.test(t.trimEnd());
   const toKey = (author, text) => `${author}::${text.replace(/[。、！？!?.,\s]+$/, '').trim()}`;
 
   await injectCaptionObserver(captionPage);
@@ -226,7 +227,16 @@ async function runService() {
       isInit = false; await sleep(POLL_MS); continue;
     }
 
-    const completedRows = rows.slice(0, -1);
+    // ── Quy tắc dịch: chỉ dịch dòng ĐÃ CHỐT ──────────────────────────
+    // Dòng cuối = dòng đang nói (text còn thay đổi) → KHÔNG dịch.
+    // Trừ khi dòng cuối đứng yên ≥10s (người nói đã dừng) → coi như đã chốt → dịch nốt.
+    const lastRow = rows[rows.length - 1];
+    const lastRowKey = lastRow ? toKey(lastRow.author, lastRow.text) : '';
+    if (lastRowKey !== _lastRowKey) { _lastRowKey = lastRowKey; _lastRowSince = Date.now(); }
+    const lastRowSettled = !!lastRowKey && (Date.now() - _lastRowSince >= LAST_ROW_SETTLE_MS);
+
+    // Mọi dòng trừ dòng cuối; thêm dòng cuối nếu đã đứng yên 10s.
+    const completedRows = lastRowSettled ? rows.slice() : rows.slice(0, -1);
     const rowsToCommit = completedRows.filter(({ author, text }) => {
       if (!author || !text) return false;
       const normThis = toKey(author, text).slice(author.length + 2);
@@ -258,7 +268,9 @@ async function runService() {
         const ts = timestamp();
         const cleaned = preprocessText(text);
 
-        if (isSentenceComplete(text)) {
+        // Mọi dòng tới đây đều ĐÃ CHỐT (dòng cuối đang đổi đã bị loại ở completedRows)
+        // → dịch 1 LẦN, đẩy ĐỒNG BỘ vào app (send) + Teams (inject) trong cùng callback.
+        {
           const tsMs = Date.now();
           send('caption-live', { id, author, original: text, translated: '…', ts, tsMs });
           enqueueTranslate(cleaned).then(translated => {
@@ -271,8 +283,6 @@ async function runService() {
               injectTranslationBelowCaption(captionPage, text, translated).catch(() => {});
             }
           });
-        } else {
-          send('caption-live', { id, author, original: text, translated: null, ts, tsMs: Date.now() });
         }
       }
     }
