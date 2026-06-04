@@ -25,15 +25,24 @@
 | 🌐 **MS Translator** | Microsoft Edge / Teams translator API | Không cần key (token lấy tự động) |
 | 🌐 **Google Translate** | Endpoint công khai (browser extension API) | Không cần key (có thể bị rate-limit) |
 | 🌐 **DeepL** | Endpoint extension không chính thức | Không cần key |
-| 🖥️ **LOCAL TRANSLATE** | LLM cục bộ — llama.cpp + Qwen3 | Tải model trong app (~1.78 GB), chạy offline |
+| 🖥️ **LOCAL TRANSLATE** | LLM cục bộ — llama.cpp, chọn model **Qwen3** (đa ngôn ngữ) hoặc **MiLMMT** (JP→VI) | Tải model trong app (~1.22–1.78 GB), chạy offline |
 
 > Cloud LLM (Groq / OpenAI / Gemini) **đã được loại bỏ** khỏi phần dịch thuật. Nếu cấu hình cũ còn lưu một trong các provider này, app sẽ tự migrate về `google-free`.
 
-**LOCAL TRANSLATE** dùng llama.cpp server (OpenAI-compatible) với:
-- **Qwen3-1.7B-Q4_K_M** (model chính) + **Qwen3-0.6B-Q4_0** (draft model cho *speculative decoding* → tăng tốc).
-- **Tải sẵn nhiều binary 1 lần** từ GitHub Releases (`ggml-org/llama.cpp`) vào thư mục riêng theo backend: **cpu + vulkan** (luôn) và **cuda** (chỉ khi có GPU NVIDIA). Mỗi backend nằm ở `llama-server/{cpu,vulkan,cuda}/`.
-- **Tự chọn backend khi khởi động server** theo GPU phát hiện được — NVIDIA → CUDA · AMD/Intel Arc/iGPU → Vulkan · không có → CPU — **không phải tải lại** khi đổi máy/GPU.
-- Tự động: tải model GGUF, chọn số thread = P-core, tự khởi động server khi bấm ▶.
+**LOCAL TRANSLATE** chạy llama.cpp server cục bộ (OpenAI-compatible) với **2 model preset** — chọn trong **⚙️ → 🌐 Dịch thuật → "Mô hình dịch"**:
+
+| Preset | Model (Q4_K_M) | Dung lượng | Đặc điểm |
+|--------|----------------|-----------|----------|
+| **Qwen3 1.7B** *(mặc định)* | Qwen3-1.7B + Qwen3-0.6B (draft) | ~1.78 GB | Đa ngôn ngữ (cả 8 ngôn ngữ đích), kiểu chat. Kèm **speculative decoding** (draft model → tăng tốc). Tự offload GPU nếu có. |
+| **MiLMMT 1B** | MiLMMT-46-1B-v0.1 (Xiaomi · nền Gemma3-1B · 46 ngôn ngữ) | ~1.22 GB | Model **dịch chuyên dụng** (đặc biệt JP→VI), nhẹ hơn, **không draft**. Ưu tiên chạy **CPU** (nhanh nhất theo benchmark). |
+
+Cơ chế chung:
+- **Tải sẵn nhiều binary 1 lần** từ GitHub Releases (`ggml-org/llama.cpp`): **cpu + vulkan** (luôn) và **cuda** (chỉ khi có GPU NVIDIA), mỗi backend ở `llama-server/{cpu,vulkan,cuda}/` — **không phải tải lại** khi đổi máy/GPU.
+- **Tự chọn backend khi khởi động server** tùy preset:
+  - **Qwen3** — theo GPU phát hiện được: NVIDIA → CUDA · AMD/Intel Arc/iGPU → Vulkan · không có → CPU. Số thread = P-core, ctx 4096, có flash-attention + KV q8_0 (CPU) và draft speculative.
+  - **MiLMMT** — **ưu tiên CPU** (`-t 4 -c 2048 --poll 0 --mlock`, idle ~0% CPU), chỉ offload khi có **GPU NVIDIA rời (dGPU)**. *Lý do:* đo thực trên Core Ultra 5 225H, MiLMMT chạy CPU-4t (~533 ms/câu) **nhanh hơn ~25%** so với iGPU-Vulkan (~665 ms) — model 1 phần + vocab 262k khiến iGPU (chia sẻ RAM) bị nghẽn băng thông.
+- **Endpoint/giải mã khác nhau:** MiLMMT dùng `/completion` với prompt `Translate this from <nguồn> to <đích>:` + giải mã **greedy** (temperature 0) và **tự nhận dạng ngôn ngữ nguồn** (Nhật cho kana/kanji · Hàn cho hangul · còn lại tiếng Anh); Qwen3 dùng `/v1/chat/completions`.
+- Tự khởi động server khi bấm ▶. Nếu LLM cục bộ lỗi/chưa sẵn sàng → tự **fallback sang Google Translate (free)**.
 
 ### Tóm tắt & xuất file
 
@@ -87,7 +96,7 @@ App sẽ tự kết nối CDP, phát hiện meeting, theo dõi caption và hiể
 ### Chọn provider dịch / ngôn ngữ
 
 - Dropdown ngôn ngữ ở header chọn ngôn ngữ đích.
-- **⚙️ Cài đặt** → tab **🌐 Dịch thuật** → chọn provider. Với **LOCAL TRANSLATE**, bấm **📥 Tải Local Translate** để tải binary + model (1 lần).
+- **⚙️ Cài đặt** → tab **🌐 Dịch thuật** → chọn provider. Với **LOCAL TRANSLATE**: chọn **Mô hình dịch** (Qwen3 đa ngôn ngữ *hoặc* MiLMMT JP→VI) rồi bấm **📥 Tải Local Translate** để tải binary + model — chỉ 1 lần (Qwen3 kèm draft ~1.78 GB; MiLMMT không draft ~1.22 GB).
 
 ---
 

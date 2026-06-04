@@ -193,6 +193,7 @@ function registerAll(app) {
     providerKeys:    Store.get('providerKeys',    {}),
     captureSource:   Store.get('captureSource',   'teams'),
     micDeviceId:     Store.get('micDeviceId',     ''),
+    localPreset:        Store.get('localPreset',        'qwen3'),
     localBaseUrl:       Store.get('localBaseUrl',       LOCAL_DEFAULTS.baseUrl),
     localModel:         Store.get('localModel',         LOCAL_DEFAULTS.model),
     localDraftModel:    Store.get('localDraftModel',    LOCAL_DEFAULTS.draftModel),
@@ -209,6 +210,7 @@ function registerAll(app) {
       Store.set('captureSource', s.captureSource);
     }
     if (s.micDeviceId     !== undefined) { Store.set('micDeviceId',     s.micDeviceId); }
+    if (s.localPreset     !== undefined) { Store.set('localPreset',     s.localPreset);     state.localPreset     = s.localPreset; }
     if (s.localBaseUrl    !== undefined) { Store.set('localBaseUrl',    s.localBaseUrl);    state.localBaseUrl    = s.localBaseUrl; }
     if (s.localModel      !== undefined) { Store.set('localModel',      s.localModel);      state.localModel      = s.localModel; }
     if (s.localDraftModel !== undefined) { Store.set('localDraftModel', s.localDraftModel); state.localDraftModel = s.localDraftModel; }

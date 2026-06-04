@@ -107,6 +107,7 @@ app.whenReady().then(() => {
   }
   state.apiKey        = Store.get('apiKey',        '');
   state.captureSource = Store.get('captureSource', 'teams');
+  state.localPreset        = Store.get('localPreset',        state.localPreset);
   state.localBaseUrl       = Store.get('localBaseUrl',       state.localBaseUrl);
   state.localModel         = Store.get('localModel',         state.localModel);
   state.localDraftModel    = Store.get('localDraftModel',    state.localDraftModel);

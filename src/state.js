@@ -19,6 +19,10 @@ module.exports = {
   apiKey: '',
 
   // Local LLM (llama.cpp server, OpenAI-compatible) — Qwen3 setup cho Japanese IT meetings
+  // localPreset: 'qwen3' (chat, đa ngôn ngữ, có draft/speculative — auto-detect GPU) | 'milmmt' (completion, JP→VI chuyên dụng)
+  // Backend (benchmark Ultra 5 225H): MiLMMT nhanh nhất trên CPU-t4 → ưu tiên CPU (chỉ offload nếu có dGPU NVIDIA);
+  // Qwen3 nhanh nhất trên iGPU/GPU → auto-detect. Xem selectVariantForPreset trong local-llm.js.
+  localPreset: 'qwen3',
   localBaseUrl: 'http://127.0.0.1:8080',
   localModel:      'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
   localDraftModel: 'Qwen_Qwen3-0.6B-Q4_0.gguf',

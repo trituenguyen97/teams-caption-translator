@@ -499,6 +499,77 @@ async function translateLocal(text, tgtLang) {
   }
 }
 
+// ── MiLMMT-46 (Xiaomi, Gemma3-1B MT) — completion endpoint ──
+// Model dịch chuyên dụng 46 ngôn ngữ. Dùng prompt format gốc (KHÔNG chat template):
+//   Translate this from <src> to <tgt>:\n<src>: <text>\n<tgt>:
+// Sampling greedy (temperature 0, top_k 1) theo model card + REPORT_speedup.md.
+
+// Tên ngôn ngữ MiLMMT mong đợi (khác tên nội bộ của app ở vài mục, vd Chinese)
+const MILMMT_LANG_NAMES = {
+  'Vietnamese': 'Vietnamese', 'English': 'English', 'Japanese': 'Japanese',
+  'Korean': 'Korean', 'Simplified Chinese': 'Chinese (Simplified)',
+  'Traditional Chinese': 'Chinese (Traditional)', 'French': 'French',
+  'German': 'German', 'Spanish': 'Spanish',
+};
+const milmmtLangName = (appLang) => MILMMT_LANG_NAMES[appLang] || appLang;
+
+// Phát hiện ngôn ngữ nguồn — app dùng chủ yếu cho meeting tiếng Nhật → Việt.
+// kana = chắc chắn Nhật; hangul = Hàn; kanji-only mặc định Nhật (bối cảnh app); còn lại = Anh.
+function detectSourceLang(text) {
+  if (/[぀-ゟ゠-ヿ]/.test(text)) return 'Japanese';
+  if (/[가-힯]/.test(text)) return 'Korean';
+  if (/[一-鿿]/.test(text)) return 'Japanese';
+  return 'English';
+}
+
+async function translateLocalMiLMMT(text, tgtLang) {
+  if (Date.now() - _localLastFailTs < LOCAL_FAIL_COOLDOWN_MS) return null;
+
+  const baseUrl = state.localBaseUrl || LOCAL_DEFAULTS.baseUrl;
+  const src = milmmtLangName(detectSourceLang(text));
+  const tgt = milmmtLangName(tgtLang);
+  if (src === tgt) return null;   // cùng ngôn ngữ → để fallback Google Free xử lý
+
+  const prompt = `Translate this from ${src} to ${tgt}:\n${src}: ${text}\n${tgt}:`;
+  const body = JSON.stringify({
+    prompt,
+    n_predict: 256,
+    temperature: 0,
+    top_k: 1,            // greedy theo model card
+    cache_prompt: true,
+    stop: ['\n', `${src}:`, `${tgt}:`],
+  });
+
+  const r = await httpPostLocal(baseUrl, '/completion',
+    { 'Content-Type': 'application/json' }, body, 25000);
+
+  if (r.status === 0) {
+    _localLastFailTs = Date.now();
+    console.warn('[milmmt] không kết nối được', baseUrl, '|', r.error || 'unknown');
+    return null;
+  }
+  if (r.status !== 200) {
+    console.warn('[milmmt] HTTP', r.status, '|', (r.body || '').slice(0, 200));
+    return null;
+  }
+  try {
+    const j = JSON.parse(r.body);
+    if (j.error) { console.warn('[milmmt] error:', j.error.message || j.error); return null; }
+    // /completion trả về { content, ... }
+    let out = (j.content || '').trim();
+    // Bỏ prefix lặp lại nếu model tự thêm "Vietnamese:" / "Translation:"
+    out = out.replace(/^(Vietnamese|Tiếng Việt|Translation|Output|[A-Z][a-z]+ \([A-Za-z]+\))\s*[:：]\s*/i, '').trim();
+    if (out) {
+      const usage = j.timings ? ` | ${(j.timings.predicted_per_second || 0).toFixed(1)} tok/s` : '';
+      console.log('[milmmt] OK:', text.slice(0, 30), '→', out.slice(0, 30), usage);
+    }
+    return out || null;
+  } catch (e) {
+    console.warn('[milmmt] parse error:', e.message);
+    return null;
+  }
+}
+
 async function checkLocalServer() {
   const baseUrl = state.localBaseUrl || LOCAL_DEFAULTS.baseUrl;
   const r = await httpGetLocalUrl(baseUrl, '/v1/models', 2500);
@@ -538,7 +609,9 @@ async function translateText(text) {
   }
 
   if (state.provider === 'local') {
-    const lResult = await translateLocal(text, state.targetLang);
+    const lResult = state.localPreset === 'milmmt'
+      ? await translateLocalMiLMMT(text, state.targetLang)
+      : await translateLocal(text, state.targetLang);
     if (lResult && lResult !== text && !isLLMRefusal(lResult, text)) {
       if (!/[぀-ゟ゠-ヿ一-鿿]/.test(lResult)) return lResult;
     }
@@ -608,5 +681,5 @@ module.exports = {
   translateViaEdge, translateViaTeamsToken, PROVIDER_PRIORITY,
   storeTeamsToken, parseJwtAudience,
   buildSystemPrompt,
-  translateLocal, checkLocalServer, LOCAL_DEFAULTS,
+  translateLocal, translateLocalMiLMMT, checkLocalServer, LOCAL_DEFAULTS,
 };

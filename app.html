@@ -420,6 +420,14 @@
             <div id="s-local-summary" style="font-size:11px;color:#9db4d8;margin-bottom:10px;line-height:1.6">
               Đang kiểm tra…
             </div>
+            <div style="margin-bottom:10px">
+              <label style="font-size:11px;color:#9db4d8;display:block;margin-bottom:4px">Mô hình dịch</label>
+              <select id="s-local-preset" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
+                <option value="qwen3">Qwen3 1.7B — đa ngôn ngữ (mặc định)</option>
+                <option value="milmmt">MiLMMT 1B — JP→VI chuyên dụng, nhanh &amp; nhẹ</option>
+              </select>
+              <div id="s-preset-desc" style="font-size:10px;color:#777;margin-top:4px;line-height:1.5"></div>
+            </div>
             <div id="s-gpu-line" style="font-size:11px;margin-bottom:10px;line-height:1.5;color:#9db4d8"></div>
             <button id="s-dl-all" style="width:100%;padding:8px;font-size:12px;background:#1a4a78;border-color:#3794ff;color:#fff">
               📥 Tải Local Translate
@@ -812,9 +820,8 @@
         Object.assign(_providerKeys, provKeys);
 
         // Load Local LLM config
-        sLocalUrl.value   = s.localBaseUrl    || 'http://127.0.0.1:8080';
-        sLocalModel.value = s.localModel      || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
-        sLocalDraft.value = s.localDraftModel || 'Qwen_Qwen3-0.6B-Q4_0.gguf';
+        sLocalUrl.value   = s.localBaseUrl || 'http://127.0.0.1:8080';
+        applyPreset(s.localPreset || 'qwen3', false);   // set model/draft/url + mô tả theo preset
         sLocalTestStatus.textContent = '';
 
         sProvider.value = s.provider || 'groq';
@@ -851,14 +858,17 @@
         providerKeys:    { ..._providerKeys },
         captureSource:   sCapture.value,
         micDeviceId:     sMicDevice.value,
+        localPreset:     sLocalPreset.value,
         localBaseUrl:    sLocalUrl.value.trim()   || 'http://127.0.0.1:8080',
-        localModel:      sLocalModel.value.trim() || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
-        localDraftModel: sLocalDraft.value.trim() || 'Qwen_Qwen3-0.6B-Q4_0.gguf',
+        localModel:      sLocalModel.value.trim() || currentPreset().model,
+        localDraftModel: sLocalDraft.value.trim(),   // MiLMMT: '' (không dùng draft)
       });
     });
 
     // ── Local LLM UI ──
     const sLocalRow         = document.getElementById('s-local-row');
+    const sLocalPreset      = document.getElementById('s-local-preset');
+    const sPresetDesc       = document.getElementById('s-preset-desc');
     const sLocalUrl         = document.getElementById('s-local-url');
     const sLocalModel       = document.getElementById('s-local-model');
     const sLocalDraft       = document.getElementById('s-local-draft');
@@ -888,17 +898,52 @@
     const sDlAll            = document.getElementById('s-dl-all');
     const sDlAllStatus      = document.getElementById('s-dl-all-status');
 
-    // Default URLs verified — bartowski Qwen3 family
-    const DEFAULT_URLS = {
-      main:  'https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf',
-      draft: 'https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/main/Qwen_Qwen3-0.6B-Q4_0.gguf',
+    // ── Model presets (URL đã verify) ──
+    const MODEL_PRESETS = {
+      qwen3: {
+        label: 'Qwen3 1.7B',
+        model:    'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
+        modelUrl: 'https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf',
+        hasDraft: true,
+        draft:    'Qwen_Qwen3-0.6B-Q4_0.gguf',
+        draftUrl: 'https://huggingface.co/bartowski/Qwen_Qwen3-0.6B-GGUF/resolve/main/Qwen_Qwen3-0.6B-Q4_0.gguf',
+        modelSize: 1.28 * 1024 ** 3,
+        draftSize: 470 * 1024 ** 2,
+        totalLabel: '~1.78 GB',
+        desc: 'Đa ngôn ngữ (chat). Kèm draft 0.6B → speculative decoding. Tự dùng GPU nếu có.',
+      },
+      milmmt: {
+        label: 'MiLMMT 1B',
+        model:    'MiLMMT-46-1B-v0.1.Q4_K_M.gguf',
+        modelUrl: 'https://huggingface.co/mradermacher/MiLMMT-46-1B-v0.1-GGUF/resolve/main/MiLMMT-46-1B-v0.1.Q4_K_M.gguf',
+        hasDraft: false,
+        draft:    '',
+        draftUrl: '',
+        modelSize: 1.1 * 1024 ** 3,
+        draftSize: 0,
+        totalLabel: '~1.22 GB',
+        desc: 'Dịch chuyên dụng JP→VI (Xiaomi · Gemma3-1B · 46 ngôn ngữ). Chạy CPU 4 threads · --poll 0 · --mlock (nhanh nhất theo benchmark, ~0.5s/câu, idle ~0% CPU); chỉ offload khi có GPU NVIDIA rời.',
+      },
     };
-    function fillDefaultUrls() {
-      if (!sModelUrl.value.trim()) sModelUrl.value = DEFAULT_URLS.main;
-      if (!sDraftUrl.value.trim()) sDraftUrl.value = DEFAULT_URLS.draft;
-      if (!sLocalModel.value.trim()) sLocalModel.value = 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
-      if (!sLocalDraft.value.trim()) sLocalDraft.value = 'Qwen_Qwen3-0.6B-Q4_0.gguf';
+    function currentPreset() { return MODEL_PRESETS[sLocalPreset.value] || MODEL_PRESETS.qwen3; }
+
+    // Áp dụng preset → các input ẩn (model/draft/url) + size cho thanh tiến trình.
+    // save=true: lưu localPreset + filename vào settings.
+    function applyPreset(presetKey, save) {
+      const key = MODEL_PRESETS[presetKey] ? presetKey : 'qwen3';
+      const p = MODEL_PRESETS[key];
+      sLocalPreset.value = key;
+      sModelUrl.value   = p.modelUrl;
+      sLocalModel.value = p.model;
+      sDraftUrl.value   = p.draftUrl;
+      sLocalDraft.value = p.draft;
+      _dlSize['model:main']  = p.modelSize;
+      _dlSize['model:draft'] = p.draftSize;
+      if (sPresetDesc) sPresetDesc.textContent = p.desc;
+      if (save) api.saveSettings({ localPreset: key, localModel: p.model, localDraftModel: p.draft });
     }
+    function fillDefaultUrls() { applyPreset(sLocalPreset.value, false); }
+    sLocalPreset.addEventListener('change', () => { applyPreset(sLocalPreset.value, true); refreshLocalStatus(); });
 
     function fmtBytes(n) {
       if (!n) return '0 B';
@@ -924,11 +969,12 @@
         if (st.modelFuzzy && sLocalModel) sLocalModel.value = st.modelFuzzy;
         if (st.draftFuzzy && sLocalDraft) sLocalDraft.value = st.draftFuzzy;
 
+        const p = currentPreset();
         const allReady = st.binaryReady && st.modelReady;
         if (allReady) {
-          const draftLabel = st.draftReady ? ' + speculative decoding' : '';
+          const draftLabel = (sLocalPreset.value !== 'milmmt' && st.draftReady) ? ' + speculative decoding' : '';
           const runLabel = st.running ? ` · ▶ server đang chạy (PID ${st.pid})` : '';
-          sLocalSummary.innerHTML = `✅ <b>Đã sẵn sàng</b>${draftLabel}${runLabel}<br><span style="color:#777">Binary tự chọn theo GPU khi start — chỉ bấm ▶ caption để dùng.</span>`;
+          sLocalSummary.innerHTML = `✅ <b>Đã sẵn sàng</b> · <b>${p.label}</b>${draftLabel}${runLabel}<br><span style="color:#777">Binary tự chọn theo GPU khi start — chỉ bấm ▶ caption để dùng.</span>`;
           sDlAll.disabled = true;
           sDlAll.textContent = '✓ Đã tải xong';
           sDlAll.style.background = '#1a4a1a';
@@ -937,8 +983,8 @@
           const missing = [];
           if (!st.binaryReady) missing.push('llama-server');
           if (!st.modelReady)  missing.push('model dịch');
-          sLocalSummary.innerHTML = `🖥️ <b>LOCAL TRANSLATE</b> — dịch offline, JP→VI<br>` +
-            `<span style="color:#dcdcaa">Cần tải: ${missing.join(' + ')} (~1.78 GB tổng)</span>`;
+          sLocalSummary.innerHTML = `🖥️ <b>LOCAL TRANSLATE</b> — dịch offline (<b>${p.label}</b>)<br>` +
+            `<span style="color:#dcdcaa">Cần tải: ${missing.join(' + ')} (${p.totalLabel} tổng)</span>`;
           sDlAll.disabled = false;
           sDlAll.textContent = '📥 Tải Local Translate';
           sDlAll.style.background = '#1a4a78';
@@ -1028,9 +1074,11 @@
         return;
       }
 
-      const stageMap = { binary: '[1/3] Đang tải llama-server', 'model:main': '[2/3] Đang tải model chính', 'model:draft': '[3/3] Đang tải draft model' };
+      // Số phần tải tùy preset (MiLMMT không có draft → 2 phần)
+      const nParts = _dlSize['model:draft'] > 0 ? 3 : 2;
+      const stageMap = { binary: `[1/${nParts}] Đang tải llama-server`, 'model:main': `[2/${nParts}] Đang tải model chính`, 'model:draft': `[3/${nParts}] Đang tải draft model` };
       if (p.stage === 'metadata') { sDlStage.textContent = stageMap[task] + ' — lấy thông tin…'; return; }
-      if (p.stage === 'extracting') { sDlStage.textContent = '[1/3] Giải nén binary…'; sDlBar.style.background = '#dcdcaa'; return; }
+      if (p.stage === 'extracting') { sDlStage.textContent = `[1/${nParts}] Giải nén binary…`; sDlBar.style.background = '#dcdcaa'; return; }
       if (p.stage === 'done') {
         _dlLoaded[task] = _dlSize[task] || _dlLoaded[task];
         sDlStage.textContent = stageMap[task] + ' ✓';
@@ -1099,7 +1147,9 @@
     });
 
     sDlAll.addEventListener('click', async () => {
-      fillDefaultUrls();
+      applyPreset(sLocalPreset.value, true);   // chốt model/url theo preset + lưu settings
+      const p = currentPreset();
+      const nParts = p.hasDraft ? 3 : 2;
       sDlAll.disabled = true;
       sDlAll.textContent = '⏳ Đang tải…';
       // Reset progress counters
@@ -1107,25 +1157,27 @@
       sDlProgWrap.style.display = '';
       sDlBar.style.width = '0%';
       sDlPct.textContent = '0%';
-      sDlBytes.textContent = '0 B / ~1.78 GB';
+      sDlBytes.textContent = '0 B / ' + p.totalLabel;
       sDlStage.textContent = 'Đang chuẩn bị…';
 
       let failed = false;
       try {
         const st = await api.localStatus();
         if (!st.binaryReady) {
-          sDlStage.textContent = '[1/3] Tải binaries (cpu + GPU — tự chọn khi start)…';
+          sDlStage.textContent = `[1/${nParts}] Tải binaries (cpu + GPU — tự chọn khi start)…`;
           const r = await api.downloadLlamaBinary('auto');   // → tải tất cả binary phù hợp
           if (!r.ok) { sDlStage.textContent = '❌ Binary: ' + r.error; failed = true; return; }
         } else { _dlLoaded.binary = _dlSize.binary; }
-        if (!st.modelReady) {
-          const m = await api.downloadModel({ kind: 'main',  url: sModelUrl.value.trim() || DEFAULT_URLS.main,  filename: sLocalModel.value.trim() || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf' });
-          if (!m.ok) { sDlStage.textContent = '❌ Main: ' + m.error; failed = true; return; }
-        } else { _dlLoaded['model:main'] = _dlSize['model:main']; }
-        if (!st.draftReady) {
-          const d = await api.downloadModel({ kind: 'draft', url: sDraftUrl.value.trim() || DEFAULT_URLS.draft, filename: sLocalDraft.value.trim() || 'Qwen_Qwen3-0.6B-Q4_0.gguf' });
+        // Model chính — downloadModel tự bỏ qua nếu file đã có (cached)
+        const m = await api.downloadModel({ kind: 'main', url: p.modelUrl, filename: p.model });
+        if (!m.ok) { sDlStage.textContent = '❌ Model: ' + m.error; failed = true; return; }
+        // Draft model — chỉ preset có draft (qwen3); MiLMMT bỏ qua
+        if (p.hasDraft) {
+          const d = await api.downloadModel({ kind: 'draft', url: p.draftUrl, filename: p.draft });
           if (!d.ok) { sDlStage.textContent = '⚠ Draft fail (vẫn chạy được không có draft): ' + d.error; }
-        } else { _dlLoaded['model:draft'] = _dlSize['model:draft']; }
+        } else {
+          _dlLoaded['model:draft'] = 0;   // không có draft → không tính vào tổng
+        }
         sDlStage.textContent = '✅ Hoàn tất — server sẽ tự khởi động khi bấm ▶ caption';
         sDlBar.style.width = '100%';
         sDlBar.style.background = '#4ec9b0';
