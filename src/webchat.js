@@ -426,6 +426,18 @@ function htmlToMarkdownInjection() {
           }
           case 'blockquote': return '\\n> ' + kids.trim() + '\\n';
           case 'hr':  return '\\n\\n---\\n\\n';
+          case 'table': {
+            const rows = [...node.querySelectorAll('tr')];
+            if (!rows.length) return kids;
+            const cell = c => walk(c).replace(/\\s+/g, ' ').split('|').join(' ').trim();
+            const toRow = tr => '| ' + [...tr.children].map(cell).join(' | ') + ' |';
+            const out = [];
+            rows.forEach((tr, ri) => {
+              out.push(toRow(tr));
+              if (ri === 0) out.push('| ' + [...tr.children].map(() => '---').join(' | ') + ' |');
+            });
+            return '\\n\\n' + out.join('\\n') + '\\n\\n';
+          }
           default: return kids;
         }
       }

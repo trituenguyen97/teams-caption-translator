@@ -427,6 +427,13 @@ function extractSizeTokens(s) {
   return new Set(m.map(t => t.replace(/\s+/g, '')));
 }
 
+// "Họ model" = token chữ cái dài nhất đầu tiên trong tên (milmmt, qwen, gemma…).
+// Dùng để fuzzy KHÔNG khớp nhầm model khác họ cùng size (vd MiLMMT-1B vs gemma-3-1b đều "1b").
+function modelFamilyKey(name) {
+  const tokens = (name || '').toLowerCase().replace(/\.gguf$/, '').match(/[a-z]{3,}/g) || [];
+  return tokens[0] || '';
+}
+
 function resolveModelPath(name) {
   if (!name) return { path: null, found: false };
   const d = dirs();
@@ -438,15 +445,17 @@ function resolveModelPath(name) {
     const full = path.join(d.models, c);
     if (fs.existsSync(full)) return { path: full, found: true };
   }
-  // Fuzzy chỉ chấp nhận khi size token (1.7b/0.6b…) khớp — tránh main match nhầm draft
+  // Fuzzy chỉ chấp nhận khi CẢ size token (1.7b/0.6b…) LẪN họ model (milmmt/qwen…) khớp —
+  // tránh main match nhầm draft VÀ tránh thay nhầm model khác họ cùng size (vd MiLMMT-1B → gemma-3-1b).
   const wantSize = extractSizeTokens(name);
-  if (wantSize.size > 0) {
+  const wantFamily = modelFamilyKey(name);
+  if (wantSize.size > 0 && wantFamily) {
     for (const f of listAvailableModels()) {
       const fSize = extractSizeTokens(f.name);
-      for (const s of wantSize) {
-        if (fSize.has(s)) {
-          return { path: path.join(d.models, f.name), found: true, fuzzy: true, actualName: f.name };
-        }
+      const sizeMatch = [...wantSize].some(s => fSize.has(s));
+      const familyMatch = f.name.toLowerCase().includes(wantFamily);
+      if (sizeMatch && familyMatch) {
+        return { path: path.join(d.models, f.name), found: true, fuzzy: true, actualName: f.name };
       }
     }
   }

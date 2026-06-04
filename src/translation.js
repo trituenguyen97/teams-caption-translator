@@ -91,13 +91,57 @@ const PHRASE_MAP = {
   '確認しました': 'Đã xác nhận.', '問題ありません': 'Không có vấn đề gì.',
   '大丈夫です': 'Ổn rồi.', '以上です': 'Hết rồi, cảm ơn.',
   'よろしいでしょうか': 'Bạn có đồng ý không?', 'いかがでしょうか': 'Bạn thấy thế nào?',
+  'では始めましょう': 'Vậy chúng ta bắt đầu nhé.', '始めましょう': 'Chúng ta bắt đầu nhé.',
+  'お先に失礼します': 'Tôi xin phép về trước.', 'ちょっとよろしいですか': 'Cho tôi hỏi một chút được không?',
+  // Câu họp/xã giao thường gặp (#2)
+  '承知しました': 'Tôi đã rõ ạ.', '承知いたしました': 'Tôi đã rõ ạ.',
+  'ご確認ください': 'Vui lòng kiểm tra giúp ạ.', 'ご確認お願いします': 'Nhờ anh/chị kiểm tra giúp ạ.',
+  'ご確認をお願いします': 'Nhờ anh/chị kiểm tra giúp ạ.',
+  '少々お待ちください': 'Xin chờ một chút ạ.', 'お待ちください': 'Xin chờ một chút ạ.',
+  'お待たせしました': 'Xin lỗi đã để mọi người chờ.', 'お待たせいたしました': 'Xin lỗi đã để mọi người chờ.',
+  'もう一度お願いします': 'Nhờ anh/chị nói lại một lần nữa ạ.',
+  'もう一度いいですか': 'Cho tôi nghe lại một lần nữa được không ạ?',
+  '聞こえますか': 'Mọi người nghe rõ không ạ?', '聞こえますでしょうか': 'Mọi người nghe rõ không ạ?',
+  '聞こえています': 'Tôi nghe rõ ạ.', '画面見えますか': 'Mọi người thấy màn hình không ạ?',
+  '画面共有します': 'Tôi xin chia sẻ màn hình.', '共有します': 'Tôi xin chia sẻ màn hình.',
+  '以上になります': 'Trên đây là phần trình bày của tôi ạ.',
+  '質問はありますか': 'Có câu hỏi nào không ạ?', '何か質問はありますか': 'Có câu hỏi nào không ạ?',
+  'よろしいですか': 'Được chứ ạ?', 'がんばりましょう': 'Cùng cố gắng nhé.',
 };
 
+// Chuẩn hóa câu Nhật: bỏ khoảng trắng + dấu câu ở hai đầu
+function normJa(s) {
+  return (s || '').trim().replace(/^[\s、。・，]+/, '').replace(/[。、！？!?.，\s]+$/g, '');
+}
+
+// Tiền tố thời gian / từ đệm / dẫn nhập hay đứng trước câu xã giao → bỏ để khớp phần lõi.
+// (vd "今日はよろしくお願いいたします" → "よろしくお願いいたします")
+const PHRASE_PREFIX_RE = /^(?:えー?と?|あの[ー〜っ]?|まずは?|では|それでは|じゃあ?|じゃ|さて|そして|本日は?|今日は?|改めて|引き続き|皆様は?|皆さんは?|みなさんは?|どうぞ|何卒)[\s、,]*/;
+
 function lookupPhrase(text) {
-  const t = text.trim();
+  const t = normJa(text);
+  if (!t) return null;
   if (PHRASE_MAP[t]) return PHRASE_MAP[t];
-  const stripped = t.replace(/[。！？!?\s]+$/, '');
-  return PHRASE_MAP[stripped] || null;
+
+  // Bỏ tối đa 2 lớp tiền tố đệm/thời gian rồi tra lại (vd "では、まずよろしくお願いします")
+  let core = t;
+  for (let k = 0; k < 2; k++) {
+    const nx = normJa(core.replace(PHRASE_PREFIX_RE, ''));
+    if (nx === core) break;
+    core = nx;
+  }
+  if (core !== t && PHRASE_MAP[core]) return PHRASE_MAP[core];
+
+  // Họ "よろしくお願い…": gần như luôn là câu chào/xã giao (kể cả khi ASR rớt お hoặc đổi đuôi).
+  // Neo ^ để KHÔNG nuốt nhầm câu nhờ vả có nội dung (vd "システム導入をよろしくお願いします").
+  if (/^よろしく(?:お?願い(?:いた)?し?ま?す?)?$/.test(core)) {
+    return PHRASE_MAP['よろしくお願いします'];
+  }
+  // "お願いします" đứng riêng (ASR có thể rớt お → "願いします")
+  if (/^お?願い(?:いた)?し?ま?す$/.test(core)) {
+    return PHRASE_MAP['お願いします'];
+  }
+  return null;
 }
 
 // ── LLM Refusal Detection ─────────────────────────────
@@ -129,9 +173,38 @@ const JA_FILLER_RE = new RegExp(
   '(?:' + JA_FILLERS.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')[、。,\\s]*', 'g'
 );
 
+// Glossary thuật ngữ IT/katakana → tiếng Anh: thay sẵn trong câu NGUỒN trước khi dịch.
+// MiLMMT/Google hay dịch katakana thành tiếng Việt (デプロイ→"phân phối", バックエンド→"hậu cần"…);
+// thay sẵn giúp GIỮ thuật ngữ tiếng Anh và nhiều ca còn dịch đúng hơn (đã kiểm chứng trên server).
+// Chỉ ảnh hưởng văn bản gửi đi dịch — phần tiếng Nhật hiển thị vẫn nguyên gốc.
+// Người dùng có thể bổ sung từ/tên riêng vào đây.
+const JA_GLOSSARY = {
+  'コードレビュー': 'code review', 'プルリクエスト': 'pull request', 'プルリク': 'PR',
+  'リファクタリング': 'refactoring', 'デプロイメント': 'deployment', 'デプロイ': 'deploy',
+  'リリース': 'release', 'ロールバック': 'rollback', 'マージ': 'merge', 'コミット': 'commit',
+  'ブランチ': 'branch', 'リポジトリ': 'repository', 'バックエンド': 'backend',
+  'フロントエンド': 'frontend', 'データベース': 'database', 'サーバー': 'server', 'サーバ': 'server',
+  'パイプライン': 'pipeline', 'スプリント': 'sprint', 'タスク': 'task', 'チケット': 'ticket',
+  'イシュー': 'issue', 'デバッグ': 'debug', 'リクエスト': 'request', 'レスポンス': 'response',
+  'エンドポイント': 'endpoint', 'ライブラリ': 'library', 'フレームワーク': 'framework',
+  'レビュー': 'review', 'スケジュール': 'schedule',
+  'マイルストーン': 'milestone', 'プロジェクト': 'project', 'リソース': 'resource',
+  'ステータス': 'status', 'バージョン': 'version', 'パフォーマンス': 'performance',
+  'ブリッジ': 'Bridge (BrSE)', 'ブレッジ': 'Bridge (BrSE)',
+};
+const _glossRe = new RegExp(
+  Object.keys(JA_GLOSSARY).sort((a, b) => b.length - a.length)
+    .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g'
+);
+function applyGlossary(text) {
+  // replace() với regex /g luôn quét từ đầu & tự reset lastIndex → không cần test() (tránh bug lastIndex)
+  return text.replace(_glossRe, m => ' ' + JA_GLOSSARY[m] + ' ');
+}
+
 function preprocessText(text) {
   let t = text.replace(/(.{2,}?)\1+/g, '$1');
   t = t.replace(JA_FILLER_RE, '');
+  t = applyGlossary(t);                 // giữ thuật ngữ IT tiếng Anh (#1)
   t = t.replace(/\s{2,}/g, ' ').trim();
   return t || text;
 }

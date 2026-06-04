@@ -21,8 +21,9 @@ contextBridge.exposeInMainWorld('__caption', {
   setWebTab:          t        => ipcRenderer.invoke('set-web-tab', t),
   setAlwaysOnTop: v    => ipcRenderer.send('set-always-on-top', v),
   focusWindow:    ()   => ipcRenderer.send('focus-window'),
-  toggleCaptions: ()   => ipcRenderer.send('toggle-captions'),
+  toggleCaptions: (desired) => ipcRenderer.send('toggle-captions', desired),
   openExternal:   url  => ipcRenderer.send('open-external', url),
+  copyToClipboard: text => ipcRenderer.invoke('copy-to-clipboard', text),
   summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),
   exportSummary:    (data)     => ipcRenderer.invoke('export-summary', data),
 

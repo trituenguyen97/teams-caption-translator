@@ -1,7 +1,7 @@
 /**
  * ipc-handlers.js — All IPC communication between main ↔ renderer
  */
-const { ipcMain, desktopCapturer, shell } = require('electron');
+const { ipcMain, desktopCapturer, shell, clipboard } = require('electron');
 const { exec } = require('child_process');
 const fs = require('fs');
 const state = require('./state');
@@ -65,7 +65,7 @@ function registerAll(app) {
   }
 
   // ── Captions toggle ───────────────────
-  ipcMain.on('toggle-captions', async () => {
+  ipcMain.on('toggle-captions', async (_, desired) => {
     // Khi user bấm ▶ caption và đang dùng local LLM → tự khởi động server
     ensureLocalServerStarted();
     // Audio mode
@@ -95,7 +95,15 @@ function registerAll(app) {
     }
 
     const stateBefore = await checkCaptionsActive();
-    console.log('[toggle-captions] state trước:', stateBefore);
+    console.log('[toggle-captions] state trước:', stateBefore, '| muốn:', desired);
+
+    // Nếu caption đã ở đúng trạng thái mong muốn (vd đã bật sẵn mà user bấm ▶ để play)
+    // → KHÔNG toggle (tránh tắt nhầm caption đang chạy), chỉ đồng bộ trạng thái nút.
+    if (typeof desired === 'boolean' && stateBefore === desired) {
+      console.log('[toggle-captions] đã đúng trạng thái → giữ nguyên, chỉ đồng bộ');
+      send('cc-state', { active: stateBefore });
+      return;
+    }
 
     // Cách 1: inject Alt+Shift+C
     await injectToggleCaptionsKey();
@@ -250,6 +258,12 @@ function registerAll(app) {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
       shell.openExternal(url);
     }
+  });
+
+  // ── Clipboard (Electron native — đáng tin hơn navigator.clipboard ở renderer) ──
+  ipcMain.handle('copy-to-clipboard', (_, text) => {
+    try { clipboard.writeText(String(text ?? '')); return { ok: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
   });
 
   // ── Summary ───────────────────────────

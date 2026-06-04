@@ -13,16 +13,25 @@ function buildSummarizePrompt(captions) {
     .filter(c => c.original && c.original.trim())
     .map(c => `[${c.author}] ${c.original}`)
     .join('\n');
-    return `Bạn là trợ lý tổng hợp cuộc họn. Hãy tạo báo cáo cuộc họn chi tiết dạng Markdown từ transcript dưới.
+    return `Bạn là trợ lý tổng hợp cuộc họp. Hãy tạo báo cáo cuộc họp chi tiết dạng Markdown từ transcript dưới đây.
 
-Yêu cầu:
-- Viết hoàn toàn bằng ${state.targetLangLabel}
-- Cấu trúc Markdown rõ ràng: tiêu đề, mổi đầu mục, danh sách
-- Bao gồm các phần: Tổng quan, Chủ đề chính, Đặc vấn đề/Vấn đề nổi bật, Quyết định/Hành động tiếp theo
-- Giữ nguyên thuật ngữ IT (bug, sprint, deploy, PR, API...)
-- Không thêm nội dung không có trong transcript
+Yêu cầu trình bày:
+- Viết bằng ${state.targetLangLabel}.
+- Markdown chuẩn: dùng tiêu đề (## / ###), gạch đầu dòng "- " cho danh sách, in đậm **...** cho điểm quan trọng.
+- Các phần nên có: Tổng quan, Chủ đề chính, Vấn đề nổi bật, Quyết định / Hành động tiếp theo (kèm người phụ trách nếu có).
 
-Transcript cuộc họn:
+Quy tắc thuật ngữ (QUAN TRỌNG):
+- GIỮ NGUYÊN tiếng Anh / nguyên gốc, KHÔNG dịch sang ${state.targetLangLabel}: các thuật ngữ IT & kỹ thuật (bug, sprint, deploy, release, build, merge, PR, API, server, database, review, commit, branch, schedule, deadline, task, issue, ticket...), mọi từ tiếng Anh và từ katakana, cùng tên riêng (người, công ty, sản phẩm, dự án, công cụ). Chỉ dịch phần diễn giải xung quanh.
+
+Quy tắc bảng (QUAN TRỌNG):
+- Nếu nội dung có số liệu, mốc thời gian, lịch trình, so sánh, hoặc danh sách hạng mục nhiều thuộc tính → hãy trình bày bằng BẢNG Markdown để dễ so sánh/đánh giá. Mẫu:
+  | Hạng mục | Giá trị | Ghi chú |
+  | --- | --- | --- |
+  | ... | ... | ... |
+
+- Không bịa thêm nội dung không có trong transcript.
+
+Transcript cuộc họp:
 ${lines}`;
 }
 

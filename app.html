@@ -333,26 +333,32 @@
       border-radius: 5px;
       padding: 12px 14px;
       font-size: 12px;
-      line-height: 1.75;
+      line-height: 1.5;
       color: #d4d4d4;
-      white-space: pre-wrap;
+      white-space: normal;
       word-break: break-word;
       user-select: text;
       min-height: 200px;
-      max-height: calc(100vh - 220px);
     }
     .summary-body h1, .summary-body h2, .summary-body h3 {
-      color: #9cdcfe; margin: 10px 0 4px;
+      color: #9cdcfe; margin: 12px 0 4px;
     }
     .summary-body h1 { font-size: 15px; }
     .summary-body h2 { font-size: 13px; }
     .summary-body h3 { font-size: 12px; }
-    .summary-body ul, .summary-body ol { padding-left: 18px; }
-    .summary-body li { margin: 2px 0; }
+    .summary-body p { margin: 5px 0; }
+    .summary-body ul, .summary-body ol { padding-left: 20px; margin: 5px 0; }
+    .summary-body ul { list-style: disc; }
+    .summary-body ol { list-style: decimal; }
+    .summary-body li { margin: 1px 0; }
     .summary-body strong { color: #dcdcaa; }
     .summary-body em { color: #ce9178; }
     .summary-body code { background:#2a2a2a; border-radius:3px; padding:1px 4px; font-family:monospace; font-size:11px; }
     .summary-body hr { border-color: #3e3e42; margin: 10px 0; }
+    .summary-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 11.5px; }
+    .summary-body th, .summary-body td { border: 1px solid #3e3e42; padding: 4px 8px; text-align: left; vertical-align: top; }
+    .summary-body th { background: #2d2d30; color: #9cdcfe; font-weight: 600; }
+    .summary-body tbody tr:nth-child(even) td { background: #232323; }
     .summary-placeholder { color: #555; font-style: italic; text-align: center; padding: 40px 0; }
   </style>
 </head>
@@ -360,7 +366,7 @@
 
   <!-- Summary Modal -->
   <div class="modal-overlay" id="summary-modal">
-    <div class="modal" style="width:520px;max-height:calc(100vh - 40px);display:flex;flex-direction:column">
+    <div class="modal" style="width:72vw;max-width:1000px;min-width:340px;height:80vh;max-height:calc(100vh - 24px);display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-shrink:0">
         <h3 style="flex:1;margin:0">📋 Tóm tắt cuộc họn</h3>
         <button id="sum-export-btn" style="padding:4px 12px;font-size:12px;background:#1a4a1a;border-color:#4ec9b0;color:#4ec9b0" disabled>⬇ Xuất .md</button>
@@ -581,6 +587,8 @@
     function setCaptionsState(on) {
       captionsOn = on;
       ccBtn.classList.toggle('active', on);
+      // Đồng bộ icon theo trạng thái (⏹ đang chạy / ▶ chưa chạy) — bỏ qua khi đang chờ ⏳ sau click.
+      if (!ccBtn.classList.contains('loading')) ccBtn.textContent = on ? '⏹' : '▶';
       if (_currentSource === 'teams') {
         ccBtn.title = on ? 'Captions đang bật — click để tắt' : 'Captions đang tắt — click để bật';
       } else {
@@ -836,7 +844,7 @@
     }
     settingsBtn.addEventListener('click', openSettings);
     document.getElementById('settings-cancel').addEventListener('click', () => settingsModal.classList.remove('open'));
-    settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.remove('open'); });
+    // (Bỏ đóng khi click nền: popup chỉ đóng bằng Hủy / Lưu / nút ✕)
 
     sToggleVis.addEventListener('click', function() {
       const isPass = sApiKey.type === 'password';
@@ -1256,7 +1264,9 @@
       ccBtn.classList.add('loading');
       const prevText = ccBtn.textContent;
       ccBtn.textContent = '⏳';
-      api.toggleCaptions();
+      // Truyền ý định theo nút: ▶ (captionsOn=false) → muốn BẬT; ⏹ → muốn TẮT.
+      // Main sẽ không toggle nếu caption đã ở đúng trạng thái (tránh bấm ▶ làm tắt caption đang bật).
+      api.toggleCaptions(!captionsOn);
       setTimeout(() => {
         ccBtn.disabled = false;
         ccBtn.classList.remove('loading');
@@ -1422,23 +1432,45 @@
     const sumCopyBtn     = document.getElementById('sum-copy-btn');
     let _lastMarkdown    = '';
 
-    // Simple Markdown → HTML renderer
+    // Markdown → HTML renderer (line-based): hỗ trợ heading, list, bảng GFM, hr, inline.
     function md2html(md) {
-      return md
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
-        .replace(/^# (.+)$/gm,   '<h1>$1</h1>')
+      const escHtml = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const inline = s => escHtml(s)
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.+?)\*/g,     '<em>$1</em>')
-        .replace(/`(.+?)`/g,       '<code>$1</code>')
-        .replace(/^---+$/gm,       '<hr>')
-        .replace(/^[*\-] (.+)$/gm, '<li>• $1</li>')
-        .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-        .replace(/(<li>.*<\/li>\n?)+/g, s => `<ul>${s}</ul>`)
-        .replace(/\n{2,}/g, '</p><p>')
-        .replace(/\n/g, '<br>')
-        .replace(/^(.)/,'<p>$1').replace(/(.)$/,'$1</p>');
+        .replace(/`(.+?)`/g,       '<code>$1</code>');
+      const isSep = s => /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(s);
+      const cells = r => r.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(c => c.trim());
+
+      const lines = (md || '').replace(/\r\n/g,'\n').split('\n');
+      const out = [];
+      let i = 0, listType = null, para = [];
+      const closeList = () => { if (listType) { out.push(`</${listType}>`); listType = null; } };
+      const flushPara = () => { if (para.length) { out.push('<p>' + para.join('<br>') + '</p>'); para = []; } };
+
+      while (i < lines.length) {
+        const t = lines[i].trim();
+        if (t === '') { flushPara(); closeList(); i++; continue; }
+
+        // Bảng: dòng có "|" + dòng kế là dòng phân cách "---"
+        if (/\|/.test(t) && i + 1 < lines.length && isSep(lines[i + 1])) {
+          flushPara(); closeList();
+          const head = cells(lines[i]); i += 2;
+          let html = '<table><thead><tr>' + head.map(h => `<th>${inline(h)}</th>`).join('') + '</tr></thead><tbody>';
+          while (i < lines.length && lines[i].trim() !== '' && /\|/.test(lines[i])) {
+            html += '<tr>' + cells(lines[i]).map(c => `<td>${inline(c)}</td>`).join('') + '</tr>'; i++;
+          }
+          out.push(html + '</tbody></table>'); continue;
+        }
+        let m;
+        if ((m = t.match(/^(#{1,3})\s+(.+)$/))) { flushPara(); closeList(); const l = m[1].length; out.push(`<h${l}>${inline(m[2])}</h${l}>`); i++; continue; }
+        if (/^---+$/.test(t)) { flushPara(); closeList(); out.push('<hr>'); i++; continue; }
+        if ((m = t.match(/^[*\-]\s+(.+)$/))) { flushPara(); if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; } out.push(`<li>${inline(m[1])}</li>`); i++; continue; }
+        if ((m = t.match(/^\d+\.\s+(.+)$/))) { flushPara(); if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; } out.push(`<li>${inline(m[1])}</li>`); i++; continue; }
+        closeList(); para.push(inline(t)); i++;
+      }
+      flushPara(); closeList();
+      return out.join('');
     }
 
     document.getElementById('sum-btn').addEventListener('click', () => {
@@ -1447,7 +1479,7 @@
     document.getElementById('sum-close-btn').addEventListener('click', () => {
       summaryModal.classList.remove('open');
     });
-    summaryModal.addEventListener('click', e => { if (e.target === summaryModal) summaryModal.classList.remove('open'); });
+    // (Bỏ đóng khi click nền: popup chỉ đóng bằng nút ✕)
 
     sumGenerateBtn.addEventListener('click', async () => {
       if (!captionData.size) {
@@ -1504,10 +1536,13 @@
 
     sumCopyBtn.addEventListener('click', async () => {
       if (!_lastMarkdown) return;
-      await navigator.clipboard.writeText(_lastMarkdown);
-      const orig = sumCopyBtn.textContent;
-      sumCopyBtn.textContent = '✔ Đã copy';
-      setTimeout(() => { sumCopyBtn.textContent = orig; }, 1500);
+      let ok = false;
+      // Ưu tiên clipboard native của Electron (qua IPC) — đáng tin hơn navigator.clipboard
+      try { const r = await api.copyToClipboard(_lastMarkdown); ok = !!(r && r.ok); } catch {}
+      // Fallback Web Clipboard API nếu IPC không có/thất bại
+      if (!ok) { try { await navigator.clipboard.writeText(_lastMarkdown); ok = true; } catch {} }
+      sumCopyBtn.textContent = ok ? '✔ Đã copy' : '❌ Lỗi copy';
+      setTimeout(() => { sumCopyBtn.textContent = '⎘ Copy'; }, 1500);
     });
     // ── end Summary modal ──
 
