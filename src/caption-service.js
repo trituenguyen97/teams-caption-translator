@@ -143,6 +143,8 @@ async function runService() {
   // Theo dõi dòng cuối (dòng đang nói): chỉ dịch khi nó đứng yên ≥10s (người nói đã dừng)
   let _lastRowKey = '', _lastRowSince = 0;
   const LAST_ROW_SETTLE_MS = 10000;
+  // #B: chốt dòng cuối SỚM khi đã kết thúc câu (dấu 。！？), thay vì luôn chờ 10s → câu trọn vẹn, dịch tự nhiên hơn
+  const SENTENCE_END_RE = /[。．.！!？?]\s*$/;
 
   const toKey = (author, text) => `${author}::${text.replace(/[。、！？!?.,\s]+$/, '').trim()}`;
 
@@ -233,7 +235,10 @@ async function runService() {
     const lastRow = rows[rows.length - 1];
     const lastRowKey = lastRow ? toKey(lastRow.author, lastRow.text) : '';
     if (lastRowKey !== _lastRowKey) { _lastRowKey = lastRowKey; _lastRowSince = Date.now(); }
-    const lastRowSettled = !!lastRowKey && (Date.now() - _lastRowSince >= LAST_ROW_SETTLE_MS);
+    const lastRowSettled = !!lastRowKey && (
+      (Date.now() - _lastRowSince >= LAST_ROW_SETTLE_MS) ||   // người nói dừng lâu
+      SENTENCE_END_RE.test(lastRow.text)                       // hoặc câu đã kết thúc (#B)
+    );
 
     // Mọi dòng trừ dòng cuối; thêm dòng cuối nếu đã đứng yên 10s.
     const completedRows = lastRowSettled ? rows.slice() : rows.slice(0, -1);

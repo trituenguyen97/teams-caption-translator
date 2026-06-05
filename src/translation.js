@@ -162,6 +162,26 @@ function isLLMRefusal(output, input) {
   return refusalPatterns.some(p => p.test(output));
 }
 
+// ── Quality Estimation (chấm độ ngờ bản dịch — reference-free, #QE) ────
+// Mức A = tín hiệu chuỗi/độ dài S1–S5 (rẻ); Mức B = S6 logprob (độ tự tin model). Ngờ cao → fallback Google.
+const QE_THRESHOLD = 0.5;     // ngờ ≥ ngưỡng → ưu tiên Google (tinh chỉnh theo log thực tế)
+const _VI_DIACRITIC = /[ăâđêôơưĂÂĐÊÔƠƯạáàảãậấầẩẫắằẳẵặẹéèẻẽệếềểễọóòỏõộốồổỗợớờởỡụúùủũựứừửữỵýỳỷỹĐ]/;
+let _lastMilmmtQE = 1;        // độ ngờ lần MiLMMT gần nhất (local concurrency=1 → an toàn dùng biến module)
+
+function qeSuspicion(jaSrc, vi, avgLogprob) {
+  if (!vi || vi.trim().length < 2) return 1;                                        // rỗng / quá ngắn
+  let s = 0;
+  if (/[぀-ゟ゠-ヿ一-鿿]/.test(vi)) s += 0.6;                                          // S1: sót ký tự Nhật
+  if (vi.length > 10 && state.targetLang === 'Vietnamese' && !_VI_DIACRITIC.test(vi)) s += 0.5; // S2: không có dấu Việt
+  const r = vi.length / Math.max(1, (jaSrc || '').length);
+  if (r < 0.5 || r > 4) s += 0.3;                                                   // S3: tỉ lệ độ dài bất thường
+  if (/(\S+)(?:\s+\1){2,}/iu.test(vi)) s += 0.3;                                    // S4: lặp token ≥3 lần
+  if (isLLMRefusal(vi, jaSrc)) s += 0.6;                                            // S5: refusal
+  if (typeof avgLogprob === 'number')                                              // S6: độ tự tin (thang trượt)
+    s += Math.max(0, Math.min(0.6, (-avgLogprob - 0.55) / 0.5));
+  return Math.min(1, s);
+}
+
 // ── Text Preprocessing ────────────────────────────────
 const JA_FILLERS = [
   'えっと', 'ええと', 'あの', 'あのー', 'あのう',
@@ -180,7 +200,7 @@ const JA_FILLER_RE = new RegExp(
 // Người dùng có thể bổ sung từ/tên riêng vào đây.
 const JA_GLOSSARY = {
   'コードレビュー': 'code review', 'プルリクエスト': 'pull request', 'プルリク': 'PR',
-  'リファクタリング': 'refactoring', 'デプロイメント': 'deployment', 'デプロイ': 'deploy',
+  'リファクタリング': 'refactor', 'デプロイメント': 'deployment', 'デプロイ': 'deploy',
   'リリース': 'release', 'ロールバック': 'rollback', 'マージ': 'merge', 'コミット': 'commit',
   'ブランチ': 'branch', 'リポジトリ': 'repository', 'バックエンド': 'backend',
   'フロントエンド': 'frontend', 'データベース': 'database', 'サーバー': 'server', 'サーバ': 'server',
@@ -207,6 +227,50 @@ function preprocessText(text) {
   t = applyGlossary(t);                 // giữ thuật ngữ IT tiếng Anh (#1)
   t = t.replace(/\s{2,}/g, ' ').trim();
   return t || text;
+}
+
+// ── Hậu xử lý bản dịch (#A) ───────────────────────────
+// Output-glossary: ép thuật ngữ IT bị MT dịch SAI về tiếng Anh (chỉ cụm gần như chắc chắn — tránh hồi quy).
+const VI_TERM_FIX = {
+  'cú nhảy': 'sprint', 'nước rút': 'sprint',
+};
+const _viFixRe = Object.keys(VI_TERM_FIX).length
+  ? new RegExp('\\b(' + Object.keys(VI_TERM_FIX).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b', 'gi')
+  : null;
+
+// Làm câu tiếng Việt tự nhiên hơn sau khi dịch: chuẩn dấu câu/khoảng trắng, khử lặp artifact,
+// ép thuật ngữ, thêm tiểu từ lịch sự "ạ" theo thể です/ます của câu nguồn (giọng họp).
+// An toàn khi nguồn không phải Nhật / đích không phải Việt (các bước đặc thù tự bỏ qua).
+function postprocessTranslation(out, jaSrc) {
+  if (!out) return out;
+  let t = out;
+
+  // 1) Dấu câu full-width Nhật còn sót → ASCII
+  t = t.replace(/[。．]/g, '.').replace(/、/g, ', ').replace(/！/g, '!').replace(/？/g, '?')
+       .replace(/[「」『』]/g, '"').replace(/（/g, '(').replace(/）/g, ')').replace(/・/g, ' ');
+
+  // 2) Chuẩn khoảng trắng quanh dấu câu (giữ an toàn cho số: 3.5 / 1,000 không bị tách)
+  t = t.replace(/\s+([,.!?;:])/g, '$1')
+       .replace(/([.!?])(?=[^\s\d.!?])/g, '$1 ')
+       .replace(/,(?=[^\s\d])/g, ', ')
+       .replace(/\s{2,}/g, ' ').trim();
+
+  // 3) Khử cụm token lặp liền kề ≥3 lần (artifact loop của MT); giữ 2 lần (có thể trung thành nguồn)
+  t = t.replace(/(\S+)(?:\s+\1){2,}/gi, '$1');
+
+  const isVi = state.targetLang === 'Vietnamese';
+
+  // 4) Output glossary: ép thuật ngữ IT bị dịch sai về tiếng Anh
+  if (isVi && _viFixRe) t = t.replace(_viFixRe, m => VI_TERM_FIX[m.toLowerCase()] || m);
+
+  // 5) Khôi phục "review" khi MT dịch một phần nhưng còn NEO tiếng Anh (vd "xem xét code" → "review code").
+  //     Chỉ thay khi đi kèm neo (code/API/backend…) → KHÔNG đụng "xem xét"/"đánh giá" đứng riêng (an toàn).
+  if (isVi) t = t.replace(/\b(?:xem xét|đánh giá|rà soát)(?: lại)? (code|API|backend|frontend|server|build|database)\b/gi, 'review $1');
+
+  // 6) Viết hoa chữ cái đầu
+  t = t.replace(/^(\p{Ll})/u, c => c.toUpperCase());
+
+  return t.trim() || out;
 }
 
 // ── Provider Functions ────────────────────────────────
@@ -325,7 +389,8 @@ async function translateGoogleFree(text, tgtLang) {
   try {
     const j = JSON.parse(r.body);
     if (!Array.isArray(j) || !Array.isArray(j[0])) return null;
-    const result = j[0].map(seg => seg && seg[0]).filter(Boolean).join('').trim();
+    let result = j[0].map(seg => seg && seg[0]).filter(Boolean).join('').trim();
+    result = postprocessTranslation(result, text);   // #A: làm câu tự nhiên hơn
     if (result) console.log('[google-free] OK:', text.slice(0, 30), '→', result.slice(0, 30));
     return result || null;
   } catch (e) {
@@ -561,6 +626,7 @@ async function translateLocal(text, tgtLang) {
         return null;  // → fallback Google Free
       }
     }
+    out = postprocessTranslation(out, text);   // #A: làm câu tự nhiên hơn
     if (out) {
       const usage = j.usage ? ` | usage: ${j.usage.prompt_tokens}+${j.usage.completion_tokens}` : '';
       console.log('[local-llm] OK:', text.slice(0, 30), '→', out.slice(0, 30), usage);
@@ -610,6 +676,7 @@ async function translateLocalMiLMMT(text, tgtLang) {
     temperature: 0,
     top_k: 1,            // greedy theo model card
     cache_prompt: true,
+    n_probs: 1,          // #QE S6: trả logprob token để chấm độ tự tin
     stop: ['\n', `${src}:`, `${tgt}:`],
   });
 
@@ -632,9 +699,23 @@ async function translateLocalMiLMMT(text, tgtLang) {
     let out = (j.content || '').trim();
     // Bỏ prefix lặp lại nếu model tự thêm "Vietnamese:" / "Translation:"
     out = out.replace(/^(Vietnamese|Tiếng Việt|Translation|Output|[A-Z][a-z]+ \([A-Za-z]+\))\s*[:：]\s*/i, '').trim();
+    out = postprocessTranslation(out, text);   // #A: làm câu tự nhiên hơn
+    // #QE S6: avg logprob của token sinh ra (độ tự tin model)
+    let avgLp = null;
+    const cp = j.completion_probabilities;
+    if (Array.isArray(cp) && cp.length) {
+      let sum = 0, n = 0;
+      for (const tk of cp) {
+        const lp = typeof tk.logprob === 'number' ? tk.logprob
+          : (Array.isArray(tk.probs) && tk.probs[0] && tk.probs[0].prob > 0 ? Math.log(tk.probs[0].prob) : null);
+        if (lp != null) { sum += lp; n++; }
+      }
+      if (n) avgLp = sum / n;
+    }
+    _lastMilmmtQE = qeSuspicion(text, out, avgLp);   // #QE: orchestrator dùng để quyết định fallback
     if (out) {
       const usage = j.timings ? ` | ${(j.timings.predicted_per_second || 0).toFixed(1)} tok/s` : '';
-      console.log('[milmmt] OK:', text.slice(0, 30), '→', out.slice(0, 30), usage);
+      console.log('[milmmt] OK:', text.slice(0, 30), '→', out.slice(0, 30), `| QE=${_lastMilmmtQE.toFixed(2)}`, usage);
     }
     return out || null;
   } catch (e) {
@@ -653,9 +734,35 @@ async function checkLocalServer() {
   } catch { return { ok: true, models: [] }; }
 }
 
+// ── Translation Memory (cache câu, #TM) ──────────────
+const _TM_MAX = 500;
+const _tm = new Map();
+const _tmKey = (text) => `${state.provider}|${state.targetLang}|${normJa(text)}`;
+function tmGet(text) {
+  const k = _tmKey(text);
+  if (!_tm.has(k)) return undefined;
+  const v = _tm.get(k); _tm.delete(k); _tm.set(k, v);   // chạm → mới nhất (LRU)
+  return v;
+}
+function tmSet(text, val) {
+  const k = _tmKey(text);
+  if (_tm.has(k)) _tm.delete(k);
+  _tm.set(k, val);
+  if (_tm.size > _TM_MAX) _tm.delete(_tm.keys().next().value);   // đẩy cũ nhất
+}
+
 // ── Translation Orchestrator ──────────────────────────
 
+// Wrapper cache: tra TM trước; chỉ cache bản dịch THẬT (khác input) để tránh cache lỗi passthrough.
 async function translateText(text) {
+  const cached = tmGet(text);
+  if (cached !== undefined) return cached;
+  const result = await _translateUncached(text);
+  if (result && result !== text) tmSet(text, result);
+  return result;
+}
+
+async function _translateUncached(text) {
   const instant = lookupPhrase(text);
   if (instant) { console.log('[translate] phrase match:', text, '→', instant); return instant; }
 
@@ -682,16 +789,21 @@ async function translateText(text) {
   }
 
   if (state.provider === 'local') {
-    const lResult = state.localPreset === 'milmmt'
+    const isMiLMMT = state.localPreset === 'milmmt';
+    const lResult = isMiLMMT
       ? await translateLocalMiLMMT(text, state.targetLang)
       : await translateLocal(text, state.targetLang);
-    if (lResult && lResult !== text && !isLLMRefusal(lResult, text)) {
-      if (!/[぀-ゟ゠-ヿ一-鿿]/.test(lResult)) return lResult;
-    }
+    const lOk = lResult && lResult !== text && !isLLMRefusal(lResult, text)
+      && !/[぀-ゟ゠-ヿ一-鿿]/.test(lResult);
+    // #QE: chỉ tin MiLMMT khi độ ngờ thấp; ngờ cao (vd bịa tên / lệch nghĩa) → để Google xử lý
+    const suspicious = isMiLMMT && _lastMilmmtQE >= QE_THRESHOLD;
+    if (lOk && !suspicious) return lResult;
+    // MiLMMT ngờ hoặc lỗi → thử Google (thường chuẩn hơn cho tên/kanji)
     const gResult = await translateGoogleFree(text, state.targetLang);
-    if (gResult && gResult !== text && !isLLMRefusal(gResult, text)) {
-      if (!/[぀-ゟ゠-ヿ一-鿿]/.test(gResult)) return gResult;
-    }
+    if (gResult && gResult !== text && !isLLMRefusal(gResult, text)
+        && !/[぀-ゟ゠-ヿ一-鿿]/.test(gResult)) return gResult;
+    // Google fail → giữ MiLMMT (dù ngờ) còn hơn trả nguyên văn
+    if (lOk) return lResult;
     return text;
   }
 

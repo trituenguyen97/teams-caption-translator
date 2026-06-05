@@ -340,12 +340,13 @@
       user-select: text;
       min-height: 200px;
     }
-    .summary-body h1, .summary-body h2, .summary-body h3 {
+    .summary-body h1, .summary-body h2, .summary-body h3, .summary-body h4 {
       color: #9cdcfe; margin: 12px 0 4px;
     }
     .summary-body h1 { font-size: 15px; }
     .summary-body h2 { font-size: 13px; }
     .summary-body h3 { font-size: 12px; }
+    .summary-body h4 { font-size: 12px; font-weight: 600; }
     .summary-body p { margin: 5px 0; }
     .summary-body ul, .summary-body ol { padding-left: 20px; margin: 5px 0; }
     .summary-body ul { list-style: disc; }
@@ -1463,7 +1464,7 @@
           out.push(html + '</tbody></table>'); continue;
         }
         let m;
-        if ((m = t.match(/^(#{1,3})\s+(.+)$/))) { flushPara(); closeList(); const l = m[1].length; out.push(`<h${l}>${inline(m[2])}</h${l}>`); i++; continue; }
+        if ((m = t.match(/^(#{1,6})\s+(.+)$/))) { flushPara(); closeList(); const l = Math.min(m[1].length, 4); out.push(`<h${l}>${inline(m[2])}</h${l}>`); i++; continue; }
         if (/^---+$/.test(t)) { flushPara(); closeList(); out.push('<hr>'); i++; continue; }
         if ((m = t.match(/^[*\-]\s+(.+)$/))) { flushPara(); if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; } out.push(`<li>${inline(m[1])}</li>`); i++; continue; }
         if ((m = t.match(/^\d+\.\s+(.+)$/))) { flushPara(); if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; } out.push(`<li>${inline(m[1])}</li>`); i++; continue; }

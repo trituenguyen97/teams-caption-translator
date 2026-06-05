@@ -44,11 +44,24 @@ Cơ chế chung:
 - **Endpoint/giải mã khác nhau:** MiLMMT dùng `/completion` với prompt `Translate this from <nguồn> to <đích>:` + giải mã **greedy** (temperature 0) và **tự nhận dạng ngôn ngữ nguồn** (Nhật cho kana/kanji · Hàn cho hangul · còn lại tiếng Anh); Qwen3 dùng `/v1/chat/completions`.
 - Tự khởi động server khi bấm ▶. Nếu LLM cục bộ lỗi/chưa sẵn sàng → tự **fallback sang Google Translate (free)**.
 
+### Pipeline xử lý câu dịch (tăng độ chính xác & tự nhiên)
+
+Mỗi câu caption đi qua các bước sau (chủ yếu cho LOCAL/MiLMMT; phrase map & glossary áp cho mọi provider):
+
+1. **Từ điển câu cố định (phrase map)** — câu xã giao/họp hay gặp (`よろしくお願いします`, `お疲れ様です`, `承知しました`, `画面共有します`…) dịch **tức thì, chính xác**, bỏ qua model. Khớp linh hoạt: bỏ tiền tố thời gian/đệm (`今日は`, `では`…) và bắt biến thể ASR (vd rớt chữ `お`).
+2. **Glossary thuật ngữ IT** — katakana kỹ thuật (`デプロイ`, `スプリント`, `バックエンド`, `コードレビュー`…) được thay sang tiếng Anh **ngay trong câu nguồn** để giữ thuật ngữ (ra "sprint" thay vì "cú nhảy"). Phần tiếng Nhật hiển thị vẫn nguyên gốc.
+3. **Dịch** qua MiLMMT (greedy) / Qwen3 / cloud.
+4. **QE routing — chấm "độ ngờ"** *(chỉ MiLMMT)*: chấm nhanh chất lượng bằng tín hiệu chuỗi/độ dài (sót ký tự Nhật, không có dấu Việt, lặp, tỉ lệ độ dài bất thường) **+ độ tự tin token (logprob)**. Ngờ cao (vd bịa tên) → **fallback Google**; ngược lại giữ MiLMMT (offline). Ngưỡng tinh chỉnh được; log mỗi câu in `| QE=0.xx`.
+5. **Hậu xử lý** — chuẩn dấu câu (full-width → ASCII), khử lặp artifact, khôi phục cụm thuật ngữ bị dịch một phần khi còn neo tiếng Anh (vd "xem xét code" → "review code").
+6. **Bộ nhớ dịch (cache LRU)** — câu trùng/giống nhau trả tức thì, đảm bảo nhất quán.
+
+> Giữ được tiếng Anh: `sprint, backend, frontend, refactoring, code, review code, API`… Vài từ tần suất cao (`deploy`, `release`, `database`) MiLMMT vẫn dịch — đây là **trần của model MT 1B**; preset **Qwen3** (chat, biết tuân lệnh) giữ trọn thuật ngữ hơn nhưng chậm hơn.
+
 ### Tóm tắt & xuất file
 
 | Tính năng | Mô tả |
 |-----------|-------|
-| 📋 **Tóm tắt cuộc họp** | Tổng hợp transcript thành báo cáo Markdown (Tổng quan, Chủ đề, Vấn đề, Quyết định/Hành động) qua **ChatGPT** chạy trong cửa sổ ẩn — **không cần API key**. Xuất `.md` hoặc copy. |
+| 📋 **Tóm tắt cuộc họp** | Tổng hợp transcript (theo **tiếng Nhật gốc**) thành báo cáo Markdown (Tổng quan, Chủ đề, Vấn đề, Quyết định/Hành động) qua **ChatGPT** chạy trong cửa sổ ẩn — **không cần API key**. Prompt yêu cầu **giữ nguyên thuật ngữ IT/tiếng Anh/katakana + tên riêng** và **tự lập bảng** khi có số liệu/so sánh. Render đầy đủ heading (h1–h4), list, **bảng**. Xuất `.md` hoặc copy (clipboard native). |
 | 💾 **Xuất bản gốc** | Lưu transcript gốc (thời gian + người nói + nội dung) ra file `.txt`. |
 
 ### Ngôn ngữ đích hỗ trợ
@@ -142,6 +155,8 @@ Cửa sổ có thể ghim luôn trên đầu màn hình (📌).
 | 📋 Tóm tắt | Tổng hợp cuộc họp bằng AI |
 | Xóa | Xóa danh sách captions |
 
+> Popup **Cài đặt / Tóm tắt** chỉ đóng bằng nút **Hủy / Lưu / ✕** (không đóng khi click ra ngoài → tránh mất thao tác). Popup Tóm tắt **co giãn theo cỡ cửa sổ** (~70–80%). Nút ▶/⏹ tự đồng bộ icon theo trạng thái đang dịch.
+
 ### Output mẫu
 
 ```
@@ -184,7 +199,8 @@ src/
 ├── cdp-browser.js            # Kết nối CDP, tìm Teams/meeting, toggle caption, auto-setup CDP,
 │                             #   capture Teams token (WebSocket), tự động đổi ngôn ngữ STT
 │
-├── translation.js            # Các provider dịch + orchestrator + queue + phrase map + tiền xử lý
+├── translation.js            # Provider dịch + orchestrator + queue + phrase map + glossary IT
+│                             #   + QE routing (chấm độ ngờ → fallback) + hậu xử lý + cache câu (TM)
 ├── local-llm.js              # llama.cpp: tải binary, GPU detect, tải model GGUF, vòng đời server
 ├── audio-stt.js              # Quản lý stt-server.py + xử lý audio chunk
 │
@@ -205,8 +221,8 @@ src/
 Teams (WebView2)
     └─ CDP port 9222  ←──  Electron main (puppeteer-core)
                               ├─ poll [data-tid="closed-caption-text"] mỗi 200ms
-                              ├─ chờ câu hoàn chỉnh (kết câu) rồi mới dịch
-                              ├─ dịch qua provider (MS / Google / DeepL / Local LLM)
+                              ├─ chốt câu khi gặp dấu kết câu (。！？) — dịch câu trọn vẹn (#B)
+                              ├─ phrase map → glossary IT → dịch → QE routing → hậu xử lý → cache
                               ├─ chèn bản dịch dưới caption gốc trong Teams (MutationObserver)
                               └─ IPC → renderer (app.html) hiển thị danh sách
 ```
