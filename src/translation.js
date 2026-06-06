@@ -179,7 +179,9 @@ function isLLMRefusal(output, input) {
 }
 
 // ── Quality Estimation (chấm độ ngờ bản dịch — reference-free, #QE) ────
-// Mức A = tín hiệu chuỗi/độ dài S1–S5 (rẻ); Mức B = S6 logprob (độ tự tin model). Ngờ cao → fallback Google.
+// Mức A = tín hiệu chuỗi/độ dài S1–S5 (rẻ). Ngờ cao → fallback Google.
+// S6 (logprob, Mức B) GIỮ trong code nhưng MẶC ĐỊNH TẮT: translateLocalMiLMMT không gửi n_probs
+// nữa (chậm ~40%/câu vì vocab 262k) → avgLogprob=null → S6 không cộng. Bật lại nếu cần độ chính xác QE.
 const QE_THRESHOLD = 0.5;     // ngờ ≥ ngưỡng → ưu tiên Google (tinh chỉnh theo log thực tế)
 const _VI_DIACRITIC = /[ăâđêôơưĂÂĐÊÔƠƯạáàảãậấầẩẫắằẳẵặẹéèẻẽệếềểễọóòỏõộốồổỗợớờởỡụúùủũựứừửữỵýỳỷỹĐ]/;
 let _lastMilmmtQE = 1;        // độ ngờ lần MiLMMT gần nhất (local concurrency=1 → an toàn dùng biến module)
@@ -193,9 +195,25 @@ function qeSuspicion(jaSrc, vi, avgLogprob) {
   if (r < 0.5 || r > 4) s += 0.3;                                                   // S3: tỉ lệ độ dài bất thường
   if (/(\S+)(?:\s+\1){2,}/iu.test(vi)) s += 0.3;                                    // S4: lặp token ≥3 lần
   if (isLLMRefusal(vi, jaSrc)) s += 0.6;                                            // S5: refusal
-  if (typeof avgLogprob === 'number')                                              // S6: độ tự tin (thang trượt)
+  if (numScaleMismatch(jaSrc, vi)) s += 0.5;                                        // S7: lệch bậc số lớn (万/億/兆)
+  if (typeof avgLogprob === 'number')                                              // S6: độ tự tin (thang trượt; mặc định tắt)
     s += Math.max(0, Math.min(0.6, (-avgLogprob - 0.55) / 0.5));
   return Math.min(1, s);
+}
+
+// S7: lệch BẬC số lớn JP→VI. MiLMMT hay rớt đơn vị 万(10^4)/億(10^8)/兆(10^12):
+// vd "500万" (=5.000.000) → "500.000" (sai 10×). Đo thực: lỗi này S1–S6 đều bỏ sót.
+// Bắt khi: nguồn có <số>万/億/兆 mà output THIẾU cả số đủ chữ số LẪN từ chỉ bậc (nghìn/triệu/tỷ/vạn).
+// Số liệu sai → fallback Google (xử lý số chuẩn hơn). Reference-free, không cần logprob.
+const _SCALE_UNIT = { '万': 4, '億': 8, '兆': 12 };
+function numScaleMismatch(src, out) {
+  const m = (src || '').match(/(\d+)\s*([万億兆])/);
+  if (!m) return false;
+  if (/(nghìn|ngàn|triệu|tỷ|tỉ|vạn|ức)/i.test(out || '')) return false;   // có từ chỉ bậc → coi như ổn
+  const expDigits = m[1].replace(/^0+/, '').length + _SCALE_UNIT[m[2]];    // số chữ số của giá trị đầy đủ
+  const norm = (out || '').replace(/(?<=\d)[.,\s](?=\d)/g, '');            // gộp "500.000" → "500000"
+  const maxDigits = (norm.match(/\d+/g) || []).reduce((a, b) => Math.max(a, b.length), 0);
+  return maxDigits < expDigits;                                           // số lớn nhất vẫn thiếu bậc → lệch
 }
 
 // ── Text Preprocessing ────────────────────────────────
@@ -587,13 +605,18 @@ async function translateLocalMiLMMT(text, tgtLang) {
   if (src === tgt) return null;   // cùng ngôn ngữ → để fallback Google Free xử lý
 
   const prompt = `Translate this from ${src} to ${tgt}:\n${src}: ${text}\n${tgt}:`;
+  // n_predict adaptive theo độ dài nguồn: lưới an toàn chặn vòng lặp degenerate chạy tới 256 token
+  // (greedy+stop thường tự dừng sớm nên bình thường không chạm cap — hệ số rộng để KHÔNG cắt câu thật).
+  const nPredict = Math.min(256, Math.max(64, text.length * 2 + 32));
   const body = JSON.stringify({
     prompt,
-    n_predict: 256,
+    n_predict: nPredict,
     temperature: 0,
     top_k: 1,            // greedy theo model card
     cache_prompt: true,
-    n_probs: 1,          // #QE S6: trả logprob token để chấm độ tự tin
+    // ⚠ KHÔNG bật n_probs: đo thực trên MiLMMT (vocab 262k) → n_probs:1 làm CHẬM ~40% mỗi câu
+    //   (tính+serialize softmax/sort 262k mục mỗi token) mà output greedy KHÔNG đổi. Bỏ logprob →
+    //   QE mất S6 (confidence) nhưng vẫn còn S1–S5 (chuỗi/độ dài/lặp/refusal) + post-process. Đáng đổi.
     stop: ['\n', `${src}:`, `${tgt}:`],
   });
 
@@ -617,19 +640,9 @@ async function translateLocalMiLMMT(text, tgtLang) {
     // Bỏ prefix lặp lại nếu model tự thêm "Vietnamese:" / "Translation:"
     out = out.replace(/^(Vietnamese|Tiếng Việt|Translation|Output|[A-Z][a-z]+ \([A-Za-z]+\))\s*[:：]\s*/i, '').trim();
     out = postprocessTranslation(out, text);   // #A: làm câu tự nhiên hơn
-    // #QE S6: avg logprob của token sinh ra (độ tự tin model)
-    let avgLp = null;
-    const cp = j.completion_probabilities;
-    if (Array.isArray(cp) && cp.length) {
-      let sum = 0, n = 0;
-      for (const tk of cp) {
-        const lp = typeof tk.logprob === 'number' ? tk.logprob
-          : (Array.isArray(tk.probs) && tk.probs[0] && tk.probs[0].prob > 0 ? Math.log(tk.probs[0].prob) : null);
-        if (lp != null) { sum += lp; n++; }
-      }
-      if (n) avgLp = sum / n;
-    }
-    _lastMilmmtQE = qeSuspicion(text, out, avgLp);   // #QE: orchestrator dùng để quyết định fallback
+    // #QE: chấm độ ngờ bằng S1–S5 (chuỗi/độ dài/lặp/refusal). S6 (avg logprob) đã bỏ cùng n_probs
+    // để tăng tốc ~40%/câu — qeSuspicion nhận avgLogprob=null sẽ tự bỏ qua S6.
+    _lastMilmmtQE = qeSuspicion(text, out, null);   // #QE: orchestrator dùng để quyết định fallback
     if (out) {
       const usage = j.timings ? ` | ${(j.timings.predicted_per_second || 0).toFixed(1)} tok/s` : '';
       console.log('[milmmt] OK:', text.slice(0, 30), '→', out.slice(0, 30), `| QE=${_lastMilmmtQE.toFixed(2)}`, usage);
