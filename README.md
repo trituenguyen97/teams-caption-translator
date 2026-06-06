@@ -25,23 +25,20 @@
 | 🌐 **MS Translator** | Microsoft Edge / Teams translator API | Không cần key (token lấy tự động) |
 | 🌐 **Google Translate** | Endpoint công khai (browser extension API) | Không cần key (có thể bị rate-limit) |
 | 🌐 **DeepL** | Endpoint extension không chính thức | Không cần key |
-| 🖥️ **LOCAL TRANSLATE** | LLM cục bộ — llama.cpp, chọn model **Qwen3** (đa ngôn ngữ) hoặc **MiLMMT** (JP→VI) | Tải model trong app (~1.22–1.78 GB), chạy offline |
+| 🖥️ **LOCAL TRANSLATE** | LLM cục bộ — llama.cpp + **MiLMMT-46-1B** (model dịch JP→VI chuyên dụng) | Tải model trong app (~1.22 GB), chạy offline |
 
 > Cloud LLM (Groq / OpenAI / Gemini) **đã được loại bỏ** khỏi phần dịch thuật. Nếu cấu hình cũ còn lưu một trong các provider này, app sẽ tự migrate về `google-free`.
 
-**LOCAL TRANSLATE** chạy llama.cpp server cục bộ (OpenAI-compatible) với **2 model preset** — chọn trong **⚙️ → 🌐 Dịch thuật → "Mô hình dịch"**:
+**LOCAL TRANSLATE** chạy llama.cpp server cục bộ (OpenAI-compatible) với **một model dịch chuyên dụng — MiLMMT-46-1B**:
 
-| Preset | Model (Q4_K_M) | Dung lượng | Đặc điểm |
-|--------|----------------|-----------|----------|
-| **Qwen3 1.7B** *(mặc định)* | Qwen3-1.7B + Qwen3-0.6B (draft) | ~1.78 GB | Đa ngôn ngữ (cả 8 ngôn ngữ đích), kiểu chat. Kèm **speculative decoding** (draft model → tăng tốc). Tự offload GPU nếu có. |
-| **MiLMMT 1B** | MiLMMT-46-1B-v0.1 (Xiaomi · nền Gemma3-1B · 46 ngôn ngữ) | ~1.22 GB | Model **dịch chuyên dụng** (đặc biệt JP→VI), nhẹ hơn, **không draft**. Ưu tiên chạy **CPU** (nhanh nhất theo benchmark). |
+| Model (Q4_K_M) | Dung lượng | Đặc điểm |
+|----------------|-----------|----------|
+| **MiLMMT-46-1B-v0.1** (Xiaomi · nền Gemma3-1B · 46 ngôn ngữ) | ~1.22 GB | Model **dịch máy chuyên dụng** (đặc biệt mạnh JP→VI, **phiên âm tên riêng chuẩn**), nhẹ, **không draft**. Ưu tiên chạy **CPU** (nhanh nhất theo benchmark). |
 
-Cơ chế chung:
+Cơ chế:
 - **Tải sẵn nhiều binary 1 lần** từ GitHub Releases (`ggml-org/llama.cpp`): **cpu + vulkan** (luôn) và **cuda** (chỉ khi có GPU NVIDIA), mỗi backend ở `llama-server/{cpu,vulkan,cuda}/` — **không phải tải lại** khi đổi máy/GPU.
-- **Tự chọn backend khi khởi động server** tùy preset:
-  - **Qwen3** — theo GPU phát hiện được: NVIDIA → CUDA · AMD/Intel Arc/iGPU → Vulkan · không có → CPU. Số thread = P-core, ctx 4096, có flash-attention + KV q8_0 (CPU) và draft speculative.
-  - **MiLMMT** — **ưu tiên CPU** (`-t 4 -c 2048 --poll 0 --mlock`, idle ~0% CPU), chỉ offload khi có **GPU NVIDIA rời (dGPU)**. *Lý do:* đo thực trên Core Ultra 5 225H, MiLMMT chạy CPU-4t (~533 ms/câu) **nhanh hơn ~25%** so với iGPU-Vulkan (~665 ms) — model 1 phần + vocab 262k khiến iGPU (chia sẻ RAM) bị nghẽn băng thông.
-- **Endpoint/giải mã khác nhau:** MiLMMT dùng `/completion` với prompt `Translate this from <nguồn> to <đích>:` + giải mã **greedy** (temperature 0) và **tự nhận dạng ngôn ngữ nguồn** (Nhật cho kana/kanji · Hàn cho hangul · còn lại tiếng Anh); Qwen3 dùng `/v1/chat/completions`.
+- **Tự chọn backend khi khởi động server:** **ưu tiên CPU** (`-t 4 -c 2048 --poll 0 --mlock`, idle ~0% CPU), chỉ offload khi có **GPU NVIDIA rời (dGPU)**. *Lý do:* đo thực trên Core Ultra 5 225H, MiLMMT chạy CPU-4t (~533 ms/câu) **nhanh hơn ~25%** so với iGPU-Vulkan (~665 ms) — model 1 phần + vocab 262k khiến iGPU (chia sẻ RAM) bị nghẽn băng thông.
+- **Endpoint/giải mã:** `/completion` với prompt `Translate this from <nguồn> to <đích>:` + giải mã **greedy** (temperature 0, top_k 1) và **tự nhận dạng ngôn ngữ nguồn** (Nhật cho kana/kanji · Hàn cho hangul · còn lại tiếng Anh).
 - Tự khởi động server khi bấm ▶. Nếu LLM cục bộ lỗi/chưa sẵn sàng → tự **fallback sang Google Translate (free)**.
 
 ### Pipeline xử lý câu dịch (tăng độ chính xác & tự nhiên)
@@ -50,12 +47,12 @@ Mỗi câu caption đi qua các bước sau (chủ yếu cho LOCAL/MiLMMT; phras
 
 1. **Từ điển câu cố định (phrase map)** — câu xã giao/họp hay gặp (`よろしくお願いします`, `お疲れ様です`, `承知しました`, `画面共有します`…) dịch **tức thì, chính xác**, bỏ qua model. Khớp linh hoạt: bỏ tiền tố thời gian/đệm (`今日は`, `では`…) và bắt biến thể ASR (vd rớt chữ `お`).
 2. **Glossary thuật ngữ IT** — katakana kỹ thuật (`デプロイ`, `スプリント`, `バックエンド`, `コードレビュー`…) được thay sang tiếng Anh **ngay trong câu nguồn** để giữ thuật ngữ (ra "sprint" thay vì "cú nhảy"). Phần tiếng Nhật hiển thị vẫn nguyên gốc.
-3. **Dịch** qua MiLMMT (greedy) / Qwen3 / cloud.
+3. **Dịch** qua MiLMMT (greedy); nếu lỗi/đáng ngờ → fallback Google.
 4. **QE routing — chấm "độ ngờ"** *(chỉ MiLMMT)*: chấm nhanh chất lượng bằng tín hiệu chuỗi/độ dài (sót ký tự Nhật, không có dấu Việt, lặp, tỉ lệ độ dài bất thường) **+ độ tự tin token (logprob)**. Ngờ cao (vd bịa tên) → **fallback Google**; ngược lại giữ MiLMMT (offline). Ngưỡng tinh chỉnh được; log mỗi câu in `| QE=0.xx`.
 5. **Hậu xử lý** — chuẩn dấu câu (full-width → ASCII), khử lặp artifact, khôi phục cụm thuật ngữ bị dịch một phần khi còn neo tiếng Anh (vd "xem xét code" → "review code").
 6. **Bộ nhớ dịch (cache LRU)** — câu trùng/giống nhau trả tức thì, đảm bảo nhất quán.
 
-> Giữ được tiếng Anh: `sprint, backend, frontend, refactoring, code, review code, API`… Vài từ tần suất cao (`deploy`, `release`, `database`) MiLMMT vẫn dịch — đây là **trần của model MT 1B**; preset **Qwen3** (chat, biết tuân lệnh) giữ trọn thuật ngữ hơn nhưng chậm hơn.
+> Giữ được tiếng Anh: `sprint, backend, frontend, refactoring, code, review code, API`… Vài từ tần suất cao (`deploy`, `release`, `database`) MiLMMT vẫn dịch — đây là **trần của model MT 1B**, đã được giảm thiểu bằng glossary + QE→Google cho các ca khó (tên riêng, số liệu).
 
 ### Tóm tắt & xuất file
 
@@ -109,7 +106,7 @@ App sẽ tự kết nối CDP, phát hiện meeting, theo dõi caption và hiể
 ### Chọn provider dịch / ngôn ngữ
 
 - Dropdown ngôn ngữ ở header chọn ngôn ngữ đích.
-- **⚙️ Cài đặt** → tab **🌐 Dịch thuật** → chọn provider. Với **LOCAL TRANSLATE**: chọn **Mô hình dịch** (Qwen3 đa ngôn ngữ *hoặc* MiLMMT JP→VI) rồi bấm **📥 Tải Local Translate** để tải binary + model — chỉ 1 lần (Qwen3 kèm draft ~1.78 GB; MiLMMT không draft ~1.22 GB).
+- **⚙️ Cài đặt** → tab **🌐 Dịch thuật** → chọn provider. Với **LOCAL TRANSLATE**: bấm **📥 Tải Local Translate** để tải binary + model **MiLMMT** — chỉ 1 lần (~1.22 GB, không draft).
 
 ---
 

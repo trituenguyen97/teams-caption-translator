@@ -107,19 +107,18 @@ app.whenReady().then(() => {
   }
   state.apiKey        = Store.get('apiKey',        '');
   state.captureSource = Store.get('captureSource', 'teams');
-  state.localPreset        = Store.get('localPreset',        state.localPreset);
   state.localBaseUrl       = Store.get('localBaseUrl',       state.localBaseUrl);
   state.localModel         = Store.get('localModel',         state.localModel);
-  state.localDraftModel    = Store.get('localDraftModel',    state.localDraftModel);
   state.localBinaryVariant = Store.get('localBinaryVariant', state.localBinaryVariant);
-  // Migrate: model Llama3-8B 1.58-bit (ternary TQ1_0/TQ2_0) đã bị gỡ → ép về Qwen3 1.7B Q4
-  const _isRemovedModel = f => /1\.58|tq1_0|tq2_0|bitnet/i.test(f || '');
-  if (_isRemovedModel(state.localModel) || _isRemovedModel(state.localDraftModel)) {
-    console.log('[migrate] local model', state.localModel, '→ Qwen3-1.7B Q4 (Llama3-8B 1.58-bit đã bị gỡ)');
-    state.localModel      = 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
-    state.localDraftModel = 'Qwen_Qwen3-0.6B-Q4_0.gguf';
-    Store.set('localModel',      state.localModel);
-    Store.set('localDraftModel', state.localDraftModel);
+  // App giờ chỉ dùng MiLMMT-46 (model dịch JP→VI). Ép preset='milmmt' + migrate mọi model cũ
+  // đã gỡ (Qwen3, Llama3-8B 1.58-bit ternary) về MiLMMT để không gọi nhánh/model không còn tồn tại.
+  state.localPreset = 'milmmt';
+  Store.set('localPreset', 'milmmt');
+  const _isRemovedModel = f => /qwen|1\.58|tq1_0|tq2_0|bitnet/i.test(f || '');
+  if (!state.localModel || _isRemovedModel(state.localModel)) {
+    console.log('[migrate] local model', state.localModel, '→ MiLMMT-46-1B (model cũ đã bị gỡ)');
+    state.localModel = 'MiLMMT-46-1B-v0.1.Q4_K_M.gguf';
+    Store.set('localModel', state.localModel);
   }
   registerAll(app);
   createWindow();

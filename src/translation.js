@@ -10,11 +10,10 @@ const EDGE_TOKEN_TTL = 9 * 60 * 1000;
 // Concurrent translation: cloud OK với 3 (rate limit), local CPU phải 1 (tránh chia BW RAM)
 const getMaxConcurrent = () => state.provider === 'local' ? 1 : 3;
 
-// Local LLM defaults — Qwen3-1.7B Q4_K_M (main) + Qwen3-0.6B Q4_0 (draft, same vocab)
+// Local LLM defaults — MiLMMT-46-1B Q4_K_M (model dịch JP→VI chuyên dụng, local duy nhất)
 const LOCAL_DEFAULTS = {
   baseUrl: 'http://127.0.0.1:8080',
-  model:   'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
-  draftModel: 'Qwen_Qwen3-0.6B-Q4_0.gguf',
+  model:   'MiLMMT-46-1B-v0.1.Q4_K_M.gguf',
 };
 
 const LANG_NAMES = {
@@ -547,97 +546,6 @@ async function translateViaTeamsToken(text) {
 let _localLastFailTs = 0;
 const LOCAL_FAIL_COOLDOWN_MS = 8000;
 
-// Prompt tối ưu cho small local LLM (1.7B-7B) — song ngữ ép đúng target language.
-// Mục tiêu: model 1.7B hay "lock" sang tiếng Anh khi system prompt toàn tiếng Anh.
-// Giải pháp: dùng tên ngôn ngữ ở cả 2 dạng (English + native label) + ví dụ rõ ràng.
-function buildLocalPrompt(tgtLang, targetLabel) {
-  return `Bạn là bộ máy dịch thuật. Bản dịch ra PHẢI là ${targetLabel} (${tgtLang}).
-You are a translation engine. The output MUST be in ${targetLabel} (${tgtLang}), NOT English (unless target = English).
-
-RULES:
-- Output ONLY the translation. NO prefix, suffix, explanation, apology.
-- Never refuse, never comment on input.
-- Keep IT terms English: bug, sprint, deploy, PR, API, DB, backend, frontend, pipeline, commit, branch, merge, repo.
-- Keep proper nouns unchanged.
-
-Examples (input → output in ${targetLabel}):
-よろしくお願いします → Rất mong được hợp tác.
-ありがとうございます → Cảm ơn bạn.
-お疲れ様でした → Bạn đã làm việc vất vả, cảm ơn.
-ブリッジ → Cầu nối (BrSE).
-ベトナムと日本をつなぐ会社 → Công ty kết nối Việt Nam và Nhật Bản.
-バグの修正をデプロイします → Sẽ deploy bản fix bug.`;
-}
-
-async function translateLocal(text, tgtLang) {
-  if (Date.now() - _localLastFailTs < LOCAL_FAIL_COOLDOWN_MS) return null;
-
-  const baseUrl = state.localBaseUrl || LOCAL_DEFAULTS.baseUrl;
-  const model   = state.localModel   || LOCAL_DEFAULTS.model;
-  const targetLabel = state.targetLangLabel || tgtLang;
-
-  const body = JSON.stringify({
-    model,
-    messages: [
-      { role: 'system', content: buildLocalPrompt(tgtLang, targetLabel) + '\n\n/no_think' },
-      { role: 'user',   content: `Dịch sang ${targetLabel} (output in ${targetLabel} only):\n${text}` },
-    ],
-    max_tokens: 200,
-    temperature: 0.1,
-    top_p: 0.9,
-    stream: false,
-    cache_prompt: true,
-    n_predict: 200,
-    stop: ['\n\n', 'Input:', 'Output:', 'English:', 'Translation:'],
-    chat_template_kwargs: { enable_thinking: false },
-  });
-
-  const r = await httpPostLocal(baseUrl, '/v1/chat/completions',
-    { 'Content-Type': 'application/json' }, body, 25000);
-
-  if (r.status === 0) {
-    _localLastFailTs = Date.now();
-    console.warn('[local-llm] không kết nối được', baseUrl, '|', r.error || 'unknown');
-    return null;
-  }
-  if (r.status !== 200) {
-    console.warn('[local-llm] HTTP', r.status, '|', (r.body || '').slice(0, 200));
-    return null;
-  }
-  try {
-    const j = JSON.parse(r.body);
-    if (j.error) { console.warn('[local-llm] error:', j.error.message || j.error); return null; }
-    let out = j.choices?.[0]?.message?.content;
-    // Strip <think>...</think> block (Qwen3/DeepSeek reasoning models)
-    out = (out || '')
-      .replace(/<think>[\s\S]*?<\/think>/gi, '')
-      .replace(/<think>[\s\S]*$/i, '')
-      .replace(/^[\s\n]+/, '')
-      .trim();
-
-    // Bỏ prefix "Dịch:", "Translation:", "Output:", "Vietnamese:"... mà model có thể thêm
-    out = out.replace(/^(Dịch|Bản dịch|Translation|Output|Vietnamese|Tiếng Việt)\s*[:：]\s*/i, '').trim();
-
-    // Validate target language: nếu Vietnamese mà output không có ký tự Việt → reject
-    if (out && out.length > 10 && state.targetLang === 'Vietnamese') {
-      const hasViChars = /[ăâđêôơưĂÂĐÊÔƠƯạáàảãậấầẩẫắằẳẵặẹéèẻẽệếềểễọóòỏõộốồổỗợớờởỡụúùủũựứừửữỵýỳỷỹĐ]/.test(out);
-      if (!hasViChars) {
-        console.warn('[local-llm] Output không có dấu Việt — có thể model trả tiếng Anh:', out.slice(0, 80));
-        return null;  // → fallback Google Free
-      }
-    }
-    out = postprocessTranslation(out, text);   // #A: làm câu tự nhiên hơn
-    if (out) {
-      const usage = j.usage ? ` | usage: ${j.usage.prompt_tokens}+${j.usage.completion_tokens}` : '';
-      console.log('[local-llm] OK:', text.slice(0, 30), '→', out.slice(0, 30), usage);
-    }
-    return out || null;
-  } catch (e) {
-    console.warn('[local-llm] parse error:', e.message);
-    return null;
-  }
-}
-
 // ── MiLMMT-46 (Xiaomi, Gemma3-1B MT) — completion endpoint ──
 // Model dịch chuyên dụng 46 ngôn ngữ. Dùng prompt format gốc (KHÔNG chat template):
 //   Translate this from <src> to <tgt>:\n<src>: <text>\n<tgt>:
@@ -789,14 +697,12 @@ async function _translateUncached(text) {
   }
 
   if (state.provider === 'local') {
-    const isMiLMMT = state.localPreset === 'milmmt';
-    const lResult = isMiLMMT
-      ? await translateLocalMiLMMT(text, state.targetLang)
-      : await translateLocal(text, state.targetLang);
+    // Local = MiLMMT-46 (model dịch JP→VI chuyên dụng, duy nhất). /completion greedy + QE.
+    const lResult = await translateLocalMiLMMT(text, state.targetLang);
     const lOk = lResult && lResult !== text && !isLLMRefusal(lResult, text)
       && !/[぀-ゟ゠-ヿ一-鿿]/.test(lResult);
     // #QE: chỉ tin MiLMMT khi độ ngờ thấp; ngờ cao (vd bịa tên / lệch nghĩa) → để Google xử lý
-    const suspicious = isMiLMMT && _lastMilmmtQE >= QE_THRESHOLD;
+    const suspicious = _lastMilmmtQE >= QE_THRESHOLD;
     if (lOk && !suspicious) return lResult;
     // MiLMMT ngờ hoặc lỗi → thử Google (thường chuẩn hơn cho tên/kanji)
     const gResult = await translateGoogleFree(text, state.targetLang);
@@ -866,5 +772,5 @@ module.exports = {
   translateViaEdge, translateViaTeamsToken, PROVIDER_PRIORITY,
   storeTeamsToken, parseJwtAudience,
   buildSystemPrompt,
-  translateLocal, translateLocalMiLMMT, checkLocalServer, LOCAL_DEFAULTS,
+  translateLocalMiLMMT, checkLocalServer, LOCAL_DEFAULTS,
 };

@@ -18,14 +18,12 @@ module.exports = {
   provider: 'google-free',
   apiKey: '',
 
-  // Local LLM (llama.cpp server, OpenAI-compatible) — Qwen3 setup cho Japanese IT meetings
-  // localPreset: 'qwen3' (chat, đa ngôn ngữ, có draft/speculative — auto-detect GPU) | 'milmmt' (completion, JP→VI chuyên dụng)
-  // Backend (benchmark Ultra 5 225H): MiLMMT nhanh nhất trên CPU-t4 → ưu tiên CPU (chỉ offload nếu có dGPU NVIDIA);
-  // Qwen3 nhanh nhất trên iGPU/GPU → auto-detect. Xem selectVariantForPreset trong local-llm.js.
-  localPreset: 'qwen3',
+  // Local LLM (llama.cpp server, OpenAI-compatible) — MiLMMT-46-1B JP→VI chuyên dụng (model local duy nhất)
+  // localPreset luôn 'milmmt' (giữ field cho selectVariantForPreset). MiLMMT dùng /completion, greedy, không draft.
+  // Backend: MiLMMT nhanh nhất trên CPU-t4 → ưu tiên CPU; chỉ offload khi có dGPU NVIDIA (CUDA).
+  localPreset: 'milmmt',
   localBaseUrl: 'http://127.0.0.1:8080',
-  localModel:      'Qwen_Qwen3-1.7B-Q4_K_M.gguf',
-  localDraftModel: 'Qwen_Qwen3-0.6B-Q4_0.gguf',
+  localModel:      'MiLMMT-46-1B-v0.1.Q4_K_M.gguf',
   localServerProc: null,
   localServerPort: 8080,
   localBinaryVariant: 'cpu',   // cpu | vulkan | cuda | sycl — để biết có offload GPU không

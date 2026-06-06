@@ -62,12 +62,10 @@ function pickVariant(available, gpu) {
 // Bản chọn hiện tại (sync, dùng cache GPU cho UI)
 function selectedVariant() { return pickVariant(listInstalledVariants(), _gpuCache); }
 
-// Chọn variant theo preset. Benchmark thực (Core Ultra 5 225H, 18 lượt/cấu hình):
+// Chọn variant cho MiLMMT. Benchmark thực (Core Ultra 5 225H, 18 lượt/cấu hình):
 //   MiLMMT  CPU -t4 = 533ms  |  iGPU = 665ms  → CPU nhanh hơn ~25% (1 model + vocab 262k, iGPU chia sẻ RAM).
-//   Qwen3   iGPU   = 605ms  |  CPU = chậm (draft tranh nhân) → Qwen3 hợp GPU.
 // → MiLMMT ưu tiên CPU; chỉ offload khi có GPU NVIDIA rời (CUDA, VRAM riêng nên không nghẽn RAM).
-//   Các preset khác giữ auto-detect (pickVariant: cuda > vulkan > cpu).
-function selectVariantForPreset(available, gpu, preset) {
+function selectVariantForPreset(available, gpu, preset = 'milmmt') {
   available = (available && available.length) ? available : listInstalledVariants();
   if (preset === 'milmmt') {
     if (gpu && gpu.vendor === 'nvidia' && available.includes('cuda')) return 'cuda';
@@ -463,10 +461,8 @@ function resolveModelPath(name) {
 }
 
 function serverStatus() {
-  const modelName = state.localModel || 'Qwen_Qwen3-1.7B-Q4_K_M.gguf';
-  const draftName = state.localDraftModel || 'Qwen_Qwen3-0.6B-Q4_0.gguf';
+  const modelName = state.localModel || 'MiLMMT-46-1B-v0.1.Q4_K_M.gguf';
   const m = resolveModelPath(modelName);
-  const dr = resolveModelPath(draftName);
   const installed = listInstalledVariants();
   const selected = selectVariantForPreset(installed, _gpuCache, state.localPreset);
   return {
@@ -477,9 +473,6 @@ function serverStatus() {
     modelReady:  m.found,
     modelPath:   m.path,
     modelFuzzy:  m.fuzzy ? m.actualName : null,
-    draftReady:  dr.found,
-    draftPath:   dr.path,
-    draftFuzzy:  dr.fuzzy ? dr.actualName : null,
     running:     !!(state.localServerProc && !state.localServerProc.killed),
     pid:         state.localServerProc ? state.localServerProc.pid : null,
     port:        state.localServerPort || 8080,
@@ -497,28 +490,26 @@ function detectPCores() {
   return Math.max(2, total - 1); // Small CPU
 }
 
-async function startServer({ port = 8080, ctxSize, threads, draftMax = 8, draftMin = 2, ngl } = {}) {
+async function startServer({ port = 8080, ctxSize, threads, ngl } = {}) {
   if (state.localServerProc) return { ok: true, alreadyRunning: true, pid: state.localServerProc.pid };
-  const preset = state.localPreset || 'qwen3';
-  const isMiLMMT = preset === 'milmmt';
   const st = serverStatus();
   if (!st.binaryReady) return { ok: false, error: 'Chưa tải llama-server binary' };
   if (!st.modelReady)  return { ok: false, error: `Chưa tải model: ${path.basename(st.modelPath)}` };
 
-  // ── TỰ CHỌN binary theo GPU + preset (không tải lại). MiLMMT ưu tiên CPU (xem selectVariantForPreset) ──
+  // ── TỰ CHỌN binary theo GPU (không tải lại). MiLMMT ưu tiên CPU (xem selectVariantForPreset) ──
   const gpu = await detectGpu();
   const installed = listInstalledVariants();
-  const variant = selectVariantForPreset(installed, gpu, preset);
+  const variant = selectVariantForPreset(installed, gpu, 'milmmt');
   state.localBinaryVariant = variant;
   const exe = variantExe(variant);
   if (!fs.existsSync(exe)) return { ok: false, error: `Binary '${variant}' chưa tải` };
 
   // MiLMMT (REPORT_speedup.md): 4 threads (KHÔNG SMT/HT) là điểm ngọt, ctx 2048 đủ cho dịch câu.
-  const t   = threads || (isMiLMMT ? 4 : detectPCores());
-  const ctx = ctxSize || (isMiLMMT ? 2048 : 4096);
+  const t   = threads || 4;
+  const ctx = ctxSize || 2048;
   const gpuLayers = (ngl !== undefined) ? ngl : (variant === 'cpu' ? 0 : 99);
   const onGpu = gpuLayers > 0;
-  console.log(`[local-llm] auto-select: preset=${preset} | GPU="${gpu.name || 'none'}" (${gpu.vendor}) | đã cài=[${installed.join(', ')}] → dùng '${variant}', -ngl=${gpuLayers}`);
+  console.log(`[local-llm] auto-select: GPU="${gpu.name || 'none'}" (${gpu.vendor}) | đã cài=[${installed.join(', ')}] → dùng '${variant}', -ngl=${gpuLayers}`);
 
   const args = [
     '-m',  st.modelPath,
@@ -530,31 +521,14 @@ async function startServer({ port = 8080, ctxSize, threads, draftMax = 8, draftM
     '-ngl', String(gpuLayers),  // 0 = CPU only, 99 = offload tất cả lên Vulkan/CUDA
   ];
 
-  if (isMiLMMT) {
-    // ── Tăng tốc MiLMMT theo REPORT_speedup.md ── (binary cpu/vulkan/cuda tự chọn như Qwen3)
-    // --poll 0  : luồng ngủ giữa request → idle ~0% CPU, không lag việc khác
-    // --mlock   : ghim model trong RAM (~1GB), tránh swap → latency ổn định
-    // CPU: KHÔNG -fa (không lợi ở ctx ngắn, -t4 còn chậm hơn — đã kiểm chứng); GPU: -fa auto
-    // KHÔNG draft/speculative : llama.cpp build này không expose tốt + lợi ích thấp trên CPU
-    // greedy temp 0 + top_k 1 : truyền theo từng request trong translateLocalMiLMMT
-    args.push('--poll', '0', '--mlock');
-    if (onGpu) args.push('-fa', 'auto');   // chỉ bật fa khi offload GPU (iGPU Vulkan / CUDA)
-    console.log(`[local-llm] spawn (MiLMMT: variant=${variant}, -ngl=${gpuLayers}, -t=${t}, -c=${ctx}, --poll 0 --mlock, fa=${onGpu ? 'auto' : 'off'}):`, exe);
-  } else {
-    args.push('--no-mmap');   // load thẳng vào RAM
-    // Flash-attention + KV cache quant: chỉ ép trên CPU.
-    // Trên Vulkan/CUDA, KV q8_0 hỗ trợ hạn chế → ép attention rớt về CPU → dùng -fa auto + KV f16.
-    if (onGpu) {
-      args.push('-fa', 'auto');
-    } else {
-      args.push('-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0');
-    }
-    if (st.draftReady) {
-      args.push('-md', st.draftPath, '--spec-draft-n-max', String(draftMax), '--spec-draft-n-min', String(draftMin));
-      if (onGpu) args.push('-ngld', String(gpuLayers));  // offload draft model lên GPU luôn
-    }
-    console.log(`[local-llm] spawn (variant=${variant}, -ngl=${gpuLayers}${onGpu && st.draftReady ? ', -ngld=' + gpuLayers : ''}, -t=${t}, fa=${onGpu ? 'auto' : 'on'}, kv=${onGpu ? 'f16' : 'q8_0'}):`, exe);
-  }
+  // ── Tăng tốc MiLMMT theo REPORT_speedup.md ── (binary cpu/vulkan/cuda tự chọn)
+  // --poll 0  : luồng ngủ giữa request → idle ~0% CPU, không lag việc khác
+  // --mlock   : ghim model trong RAM (~1GB), tránh swap → latency ổn định
+  // CPU: KHÔNG -fa (không lợi ở ctx ngắn, -t4 còn chậm hơn — đã kiểm chứng); GPU: -fa auto
+  // greedy temp 0 + top_k 1 : truyền theo từng request trong translateLocalMiLMMT
+  args.push('--poll', '0', '--mlock');
+  if (onGpu) args.push('-fa', 'auto');   // chỉ bật fa khi offload GPU (iGPU Vulkan / CUDA)
+  console.log(`[local-llm] spawn (MiLMMT: variant=${variant}, -ngl=${gpuLayers}, -t=${t}, -c=${ctx}, --poll 0 --mlock, fa=${onGpu ? 'auto' : 'off'}):`, exe);
 
   return new Promise((resolve) => {
     const proc = spawn(exe, args, {
