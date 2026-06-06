@@ -178,11 +178,6 @@
     }
     .win-card.selected .win-title { color:#7cb8ef; }
 
-    .api-status { font-size: 10px; margin-top: 6px; padding: 4px 8px; border-radius: 3px; display: none; }
-    .api-status.ok { display: block; background: #1a3a1a; color: #4ec9b0; border: 1px solid #2a5a2a; }
-    .api-status.err { display: block; background: #3a1a1a; color: #f88; border: 1px solid #5a2a2a; }
-    .api-status.warn { display: block; background: #3a3a1a; color: #dcdcaa; border: 1px solid #5a5a2a; }
-
     @keyframes blink {
       0%, 100% { opacity: 1; } 50% { opacity: 0.2; }
     }
@@ -399,14 +394,8 @@
         <div style="margin-bottom:12px">
           <label>Dịch vụ</label>
           <select id="s-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
-            <optgroup label="── Dịch từng câu (word-by-word) ──">
-              <option value="teams-token">MS Translator</option>
-              <option value="google-free">Google Translate</option>
-              <option value="deepl">DeepL</option>
-            </optgroup>
-            <optgroup label="── Dịch offline ──">
-              <option value="local">🖥️ LOCAL TRANSLATE</option>
-            </optgroup>
+            <option value="online">🌐 Online</option>
+            <option value="local">🖥️ Offline</option>
           </select>
           <div class="hint" id="s-provider-note" style="margin-top:4px"></div>
         </div>
@@ -421,58 +410,6 @@
           <div class="hint" id="s-key-hint"></div>
         </div>
 
-        <!-- LOCAL TRANSLATE panel — minimal -->
-        <div id="s-local-row" style="margin-bottom:12px;display:none">
-          <div id="s-local-card" style="background:#1a2535;border:1px solid #264f78;border-radius:5px;padding:14px">
-            <div id="s-local-summary" style="font-size:11px;color:#9db4d8;margin-bottom:10px;line-height:1.6">
-              Đang kiểm tra…
-            </div>
-            <div style="margin-bottom:10px">
-              <label style="font-size:11px;color:#9db4d8;display:block;margin-bottom:4px">Mô hình dịch</label>
-              <div style="padding:5px 8px;font-size:12px;background:#2a2a2a;border:1px solid #3e3e42;border-radius:4px;color:#ccc">
-                MiLMMT 1B — JP→VI chuyên dụng (Xiaomi · Gemma3-1B · 46 ngôn ngữ)
-              </div>
-              <input type="hidden" id="s-local-preset" value="milmmt">
-              <div id="s-preset-desc" style="font-size:10px;color:#777;margin-top:4px;line-height:1.5"></div>
-            </div>
-            <div id="s-gpu-line" style="font-size:11px;margin-bottom:10px;line-height:1.5;color:#9db4d8"></div>
-            <button id="s-dl-all" style="width:100%;padding:8px;font-size:12px;background:#1a4a78;border-color:#3794ff;color:#fff">
-              📥 Tải Local Translate
-            </button>
-            <div id="s-dl-progress-wrap" style="display:none;margin-top:10px">
-              <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:#aaa;margin-bottom:3px">
-                <span id="s-dl-stage">Đang chuẩn bị…</span>
-                <span id="s-dl-pct">0%</span>
-              </div>
-              <div style="background:#0d0d0d;border-radius:3px;overflow:hidden;height:6px">
-                <div id="s-dl-bar" style="background:#4ec9b0;height:100%;width:0%;transition:width 0.2s"></div>
-              </div>
-              <div id="s-dl-bytes" style="font-size:10px;color:#777;margin-top:3px">0 B / 0 B</div>
-            </div>
-          </div>
-
-          <!-- HIDDEN elements giữ ref cho JS cũ — không hiển thị -->
-          <div style="display:none">
-            <span id="s-bin-status"></span>
-            <span id="s-model-status"></span>
-            <span id="s-srv-status"></span>
-            <span id="s-gpu-info"></span>
-            <span id="s-dl-all-status"></span>
-            <select id="s-bin-variant"><option value="auto" selected>auto</option></select>
-            <button id="s-bin-download"></button>
-            <input id="s-model-url"><input id="s-local-model">
-            <button id="s-model-download"></button>
-            <input id="s-local-url" value="http://127.0.0.1:8080">
-            <button id="s-srv-start"></button><button id="s-srv-stop"></button>
-            <button id="s-local-test"></button><span id="s-local-test-status"></span>
-            <a id="s-toggle-advanced" href="#"></a>
-            <div id="s-local-advanced"></div>
-            <div id="s-bin-progress-wrap"><div id="s-bin-progress"></div><div id="s-bin-progress-text"></div></div>
-            <div id="s-model-progress-wrap"><div id="s-model-progress"></div><div id="s-model-progress-text"></div></div>
-          </div>
-        </div>
-
-        <div class="api-status" id="api-status"></div>
       </div>
 
       <!-- Tab 2: Nguồn dịch -->
@@ -564,17 +501,17 @@
     const ccBtn       = document.getElementById('cc-btn');
     const settingsBtn = document.getElementById('settings-btn');
     const settingsModal = document.getElementById('settings-modal');
-    const apiStatus     = document.getElementById('api-status');
 
     let autoScroll  = true;
     let pinned      = false;
     let count       = 0;
     let captionsOn  = false;
     let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
-    let _currentProvider = 'groq';  // theo dõi provider hiện tại
+    let _currentProvider = 'online';  // theo dõi provider hiện tại
     const PROVIDER_NAMES = {
-      'teams-token': 'MS Translator', 'google-free': 'Google Translate',
-      deepl: 'DeepL', local: 'LOCAL TRANSLATE',
+      online: 'Online (auto)', local: 'LOCAL TRANSLATE',
+      // legacy — store cũ chưa migrate vẫn hiển đúng tên
+      'teams-token': 'MS Translator', 'google-free': 'Google Translate', deepl: 'DeepL',
     };
     let _mediaRecorder  = null;
     let _audioStream    = null;
@@ -607,7 +544,7 @@
     // Kiểm tra API key và lấy nguồn dịch khi khởi động
     api.getSettings().then(s => {
       _currentSource = s.captureSource || 'teams';
-      const prov = s.provider || 'groq';
+      const prov = s.provider || 'online';
       _currentProvider = prov;
       const provInfo = PROVIDER_INFO[prov];
       const needsKey = !(provInfo && provInfo.noKey);
@@ -746,13 +683,11 @@
 
     // ── Settings modal ──
     const PROVIDER_INFO = {
+      online: { label: '', placeholder: '', hint: 'Google Translator, MS Translator, DeepL', link: '', showModel: false, noKey: true },
       'teams-token': { label: '', placeholder: '', hint: 'Dùng Microsoft Edge Translator API miễn phí — không cần API key', link: '', showModel: false, noKey: true },
       'google-free': { label: '', placeholder: '', hint: 'Dùng Google Translate public endpoint — không cần API key (có thể bị rate-limit nếu dùng quá nhiều)', link: '', showModel: false, noKey: true },
       deepl:  { label: '', placeholder: '', hint: 'Free 500K ký tự/tháng — không cần API key', link: '', showModel: false, noKey: true },
-      groq:   { label: 'Groq API Key', placeholder: 'gsk_...', hint: 'Free: 14,400 req/day — tự fallback model premium → fast khi fail', link: 'https://console.groq.com/keys', showModel: false },
-      openai: { label: 'OpenAI API Key', placeholder: 'sk-...', hint: 'Trả phí theo dùng — tự fallback gpt-4o → gpt-3.5 khi fail', link: 'https://platform.openai.com/api-keys', showModel: false },
-      gemini: { label: 'Gemini API Key', placeholder: 'AIza...', hint: 'Free: 1500 req/day, 1M ctx — tự fallback 2.0 → 1.5 khi fail', link: 'https://aistudio.google.com/apikey', showModel: false },
-      local:  { label: '', placeholder: '', hint: 'LOCAL TRANSLATE — dịch hoàn toàn offline, mọi cấu hình tự động.', link: '', showModel: false, noKey: true, isLocal: true },
+      local:  { label: '', placeholder: '', hint: 'Dịch local offline dưới máy', link: '', showModel: false, noKey: true, isLocal: true },
       duckai:  { label: '', placeholder: '', hint: 'DuckDuckGo AI — embedded browser, không key. Lần đầu có thể hiện cửa sổ để dismiss cookie/popup, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
       copilot: { label: '', placeholder: '', hint: 'Microsoft Copilot — embedded browser, không key. Lần đầu có thể hiện cửa sổ để dismiss cookie banner/welcome modal, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
       chatgpt: { label: '', placeholder: '', hint: 'ChatGPT — embedded browser, không key (dùng chế độ logged-out). Lần đầu có thể hiện cửa sổ để dismiss "Stay logged out"/cookie banner, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
@@ -771,16 +706,9 @@
     const sMicDevice   = document.getElementById('s-mic-device');
 
     function applyProviderUI(provider) {
-      const info = PROVIDER_INFO[provider] || PROVIDER_INFO.groq;
+      const info = PROVIDER_INFO[provider] || PROVIDER_INFO.online;
       const isNoKey = !!info.noKey;
-      const isLocal = !!info.isLocal;
       document.getElementById('s-key-row').style.display = isNoKey ? 'none' : '';
-      const localRow = document.getElementById('s-local-row');
-      if (localRow) localRow.style.display = isLocal ? '' : 'none';
-      if (isLocal) {
-        if (typeof fillDefaultUrls === 'function') fillDefaultUrls();
-        if (typeof refreshLocalStatus === 'function') refreshLocalStatus();
-      }
       sKeyLabel.textContent    = info.label;
       sApiKey.placeholder      = info.placeholder;
       const noteEl = document.getElementById('s-provider-note');
@@ -793,21 +721,6 @@
       }
       sKeyHint.textContent = info.hint || '';
       sApiKey.value = _providerKeys[provider] || '';
-      updateTranslateStatus(provider);
-    }
-
-    function updateTranslateStatus(provider) {
-      const info = PROVIDER_INFO[provider];
-      if (info && info.noKey) {
-        apiStatus.className  = 'api-status ok';
-        apiStatus.textContent = '✅ ' + info.hint;
-      } else if (sApiKey.value.trim()) {
-        apiStatus.className  = 'api-status ok';
-        apiStatus.textContent = '✓ API key đã được lưu';
-      } else {
-        apiStatus.className  = 'api-status warn';
-        apiStatus.textContent = '⚠ Chưa có API key — captions sẽ hiển nguyên gốc không dịch';
-      }
     }
 
     function applyCaptureUI(source) {
@@ -868,12 +781,7 @@
         const provKeys = s.providerKeys || {};
         Object.assign(_providerKeys, provKeys);
 
-        // Load Local LLM config
-        sLocalUrl.value   = s.localBaseUrl || 'http://127.0.0.1:8080';
-        applyPreset('milmmt', false);   // chỉ MiLMMT — set model/url + mô tả
-        sLocalTestStatus.textContent = '';
-
-        sProvider.value = s.provider || 'groq';
+        sProvider.value = s.provider || 'online';
         sProvider._prevProvider = sProvider.value;
         applyProviderUI(sProvider.value);
         // Source tab
@@ -907,340 +815,15 @@
         providerKeys:    { ..._providerKeys },
         captureSource:   sCapture.value,
         micDeviceId:     sMicDevice.value,
-        localPreset:     'milmmt',
-        localBaseUrl:    sLocalUrl.value.trim()   || 'http://127.0.0.1:8080',
-        localModel:      sLocalModel.value.trim() || currentPreset().model,
       });
-    });
-
-    // ── Local LLM UI ──
-    const sLocalRow         = document.getElementById('s-local-row');
-    const sLocalPreset      = document.getElementById('s-local-preset');
-    const sPresetDesc       = document.getElementById('s-preset-desc');
-    const sLocalUrl         = document.getElementById('s-local-url');
-    const sLocalModel       = document.getElementById('s-local-model');
-    const sLocalTest        = document.getElementById('s-local-test');
-    const sLocalTestStatus  = document.getElementById('s-local-test-status');
-    const sBinStatus        = document.getElementById('s-bin-status');
-    const sBinVariant       = document.getElementById('s-bin-variant');
-    const sBinDownload      = document.getElementById('s-bin-download');
-    const sBinProgWrap      = document.getElementById('s-bin-progress-wrap');
-    const sBinProg          = document.getElementById('s-bin-progress');
-    const sBinProgText      = document.getElementById('s-bin-progress-text');
-    const sModelStatus      = document.getElementById('s-model-status');
-    const sModelUrl         = document.getElementById('s-model-url');
-    const sModelDl          = document.getElementById('s-model-download');
-    const sModelProgWrap    = document.getElementById('s-model-progress-wrap');
-    const sModelProg        = document.getElementById('s-model-progress');
-    const sModelProgText    = document.getElementById('s-model-progress-text');
-    const sSrvStatus        = document.getElementById('s-srv-status');
-    const sSrvStart         = document.getElementById('s-srv-start');
-    const sSrvStop          = document.getElementById('s-srv-stop');
-    const sDlAll            = document.getElementById('s-dl-all');
-    const sDlAllStatus      = document.getElementById('s-dl-all-status');
-
-    // ── Model preset (chỉ MiLMMT — model dịch JP→VI local duy nhất; URL đã verify) ──
-    const MODEL_PRESETS = {
-      milmmt: {
-        label: 'MiLMMT 1B',
-        model:    'MiLMMT-46-1B-v0.1.Q4_K_M.gguf',
-        modelUrl: 'https://huggingface.co/mradermacher/MiLMMT-46-1B-v0.1-GGUF/resolve/main/MiLMMT-46-1B-v0.1.Q4_K_M.gguf',
-        hasDraft: false,
-        draft:    '',
-        draftUrl: '',
-        modelSize: 1.1 * 1024 ** 3,
-        draftSize: 0,
-        totalLabel: '~1.22 GB',
-        desc: 'Dịch chuyên dụng JP→VI (Xiaomi · Gemma3-1B · 46 ngôn ngữ). Chạy CPU 4 threads · --poll 0 · --mlock (nhanh nhất theo benchmark, ~0.5s/câu, idle ~0% CPU); chỉ offload khi có GPU NVIDIA rời.',
-      },
-    };
-    function currentPreset() { return MODEL_PRESETS.milmmt; }
-
-    // Áp dụng preset → input ẩn (model/url) + size cho thanh tiến trình. save=true: lưu vào settings.
-    function applyPreset(presetKey, save) {
-      const p = MODEL_PRESETS.milmmt;
-      sLocalPreset.value = 'milmmt';
-      sModelUrl.value   = p.modelUrl;
-      sLocalModel.value = p.model;
-      _dlSize['model:main']  = p.modelSize;
-      _dlSize['model:draft'] = 0;
-      if (sPresetDesc) sPresetDesc.textContent = p.desc;
-      if (save) api.saveSettings({ localPreset: 'milmmt', localModel: p.model });
-    }
-    function fillDefaultUrls() { applyPreset('milmmt', false); }
-
-    function fmtBytes(n) {
-      if (!n) return '0 B';
-      const u = ['B','KB','MB','GB','TB'];
-      let i = 0;
-      while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-      return n.toFixed(n < 10 ? 2 : 1) + ' ' + u[i];
-    }
-
-    const sLocalSummary = document.getElementById('s-local-summary');
-    const sGpuLine      = document.getElementById('s-gpu-line');
-    const sDlProgWrap   = document.getElementById('s-dl-progress-wrap');
-    const sDlStage      = document.getElementById('s-dl-stage');
-    const sDlPct        = document.getElementById('s-dl-pct');
-    const sDlBar        = document.getElementById('s-dl-bar');
-    const sDlBytes      = document.getElementById('s-dl-bytes');
-
-    async function refreshLocalStatus() {
-      try {
-        try { await api.detectGpu(); } catch {}   // warm cache GPU để serverStatus chọn đúng variant
-        const st = await api.localStatus();
-        // Sync fuzzy filename về settings (giữ logic auto-match cũ)
-        if (st.modelFuzzy && sLocalModel) sLocalModel.value = st.modelFuzzy;
-
-        const p = currentPreset();
-        const allReady = st.binaryReady && st.modelReady;
-        if (allReady) {
-          const runLabel = st.running ? ` · ▶ server đang chạy (PID ${st.pid})` : '';
-          sLocalSummary.innerHTML = `✅ <b>Đã sẵn sàng</b> · <b>${p.label}</b>${runLabel}<br><span style="color:#777">Binary tự chọn theo GPU khi start — chỉ bấm ▶ caption để dùng.</span>`;
-          sDlAll.disabled = true;
-          sDlAll.textContent = '✓ Đã tải xong';
-          sDlAll.style.background = '#1a4a1a';
-          sDlAll.style.borderColor = '#4ec9b0';
-        } else {
-          const missing = [];
-          if (!st.binaryReady) missing.push('llama-server');
-          if (!st.modelReady)  missing.push('model dịch');
-          sLocalSummary.innerHTML = `🖥️ <b>LOCAL TRANSLATE</b> — dịch offline (<b>${p.label}</b>)<br>` +
-            `<span style="color:#dcdcaa">Cần tải: ${missing.join(' + ')} (${p.totalLabel} tổng)</span>`;
-          sDlAll.disabled = false;
-          sDlAll.textContent = '📥 Tải Local Translate';
-          sDlAll.style.background = '#1a4a78';
-          sDlAll.style.borderColor = '#3794ff';
-        }
-
-        // ── Dòng trạng thái GPU: backend đã tải sẵn + backend sẽ tự chọn khi start ──
-        if (sGpuLine) {
-          try {
-            const gpu = await api.detectGpu();                 // { vendor, name, variant, hint }
-            const installed = st.installedVariants || [];      // các backend đã tải: cpu/vulkan/cuda
-            const selected = st.binaryVariant || 'cpu';        // backend sẽ dùng theo GPU hiện tại
-            const gpuName = gpu.name || '(không thấy GPU)';
-            let msg, color;
-            if (!st.binaryReady) {
-              color = '#777';
-              msg = `🎮 Phát hiện: <b>${gpuName}</b> → sẽ dùng <b>${gpu.variant}</b> (bấm Tải để cài sẵn cpu + gpu)`;
-            } else {
-              const onGpu = selected !== 'cpu';
-              color = onGpu ? '#4ec9b0' : '#9db4d8';
-              msg = `🎮 GPU: <b>${gpuName}</b><br>` +
-                `<span style="color:#9db4d8">Đã cài sẵn: <b>${installed.join(', ') || 'none'}</b> · ` +
-                `tự chọn khi start → đang dùng <b>${selected}</b> ${onGpu ? '(offload GPU)' : '(CPU)'}</span>`;
-            }
-            sGpuLine.style.color = color;
-            const reLink = st.binaryReady
-              ? `<br><a href="#" id="s-gpu-redl" style="color:#4ec9b0">↻ Tải lại tất cả binary</a>`
-              : '';
-            sGpuLine.innerHTML = msg + reLink;
-            const re = document.getElementById('s-gpu-redl');
-            if (re) re.addEventListener('click', async (e) => {
-              e.preventDefault();
-              sGpuLine.innerHTML = '⏳ Dừng server + tải lại tất cả binary…';
-              try { await api.stopLocalServer(); } catch {}    // unlock llama-server.exe trước khi ghi đè
-              _binOnly = true;
-              const r = await api.downloadLlamaBinary('auto');  // → tải tất cả (cpu + vulkan [+ cuda nếu NVIDIA])
-              _binOnly = false;
-              sDlProgWrap.style.display = 'none';
-              sGpuLine.innerHTML = (r && r.ok)
-                ? `✅ Đã cài: <b>${(r.installed || []).join(', ')}</b> · sẽ dùng <b>${r.selected || '?'}</b> — bấm ▶ caption.`
-                : `❌ Tải lại lỗi: ${r ? r.error : 'unknown'}`;
-              refreshLocalStatus();
-            });
-          } catch { sGpuLine.textContent = ''; }
-        }
-      } catch (e) { console.warn(e); }
-    }
-
-    function normalizeFilename(fn, defaultFn) {
-      fn = (fn || '').trim() || defaultFn;
-      if (!/\.gguf$/i.test(fn)) fn += '.gguf';
-      return fn;
-    }
-
-    // ESTIMATE size cho progress tổng (cập nhật khi nhận content-length thực)
-    const _dlSize = { binary: 120 * 1024 * 1024, 'model:main': 1.1 * 1024 ** 3, 'model:draft': 0 };
-    const _dlLoaded = { binary: 0, 'model:main': 0, 'model:draft': 0 };
-    let _dlActiveTask = null;
-    let _binOnly = false;   // true khi chỉ tải lại mỗi binary (link "↻ Tải lại binary") → % theo riêng binary
-
-    function updateProgressUI(task, p) {
-      // Reset wrap visible
-      sDlProgWrap.style.display = '';
-      _dlActiveTask = task;
-
-      // Tải xong tất cả binary (cpu + vulkan [+ cuda])
-      if (p.stage === 'all-done') {
-        if (_binOnly) {
-          sDlStage.textContent = '✅ Đã cài: ' + ((p.installed || []).join(', '));
-          sDlBar.style.width = '100%'; sDlBar.style.background = '#4ec9b0'; sDlPct.textContent = '100%';
-        } else { _dlLoaded.binary = _dlSize.binary; }  // đánh dấu binary xong cho aggregate
-        return;
-      }
-
-      // Tải lại CHỈ binary: hiển thị % theo từng variant (không gộp vào tổng → tránh kẹt ~2%)
-      if (_binOnly && task === 'binary') {
-        const vlabel = p.variant ? ` [${p.variant}${p.sub ? '/' + p.sub : ''}]` : '';
-        if (p.stage === 'metadata') { sDlStage.textContent = 'Tải binaries (cpu + GPU) — lấy thông tin…'; return; }
-        if (p.stage === 'extracting') { sDlStage.textContent = 'Giải nén binary' + vlabel + '…'; sDlBar.style.background = '#dcdcaa'; return; }
-        if (p.stage === 'done') { sDlStage.textContent = 'Tải binary' + vlabel + ' ✓'; sDlBar.style.background = '#4ec9b0'; return; }
-        const pctB = p.total ? (p.loaded / p.total) * 100 : 0;
-        sDlStage.textContent = 'Đang tải binary' + vlabel + '…';
-        sDlBar.style.width = pctB.toFixed(1) + '%';
-        sDlBar.style.background = '#3794ff';
-        sDlPct.textContent = pctB.toFixed(1) + '%';
-        sDlBytes.textContent = `${fmtBytes(p.loaded || 0)} / ${fmtBytes(p.total || 0)}`;
-        return;
-      }
-
-      // Số phần tải tùy preset (MiLMMT không có draft → 2 phần)
-      const nParts = _dlSize['model:draft'] > 0 ? 3 : 2;
-      const stageMap = { binary: `[1/${nParts}] Đang tải llama-server`, 'model:main': `[2/${nParts}] Đang tải model chính`, 'model:draft': `[3/${nParts}] Đang tải draft model` };
-      if (p.stage === 'metadata') { sDlStage.textContent = stageMap[task] + ' — lấy thông tin…'; return; }
-      if (p.stage === 'extracting') { sDlStage.textContent = `[1/${nParts}] Giải nén binary…`; sDlBar.style.background = '#dcdcaa'; return; }
-      if (p.stage === 'done') {
-        _dlLoaded[task] = _dlSize[task] || _dlLoaded[task];
-        sDlStage.textContent = stageMap[task] + ' ✓';
-      } else {
-        sDlStage.textContent = stageMap[task] || 'Đang tải…';
-        if (p.total) _dlSize[task] = p.total;
-        _dlLoaded[task] = p.loaded || 0;
-      }
-      // Aggregate
-      const totalSize   = _dlSize.binary + _dlSize['model:main'] + _dlSize['model:draft'];
-      const totalLoaded = _dlLoaded.binary + _dlLoaded['model:main'] + _dlLoaded['model:draft'];
-      const pct = totalSize > 0 ? (totalLoaded / totalSize) * 100 : 0;
-      sDlBar.style.width = pct.toFixed(1) + '%';
-      sDlBar.style.background = pct >= 99 ? '#4ec9b0' : '#3794ff';
-      sDlPct.textContent = pct.toFixed(1) + '%';
-      sDlBytes.textContent = `${fmtBytes(totalLoaded)} / ${fmtBytes(totalSize)}`;
-    }
-
-    api.onLocalProgress(({ task, ...p }) => updateProgressUI(task, p));
-
-    sBinDownload.addEventListener('click', async () => {
-      sBinDownload.disabled = true;
-      sBinProgWrap.style.display = '';
-      sBinProg.style.width = '0%';
-      sBinProgText.textContent = 'Bắt đầu…';
-      const r = await api.downloadLlamaBinary(sBinVariant.value);
-      sBinDownload.disabled = false;
-      if (!r.ok) { sBinProgText.textContent = '❌ ' + (r.error || 'lỗi'); sBinProg.style.background = '#f88'; }
-      refreshLocalStatus();
-    });
-
-    async function doDownloadModel(kind, urlInput, nameInput, dlBtn) {
-      const url = urlInput.value.trim();
-      if (!url) { sLocalTestStatus.style.color = '#f88'; sLocalTestStatus.textContent = '⚠ Paste URL GGUF vào ô trên'; return; }
-      const filename = normalizeFilename(nameInput.value, 'MiLMMT-46-1B-v0.1.Q4_K_M.gguf');
-      nameInput.value = filename;  // reflect normalized name (auto-add .gguf)
-      // Lưu filename vào settings ngay để serverStatus dùng đúng tên
-      api.saveSettings({ localModel: filename });
-      dlBtn.disabled = true;
-      const r = await api.downloadModel({ kind, url, filename });
-      dlBtn.disabled = false;
-      if (!r.ok) {
-        sModelProgWrap.style.display = '';
-        sModelProgText.textContent = '❌ ' + (r.error || 'lỗi');
-      }
-      refreshLocalStatus();
-    }
-    sModelDl.addEventListener('click', () => doDownloadModel('main',  sModelUrl, sLocalModel, sModelDl));
-
-    // Auto-save filename khi user blur khỏi input (không cần bấm Lưu)
-    sLocalModel.addEventListener('change', () => {
-      const fn = normalizeFilename(sLocalModel.value, 'MiLMMT-46-1B-v0.1.Q4_K_M.gguf');
-      sLocalModel.value = fn;
-      api.saveSettings({ localModel: fn });
-      refreshLocalStatus();
-    });
-
-    sDlAll.addEventListener('click', async () => {
-      applyPreset('milmmt', true);   // chốt model/url + lưu settings
-      const p = currentPreset();
-      sDlAll.disabled = true;
-      sDlAll.textContent = '⏳ Đang tải…';
-      // Reset progress counters
-      _dlLoaded.binary = 0; _dlLoaded['model:main'] = 0; _dlLoaded['model:draft'] = 0;
-      sDlProgWrap.style.display = '';
-      sDlBar.style.width = '0%';
-      sDlPct.textContent = '0%';
-      sDlBytes.textContent = '0 B / ' + p.totalLabel;
-      sDlStage.textContent = 'Đang chuẩn bị…';
-
-      let failed = false;
-      try {
-        const st = await api.localStatus();
-        if (!st.binaryReady) {
-          sDlStage.textContent = `[1/2] Tải binaries (cpu + GPU — tự chọn khi start)…`;
-          const r = await api.downloadLlamaBinary('auto');   // → tải tất cả binary phù hợp
-          if (!r.ok) { sDlStage.textContent = '❌ Binary: ' + r.error; failed = true; return; }
-        } else { _dlLoaded.binary = _dlSize.binary; }
-        // Model MiLMMT — downloadModel tự bỏ qua nếu file đã có (cached)
-        const m = await api.downloadModel({ kind: 'main', url: p.modelUrl, filename: p.model });
-        if (!m.ok) { sDlStage.textContent = '❌ Model: ' + m.error; failed = true; return; }
-        sDlStage.textContent = '✅ Hoàn tất — server sẽ tự khởi động khi bấm ▶ caption';
-        sDlBar.style.width = '100%';
-        sDlBar.style.background = '#4ec9b0';
-        sDlPct.textContent = '100%';
-        // Ẩn progress sau 3s khi success
-        setTimeout(() => { if (!failed) sDlProgWrap.style.display = 'none'; }, 3000);
-      } finally {
-        refreshLocalStatus();
-      }
-    });
-
-    sSrvStart.addEventListener('click', async () => {
-      sSrvStart.disabled = true;
-      sSrvStatus.style.color = '#dcdcaa';
-      sSrvStatus.textContent = '⏳ Khởi động llama-server…';
-      const r = await api.startLocalServer({ port: 8080 });
-      sSrvStart.disabled = false;
-      if (!r.ok) { sSrvStatus.style.color = '#f88'; sSrvStatus.textContent = '❌ ' + r.error; }
-      else if (r.threads) { sSrvStatus.style.color = '#4ec9b0'; sSrvStatus.textContent = `▶ Chạy với -t ${r.threads} (PID ${r.pid})`; }
-      refreshLocalStatus();
-    });
-    sSrvStop.addEventListener('click', async () => { await api.stopLocalServer(); refreshLocalStatus(); });
-
-    // Toggle "Cấu hình nâng cao"
-    document.getElementById('s-toggle-advanced').addEventListener('click', (e) => {
-      e.preventDefault();
-      const adv = document.getElementById('s-local-advanced');
-      const visible = adv.style.display !== 'none';
-      adv.style.display = visible ? 'none' : '';
-      e.target.textContent = visible ? '[⚙ Cấu hình nâng cao]' : '[× Đóng cấu hình nâng cao]';
-    });
-
-    sLocalTest.addEventListener('click', async () => {
-      sLocalTest.disabled = true;
-      sLocalTestStatus.style.color = '#dcdcaa';
-      sLocalTestStatus.textContent = '⏳ Kiểm tra ' + sLocalUrl.value.trim() + '…';
-      api.saveSettings({ localBaseUrl: sLocalUrl.value.trim() || 'http://127.0.0.1:8080' });
-      const r = await api.checkLocalLLM();
-      if (r.ok) {
-        sLocalTestStatus.style.color = '#4ec9b0';
-        sLocalTestStatus.textContent = '✅ OK' + (r.models?.length ? ' · ' + r.models.slice(0, 3).join(', ') : '');
-      } else {
-        sLocalTestStatus.style.color = '#f88';
-        sLocalTestStatus.textContent = '❌ ' + (r.error || 'không kết nối');
-      }
-      sLocalTest.disabled = false;
     });
 
     api.onSettingsSaved(({ ok }) => {
       if (ok) {
         _currentSource = sCapture.value;
         _currentProvider = sProvider.value;
-        const prov = sProvider.value;
-        const provInfo = PROVIDER_INFO[prov];
+        const provInfo = PROVIDER_INFO[sProvider.value];
         const isNoKey = provInfo && provInfo.noKey;
-        apiStatus.className  = 'api-status ' + ((isNoKey || sApiKey.value.trim()) ? 'ok' : 'warn');
-        apiStatus.textContent = isNoKey
-          ? '✓ Đã lưu! Dùng ' + prov + ' (miễn phí)'
-          : (sApiKey.value.trim() ? '✓ Đã lưu! Dịch bằng ' + prov : '⚠ Đã xóa API key. Captions sẽ hiển nguyên gốc.');
         settingsBtn.textContent = (isNoKey || sApiKey.value.trim()) ? '⚙️' : '⚠️';
         setTimeout(() => { settingsModal.classList.remove('open'); }, 900);
       }

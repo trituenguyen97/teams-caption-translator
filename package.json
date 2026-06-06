@@ -5,6 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "fetch-binaries": "node scripts/fetch-binaries.js",
+    "prebuild": "node scripts/fetch-binaries.js",
     "build": "electron-builder"
   },
   "dependencies": {
@@ -38,6 +40,10 @@
     ],
     "asarUnpack": [
       "stt-server.py"
+    ],
+    "extraResources": [
+      { "from": "bin", "to": "bin", "filter": ["**/*"] },
+      { "from": "models", "to": "models", "filter": ["**/*.gguf"] }
     ]
   }
 }

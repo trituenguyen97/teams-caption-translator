@@ -21,6 +21,36 @@ const { summarizeMeeting, exportSummary } = require('./summary');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (ch, data) => state.win?.webContents?.send(ch, data);
 
+// Auto-start local LLM server khi provider=local + đã có binary+model. Gọi từ: boot (main.js),
+// toggle-captions, save-settings, và SAU KHI tải xong model/binary. Idempotent (startServer tự guard
+// alreadyRunning) → gọi nhiều lần an toàn. Server chỉ tắt khi đổi provider khác local hoặc đóng app —
+// KHÔNG cần bấm nút play. notifyIfMissing=true (toggle/save) thì báo nếu chưa cài; boot/download thì im.
+function ensureLocalServerStarted(notifyIfMissing = false) {
+  if (state.provider !== 'local') return;
+  try {
+    const st = localLlm.serverStatus();
+    if (st.running) return;
+    if (!st.binaryReady || !st.modelReady) {
+      console.warn('[auto-start] thiếu binary/model — bỏ qua (tải xong sẽ tự start)');
+      if (notifyIfMissing) send('status', { type: 'error', msg: '⚠ Local LLM chưa cài đủ — vào ⚙️ → Local LLM → Tải tất cả' });
+      return;
+    }
+    console.log('[auto-start] khởi động local LLM server…');
+    send('status', { type: 'loading', msg: '⏳ Đang khởi động Local LLM server…' });
+    localLlm.startServer({ port: 8080 })
+      .then(r => {
+        if (r.ok) {
+          console.log('[auto-start] local server OK', r.pid);
+          send('status', { type: 'running', msg: `▶ Local LLM ready (PID ${r.pid}, -t ${r.threads || '?'})` });
+        } else {
+          console.warn('[auto-start] fail:', r.error);
+          send('status', { type: 'error', msg: '❌ Local LLM start: ' + r.error });
+        }
+      })
+      .catch(e => console.warn('[auto-start] error:', e.message));
+  } catch (e) { console.warn('[auto-start] exception:', e.message); }
+}
+
 function registerAll(app) {
   // ── Language ──────────────────────────
   ipcMain.on('set-lang', (_, lang) => {
@@ -37,37 +67,10 @@ function registerAll(app) {
     if (v) state.win?.focus();
   });
 
-  // Auto-start local LLM server (fire-and-forget, không block toggle-captions)
-  function ensureLocalServerStarted() {
-    if (state.provider !== 'local') return;
-    try {
-      const st = localLlm.serverStatus();
-      if (st.running) return;
-      if (!st.binaryReady || !st.modelReady) {
-        console.warn('[auto-start] thiếu binary/model — bỏ qua auto-start');
-        send('status', { type: 'error', msg: '⚠ Local LLM chưa cài đủ — vào ⚙️ → Local LLM → Tải tất cả' });
-        return;
-      }
-      console.log('[auto-start] khởi động local LLM server…');
-      send('status', { type: 'loading', msg: '⏳ Đang khởi động Local LLM server…' });
-      localLlm.startServer({ port: 8080 })
-        .then(r => {
-          if (r.ok) {
-            console.log('[auto-start] local server OK', r.pid);
-            send('status', { type: 'running', msg: `▶ Local LLM ready (PID ${r.pid}, -t ${r.threads || '?'})` });
-          } else {
-            console.warn('[auto-start] fail:', r.error);
-            send('status', { type: 'error', msg: '❌ Local LLM start: ' + r.error });
-          }
-        })
-        .catch(e => console.warn('[auto-start] error:', e.message));
-    } catch (e) { console.warn('[auto-start] exception:', e.message); }
-  }
-
   // ── Captions toggle ───────────────────
   ipcMain.on('toggle-captions', async (_, desired) => {
-    // Khi user bấm ▶ caption và đang dùng local LLM → tự khởi động server
-    ensureLocalServerStarted();
+    // Khi user bấm ▶ caption và đang dùng local LLM → đảm bảo server chạy (báo nếu chưa cài)
+    ensureLocalServerStarted(true);
     // Audio mode
     if (state.captureSource !== 'teams') {
       state.audioPaused = !state.audioPaused;
@@ -196,7 +199,7 @@ function registerAll(app) {
 
   // ── Settings ──────────────────────────
   ipcMain.handle('get-settings', () => ({
-    provider:        Store.get('provider',        'groq'),
+    provider:        Store.get('provider',        'online'),
     apiKey:          Store.get('apiKey',          ''),
     providerKeys:    Store.get('providerKeys',    {}),
     captureSource:   Store.get('captureSource',   'teams'),
@@ -220,10 +223,10 @@ function registerAll(app) {
     if (s.localBaseUrl    !== undefined) { Store.set('localBaseUrl',    s.localBaseUrl);    state.localBaseUrl    = s.localBaseUrl; }
     if (s.localModel      !== undefined) { Store.set('localModel',      s.localModel);      state.localModel      = s.localModel; }
     send('settings-saved', { ok: true });
-    // Auto-start nếu provider vừa đổi sang local + đã có model.
-    // Ngược lại: nếu vừa đổi SANG provider khác local → tắt llama-server để giải phóng
-    // ~1GB RAM (model bị --mlock ghim cứng, không pageable) — không request nào tới nó nữa.
-    if (state.provider === 'local') ensureLocalServerStarted();
+    // Vừa chọn local → tự khởi động server (báo nếu chưa cài). Server giữ chạy tới khi đóng app.
+    // Ngược lại: vừa đổi SANG provider khác local → tắt llama-server để giải phóng ~1GB RAM
+    // (model bị --mlock ghim cứng) — không request nào tới nó nữa.
+    if (state.provider === 'local') ensureLocalServerStarted(true);
     else if (s.provider !== undefined && s.provider !== 'local') {
       try { localLlm.stopServer(); } catch {}
     }
@@ -242,14 +245,17 @@ function registerAll(app) {
       Store.set('localBinaryVariant', r.selected);
       state.localBinaryVariant = r.selected;
     }
+    if (r.ok) ensureLocalServerStarted();   // tải binary xong → tự start nếu provider=local + đã đủ model
     return r;
   });
   ipcMain.handle('local-llm-download-model', async (_, { kind, url, filename }) => {
     const id = `model:${kind}`;
-    return localLlm.downloadModel({
+    const r = await localLlm.downloadModel({
       id, url, filename,
       onProgress: (p) => send('local-llm-progress', { task: id, ...p }),
     });
+    if (r && r.ok) ensureLocalServerStarted();   // tải model xong → tự start nếu provider=local + đã đủ binary
+    return r;
   });
   ipcMain.handle('local-llm-cancel-download', (_, { task }) => ({ ok: localLlm.cancelDownload(task) }));
   ipcMain.handle('local-llm-start', async (_, opts = {}) => localLlm.startServer(opts));
@@ -273,4 +279,4 @@ function registerAll(app) {
   ipcMain.handle('export-summary', async (_, opts) => exportSummary(opts));
 }
 
-module.exports = { registerAll };
+module.exports = { registerAll, ensureLocalServerStarted };

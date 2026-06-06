@@ -7,7 +7,7 @@ const { app, BrowserWindow, desktopCapturer } = require('electron');
 const path = require('path');
 const state = require('./src/state');
 const Store = require('./src/store');
-const { registerAll } = require('./src/ipc-handlers');
+const { registerAll, ensureLocalServerStarted } = require('./src/ipc-handlers');
 const { runService } = require('./src/caption-service');
 const { runAudioService, stopSTTServer } = require('./src/audio-stt');
 
@@ -99,12 +99,14 @@ async function startService() {
 
 // â”€â”€ App lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.whenReady().then(() => {
-  // Migrate: groq/gemini/openai đã bị loại khỏi translation → fallback google-free
-  const savedProvider = Store.get('provider', 'google-free');
-  if (['groq', 'gemini', 'openai'].includes(savedProvider)) {
-    console.log('[migrate] provider', savedProvider, '→ google-free (cloud LLM đã bị xóa khỏi translation)');
-    Store.set('provider', 'google-free');
-    state.provider = 'google-free';
+  // Migrate: mọi provider dịch online cũ (cloud LLM + MS/Google/DeepL riêng lẻ) → gộp về 'online'
+  // (1 nhánh cascade Google→MS→DeepL trong translation.js). Chỉ còn 2 lựa chọn: 'online' | 'local'.
+  const savedProvider = Store.get('provider', 'online');
+  const _legacyOnline = ['groq', 'gemini', 'openai', 'teams-token', 'google-free', 'deepl'];
+  if (_legacyOnline.includes(savedProvider)) {
+    console.log('[migrate] provider', savedProvider, '→ online (gộp MS/Google/DeepL thành 1 nhánh cascade)');
+    Store.set('provider', 'online');
+    state.provider = 'online';
   } else {
     state.provider = savedProvider;
   }
@@ -123,13 +125,35 @@ app.whenReady().then(() => {
     state.localModel = 'MiLMMT-46-1B-v0.1.Q4_K_M.gguf';
     Store.set('localModel', state.localModel);
   }
+
+  // Đồng bộ tên model với file THẬT có sẵn (bundle Q4_K_M hoặc đã tải) — tên file có thể khác mặc định.
+  try {
+    const localLlm = require('./src/local-llm');
+    const st = localLlm.serverStatus();
+    if (st.modelFuzzy && st.modelFuzzy !== state.localModel) {
+      console.log('[boot] model file thực:', st.modelFuzzy, '→ cập nhật localModel');
+      state.localModel = st.modelFuzzy; Store.set('localModel', st.modelFuzzy);
+    } else if (!st.modelReady && st.available.length) {
+      const m = st.available.find(x => /milmmt/i.test(x.name)) || st.available[0];
+      console.log('[boot] dùng model có sẵn:', m.name);
+      state.localModel = m.name; Store.set('localModel', m.name);
+    }
+  } catch (e) { console.warn('[boot] align model:', e.message); }
+
   registerAll(app);
   createWindow();
   startService();
-  // KHÔNG auto-start local LLM server lúc boot nữa: tránh ghim ~1GB RAM (--mlock) khi app
-  // mở mà chưa vào họp. Server được khởi động lazy bởi ensureLocalServerStarted() khi user
-  // bấm ▶ (toggle-captions) hoặc chọn provider=local trong Cài đặt. Câu đầu tiên trong lúc
-  // server đang load sẽ tự fallback Google Free (translation.js) — đúng như hành vi đã có.
+
+  // provider=local → TỰ khởi động llama-server lúc mở app (nếu đã có binary+model), giữ chạy tới khi
+  // đóng app. KHÔNG cần bấm play. Nếu chưa cài → im lặng; tải xong (download handler) sẽ tự start.
+  // Delay 2s để renderer sẵn sàng nhận status. Tắt server: khi đổi provider khác local / đóng app.
+  if (state.provider === 'local') {
+    setTimeout(() => { try { ensureLocalServerStarted(); } catch (e) { console.warn('[boot] auto-start local:', e.message); } }, 2000);
+  }
+
+  // (KHÔNG prewarm ChatGPT nữa) — mỗi lần bấm Tóm tắt mới mở cửa sổ webchat, xong thì destroy. Giữ
+  // session sống lâu khiến ChatGPT bắt đăng nhập ở lần hỏi thứ 2 nên không pre-warm/giữ cửa sổ nền.
+
   app.on('activate', () => {
     if (!BrowserWindow.getAllWindows().length) createWindow();
   });

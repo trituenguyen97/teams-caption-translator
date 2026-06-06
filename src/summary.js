@@ -1,11 +1,9 @@
 /**
- * summary.js — Meeting summarization via LLM
+ * summary.js — Tóm tắt cuộc họp qua webchat ChatGPT (cửa sổ ẩn, free, không API key)
  */
 const { dialog } = require('electron');
 const fs = require('fs');
 const state = require('./state');
-const Store = require('./store');
-const { callLLM, callGemini, PROVIDER_PRIORITY } = require('./translation');
 const { summarizeViaWebChat } = require('./webchat');
 
 function buildSummarizePrompt(captions) {
@@ -50,39 +48,10 @@ async function summarizeMeeting(captions) {
   const inputTokensEst = estimateTokens(prompt);
   const t0 = Date.now();
 
-  let result = null;
-  let usedModel = null;
-
-  if (provider === 'duckai' || provider === 'copilot' || provider === 'chatgpt') {
-    const r = await summarizeViaWebChat(provider, prompt);
-    if (!r.ok) return { ok: false, error: r.error };
-    result = r.text;
-    usedModel = r.model;
-  } else {
-    const sumKeys = Store.get('summaryKeys', {});
-    const provKeys = Store.get('providerKeys', {});
-    const apiKey = sumKeys[provider] || Store.get('summaryApiKey', '') || provKeys[provider] || state.apiKey;
-    const models = PROVIDER_PRIORITY[provider];
-    if (!models) return { ok: false, error: `Provider '${provider}' không hỗ trợ tóm tắt (cần LLM)` };
-    if (!apiKey) return { ok: false, error: 'Chưa có API key — hãy thiết lập trong ⚙️ Cài đặt → Tóm tắt' };
-
-    for (const model of models) {
-      try {
-        if (provider === 'gemini') {
-          result = await callGemini(apiKey, model, prompt, 8192);
-        } else {
-          const host = provider === 'groq' ? 'api.groq.com' : 'api.openai.com';
-          const llmPath = provider === 'groq' ? '/openai/v1/chat/completions' : '/v1/chat/completions';
-          result = await callLLM(host, llmPath, apiKey, model, prompt);
-        }
-      } catch (e) {
-        console.warn(`[summary/${provider}/${model}] error:`, e.message);
-        result = null;
-      }
-      if (result && result.trim()) { usedModel = model; break; }
-    }
-    if (!result) return { ok: false, error: 'Tất cả model đều không trả được kết quả' };
-  }
+  const r = await summarizeViaWebChat(provider, prompt);
+  if (!r.ok) return { ok: false, error: r.error };
+  const result = r.text;
+  const usedModel = r.model;
 
   const elapsedMs = Date.now() - t0;
   const outputTokens = estimateTokens(result);

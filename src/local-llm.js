@@ -36,14 +36,34 @@ function ensureDirs() {
   return d;
 }
 
+// Tài nguyên đóng gói cùng app (read-only). Production: <resources>/bin + /models (electron-builder
+// extraResources). Dev (electron .): gốc project. Nhờ đó binary + model có SẴN → chạy ngay, không tải.
+function bundleDirs() {
+  const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
+  return {
+    binRoot: path.join(base, 'bin', 'llama-server'),
+    models:  path.join(base, 'models'),
+  };
+}
+
 // Ưu tiên backend: cuda > vulkan > cpu
 const VARIANTS = ['cuda', 'vulkan', 'cpu'];
-function variantDir(v) { return path.join(dirs().binRoot, v); }
+function variantDir(v) { return path.join(dirs().binRoot, v); }          // userData = đích TẢI VỀ
 function variantExe(v) { return path.join(variantDir(v), 'llama-server.exe'); }
 
-// Các variant đã cài (có llama-server.exe)
+// Tìm exe của variant: userData (đã tải/nâng cấp) TRƯỚC, rồi bundle (đóng gói cùng app).
+function binRoots() { return [dirs().binRoot, bundleDirs().binRoot]; }
+function resolveVariant(v) {
+  for (const root of binRoots()) {
+    const exe = path.join(root, v, 'llama-server.exe');
+    try { if (fs.existsSync(exe)) return { dir: path.join(root, v), exe }; } catch {}
+  }
+  return null;
+}
+
+// Các variant có sẵn (ở userData HOẶC bundle)
 function listInstalledVariants() {
-  return VARIANTS.filter(v => { try { return fs.existsSync(variantExe(v)); } catch { return false; } });
+  return VARIANTS.filter(v => !!resolveVariant(v));
 }
 
 // Chọn variant tối ưu theo GPU trong số đã cài (KHÔNG tải lại). gpu lấy từ detectGpu.
@@ -409,14 +429,28 @@ function cancelDownload(id) {
 
 // ── Server lifecycle ──────────────────────────────────
 
+function modelRoots() { return [dirs().models, bundleDirs().models]; }   // userData TRƯỚC, rồi bundle
+function modelFullPath(name) {
+  for (const dir of modelRoots()) {
+    const full = path.join(dir, name);
+    try { if (fs.existsSync(full)) return full; } catch {}
+  }
+  return path.join(dirs().models, name);
+}
+
+// Model có sẵn ở userData + bundle (gộp; userData thắng khi trùng tên).
 function listAvailableModels() {
-  try {
-    const dir = dirs().models;
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir)
-      .filter(f => /\.gguf$/i.test(f))
-      .map(f => ({ name: f, size: (fs.statSync(path.join(dir, f)).size) }));
-  } catch { return []; }
+  const seen = new Map();
+  for (const dir of modelRoots()) {
+    try {
+      if (!fs.existsSync(dir)) continue;
+      for (const f of fs.readdirSync(dir)) {
+        if (!/\.gguf$/i.test(f) || seen.has(f)) continue;
+        try { seen.set(f, { name: f, size: fs.statSync(path.join(dir, f)).size }); } catch {}
+      }
+    } catch {}
+  }
+  return [...seen.values()];
 }
 
 // Extract "model size tokens" như 1.7b / 0.6b / 7b / 14b để so sánh chính xác
@@ -434,14 +468,15 @@ function modelFamilyKey(name) {
 
 function resolveModelPath(name) {
   if (!name) return { path: null, found: false };
-  const d = dirs();
   const candidates = [
     name.endsWith('.gguf') ? name : name + '.gguf',
     name,
   ];
-  for (const c of candidates) {
-    const full = path.join(d.models, c);
-    if (fs.existsSync(full)) return { path: full, found: true };
+  for (const dir of modelRoots()) {
+    for (const c of candidates) {
+      const full = path.join(dir, c);
+      try { if (fs.existsSync(full)) return { path: full, found: true }; } catch {}
+    }
   }
   // Fuzzy chỉ chấp nhận khi CẢ size token (1.7b/0.6b…) LẪN họ model (milmmt/qwen…) khớp —
   // tránh main match nhầm draft VÀ tránh thay nhầm model khác họ cùng size (vd MiLMMT-1B → gemma-3-1b).
@@ -453,11 +488,11 @@ function resolveModelPath(name) {
       const sizeMatch = [...wantSize].some(s => fSize.has(s));
       const familyMatch = f.name.toLowerCase().includes(wantFamily);
       if (sizeMatch && familyMatch) {
-        return { path: path.join(d.models, f.name), found: true, fuzzy: true, actualName: f.name };
+        return { path: modelFullPath(f.name), found: true, fuzzy: true, actualName: f.name };
       }
     }
   }
-  return { path: path.join(d.models, candidates[0]), found: false };
+  return { path: path.join(dirs().models, candidates[0]), found: false };
 }
 
 function serverStatus() {
@@ -469,7 +504,7 @@ function serverStatus() {
     binaryReady:      installed.length > 0,
     installedVariants: installed,                                 // các backend đã tải sẵn
     binaryVariant:    selected,                                   // backend sẽ dùng theo GPU hiện tại
-    binaryPath:       installed.length ? variantExe(selected) : null,
+    binaryPath:       installed.length ? (resolveVariant(selected) ? resolveVariant(selected).exe : null) : null,
     modelReady:  m.found,
     modelPath:   m.path,
     modelFuzzy:  m.fuzzy ? m.actualName : null,
@@ -501,8 +536,9 @@ async function startServer({ port = 8080, ctxSize, threads, ngl } = {}) {
   const installed = listInstalledVariants();
   const variant = selectVariantForPreset(installed, gpu, 'milmmt');
   state.localBinaryVariant = variant;
-  const exe = variantExe(variant);
-  if (!fs.existsSync(exe)) return { ok: false, error: `Binary '${variant}' chưa tải` };
+  const rv = resolveVariant(variant);
+  if (!rv) return { ok: false, error: `Binary '${variant}' chưa có (bundle lẫn userData)` };
+  const exe = rv.exe;
 
   // MiLMMT (REPORT_speedup.md): 4 threads (KHÔNG SMT/HT) là điểm ngọt, ctx 2048 đủ cho dịch câu.
   const t   = threads || 4;
@@ -532,7 +568,7 @@ async function startServer({ port = 8080, ctxSize, threads, ngl } = {}) {
 
   return new Promise((resolve) => {
     const proc = spawn(exe, args, {
-      cwd: variantDir(variant),   // để DLL của variant resolve đúng
+      cwd: rv.dir,   // để DLL của variant resolve đúng (userData hoặc bundle)
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });

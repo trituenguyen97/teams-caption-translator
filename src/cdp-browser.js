@@ -100,6 +100,7 @@ async function connectToTeamsBrowser() {
           pages.some(p => { try { return /teams\.microsoft/i.test(p.url()); } catch { return false; } });
         if (hasTeamsPage) {
           console.log('[CDP] Kết nối thành công qua port', port, '(verified Teams)');
+          await resumeAllTeamsTargets(port).catch(() => {});   // gỡ park "Debugger paused" do auto-attach
           return b;
         }
         const hasWidgets = titles.some(t => /widgets/i.test(t));
@@ -116,7 +117,11 @@ async function connectToTeamsBrowser() {
             const titles2 = await Promise.all(pages2.map(p => p.title().catch(() => '')));
             const ok = titles2.some(t => /microsoft teams/i.test(t)) ||
               pages2.some(p => { try { return /teams\.microsoft/i.test(p.url()); } catch { return false; } });
-            if (ok) { console.log('[CDP] Kết nối thành công sau kill Widgets, port', port); return b2; }
+            if (ok) {
+              console.log('[CDP] Kết nối thành công sau kill Widgets, port', port);
+              await resumeAllTeamsTargets(port).catch(() => {});
+              return b2;
+            }
             await b2.disconnect().catch(() => {});
           } catch {}
         }
@@ -128,8 +133,11 @@ async function connectToTeamsBrowser() {
   for (let port = 9222; port <= 9240; port++) {
     if (await isTeamsOnPort(port)) {
       console.log('[CDP] Teams tìm thấy trên port', port, '(scan)');
-      try { return await puppeteer.connect({ browserURL: `http://localhost:${port}`, defaultViewport: null }); }
-      catch { continue; }
+      try {
+        const b = await puppeteer.connect({ browserURL: `http://localhost:${port}`, defaultViewport: null });
+        await resumeAllTeamsTargets(port).catch(() => {});
+        return b;
+      } catch { continue; }
     }
   }
   return null;
@@ -305,7 +313,15 @@ function _monitorWorkerForToken(wsUrl, label) {
     let msgId = 0, reqCount = 0;
     ws.on('open', () => {
       ws.send(JSON.stringify({ id: ++msgId, method: 'Network.enable', params: { maxPostDataSize: 256 } }));
-      console.log('[teams-token] WS connected:', label);
+      // Gỡ banner "Debugger paused in another tab": puppeteer auto-attach (waitForDebuggerOnStart) PARK
+      // các sub-target Teams (worker/iframe) lúc mở app; ngoài ra Teams có thể có bẫy `debugger;`.
+      //  • runIfWaitingForDebugger: giải phóng target đang bị park (lệnh DUY NHẤT clear được auto-attach park).
+      //  • setSkipAllPauses{skip:true}: biến `debugger;`/breakpoint thành no-op (= "Deactivate breakpoints").
+      // Đều ở phạm vi session của ta → KHÔNG đổi hành vi Teams, không ảnh hưởng caption/token.
+      ws.send(JSON.stringify({ id: ++msgId, method: 'Debugger.enable' }));
+      ws.send(JSON.stringify({ id: ++msgId, method: 'Debugger.setSkipAllPauses', params: { skip: true } }));
+      ws.send(JSON.stringify({ id: ++msgId, method: 'Runtime.runIfWaitingForDebugger' }));
+      console.log('[teams-token] WS connected (skip-pauses armed):', label);
     });
     ws.on('message', raw => {
       try {
@@ -332,6 +348,37 @@ function _monitorWorkerForToken(wsUrl, label) {
       setTimeout(() => _monitorWorkerForToken(wsUrl, label), 5000);
     });
   } catch { _tokenSockets.delete(wsUrl); }
+}
+
+// One-shot: quét mọi target trên cdpPort và GIẢI PHÓNG target đang bị PARK bởi puppeteer auto-attach
+// (waitForDebuggerOnStart) + tắt pause cho phiên của ta. Gọi sau MỖI lần (re)connect vì puppeteer
+// re-arm waitForDebuggerOnStart mỗi lần attach. WS ngắn hạn (đóng sau 300ms) — không giữ socket.
+async function resumeAllTeamsTargets(cdpPort) {
+  if (!cdpPort) return;
+  const raw = await new Promise(resolve => {
+    const req = http.get({ hostname: '127.0.0.1', port: cdpPort, path: '/json/list' }, res => {
+      let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
+    });
+    req.setTimeout(1500, () => { req.destroy(); resolve('[]'); });
+    req.on('error', () => resolve('[]'));
+  });
+  let targets; try { targets = JSON.parse(raw); } catch { return; }
+  let n = 0;
+  for (const t of targets) {
+    if (!t.webSocketDebuggerUrl) continue;
+    try {
+      const ws = new WebSocket(t.webSocketDebuggerUrl);
+      ws.on('open', () => {
+        ws.send(JSON.stringify({ id: 1, method: 'Debugger.enable' }));
+        ws.send(JSON.stringify({ id: 2, method: 'Debugger.setSkipAllPauses', params: { skip: true } }));
+        ws.send(JSON.stringify({ id: 3, method: 'Runtime.runIfWaitingForDebugger' }));
+        setTimeout(() => { try { ws.close(); } catch {} }, 300);
+      });
+      ws.on('error', () => { try { ws.close(); } catch {} });
+      n++;
+    } catch {}
+  }
+  if (n) console.log(`[cdp] resumeAllTeamsTargets: gửi resume tới ${n} target trên port ${cdpPort}`);
 }
 
 // Đóng toàn bộ WS monitor + xóa map (gọi trước mỗi lần start để thay thế, không chồng chất).
@@ -544,7 +591,7 @@ module.exports = {
   connectToTeamsBrowser, findMeetingPage,
   tryToggleCaptionsViaDOM, injectToggleCaptionsKey,
   checkCaptionsActive,
-  startTeamsTokenCapture,
+  startTeamsTokenCapture, resumeAllTeamsTargets,
   autoSetupCDP, isCDPEnvSet, setCDPEnv,
   freePort9222IfNeeded,
   tryPowerShellSendKeys,

@@ -15,7 +15,7 @@ module.exports = {
   audioEntryId: 0,
   sttProcess: null,
 
-  provider: 'google-free',
+  provider: 'online',   // 'online' = cascade Google→MS→DeepL | 'local' = MiLMMT offline
   apiKey: '',
 
   // Local LLM (llama.cpp server, OpenAI-compatible) — MiLMMT-46-1B JP→VI chuyên dụng (model local duy nhất)

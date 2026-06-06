@@ -1,7 +1,7 @@
 /**
  * webchat.js — Summary qua web chat UI (Copilot, duck.ai) trong BrowserWindow embedded.
  *
- * DEBUG mode: bật bằng env var WEBCHAT_DEBUG=1 hoặc default (đang TRUE để verify).
+ * DEBUG mode: bật bằng env var WEBCHAT_DEBUG=1. MẶC ĐỊNH TẮT → summary chạy webchat ChatGPT ẩn.
  *   - Window hiển thị từ đầu
  *   - DevTools tự mở
  *   - Window không tự ẩn sau khi xong → user inspect được
@@ -136,14 +136,17 @@ const PROVIDERS = {
       'button[aria-label*="Send message"]',
       'button[type="submit"]',
     ],
+    // CHỈ selector trỏ ĐÚNG vào nội dung trợ lý. Bỏ 'conversation-turn' (khớp CẢ lượt user → kéo theo
+    // echo prompt "You said:…") và nhãn sr-only. '.markdown' = thân câu trả lời (lượt user không có).
     responseSelectors: [
       '[data-message-author-role="assistant"]',
       'div[data-message-author-role="assistant"]',
-      'article[data-testid^="conversation-turn"]',
-      'div[data-testid^="conversation-turn"]',
       '[class*="markdown"]',
     ],
     chatContainerSelectors: ['main', '[role="main"]', '#__next', 'body'],
+    // ChatGPT có selector trợ lý đáng tin → KHÔNG dùng fallback text-diff (vốn quét cả container, dễ
+    // vớ nhầm prompt "You said:…" khi câu trả lời còn rỗng/đang nghĩ).
+    noTextDiff: true,
   },
 };
 
@@ -197,6 +200,32 @@ function getWindow(provider) {
 
   _windows.set(provider, win);
   return win;
+}
+
+// ── Lifecycle: mỗi lần tóm tắt MỞ CỬA SỔ MỚI → load chatgpt.com → xử lý → (thành công) DESTROY.
+// KHÔNG prewarm, KHÔNG giữ cửa sổ sống: giữ 1 session sống lâu làm ChatGPT bắt đăng nhập ở lần hỏi
+// thứ 2. Mở lại sạch mỗi lần → mỗi yêu cầu độc lập. (Session/login vẫn lưu đĩa qua partition persist.)
+
+// Loại noise UI của trang chat lọt vào response: nhãn screen-reader đầu message + disclaimer cuối trang.
+// (Khi extraction over-capture qua text-diff fallback, các đoạn này dính vào báo cáo.)
+function stripChatUiNoise(text) {
+  if (!text) return text;
+  const cleaned = text
+    // Nhãn sr-only đầu message: "ChatGPT said:" / "You said:" / "Assistant said:"
+    .replace(/^\s*(?:ChatGPT|Copilot|Assistant)\s+said:\s*/i, '')
+    .replace(/^\s*You said:\s*/i, '')
+    // Disclaimer cuối trang (các biến thể): "ChatGPT can make mistakes…",
+    // "ChatGPT is AI and can make mistakes." — kèm "Check important info." nếu có.
+    .replace(/\s*(?:ChatGPT|Copilot)?\s*(?:is AI and\s+)?can make mistakes\.?(?:\s*Check important info\.?)?\s*$/i, '')
+    // Nhãn sr-only sót ở cuối khi over-capture
+    .replace(/\s*(?:ChatGPT|Copilot|Assistant)\s+said:\s*$/i, '')
+    .trim();
+  return cleaned || text;   // nếu lọc ra rỗng (bất thường) → giữ nguyên bản gốc
+}
+
+// B: ChatGPT đang sinh thì hiện nút "Stop"; nút biến mất = sinh xong → thoát sớm khỏi waitResponseStable.
+async function isGenerating(win) {
+  return await exec(win, `(() => !!document.querySelector('button[data-testid="stop-button"], button[aria-label*="Stop"], button[aria-label*="stop"]'))()`);
 }
 
 async function exec(win, code) {
@@ -446,19 +475,23 @@ function htmlToMarkdownInjection() {
   `;
 }
 
-async function getLastResponseText(win, selectors) {
+// Đọc TRỰC TIẾP message trợ lý MỚI NHẤT (markdown). Chỉ trả khi đã có message MỚI so với trước submit
+// (els.length > priorCount) → không đọc nhầm answer cũ (nếu trang chưa kịp sạch) và không bao giờ chốt
+// trước khi câu trả lời thật xuất hiện. KHÔNG đọc cả container → loại echo prompt ("You said:…") và
+// disclaimer cuối trang. Trả text KỂ CẢ KHI RỖNG ('') để caller phân biệt "chưa có" (null) vs "rỗng".
+async function getNewAssistantText(win, selectors, priorCount = 0) {
   for (const sel of selectors) {
     const r = await exec(win, `
       (() => {
         const els = [...document.querySelectorAll(${JSON.stringify(sel)})]
           .filter(el => el.offsetWidth > 0 && el.offsetHeight > 0);
-        if (!els.length) return null;
+        if (els.length <= ${priorCount}) return null;   // chưa có message trợ lý MỚI
         const last = els[els.length - 1];
         const toMarkdown = ${htmlToMarkdownInjection()};
         return { count: els.length, text: toMarkdown(last), selector: ${JSON.stringify(sel)} };
       })();
     `);
-    if (r && r.text && r.text.length > 20) return r;
+    if (r) return r;
   }
   return null;
 }
@@ -534,24 +567,28 @@ async function extractMarkdownForText(win, snippetText) {
 }
 
 async function waitResponseStable(win, config, prompt, baselineText, {
-  totalTimeoutMs = 180000, stableMs = 4000, pollMs = 1000, minChars = 80,
+  totalTimeoutMs = 180000, stableMs = 2500, pollMs = 700, minChars = 80, stopIdleMs = 1200,
+  priorCount = 0,
 } = {}) {
   const t0 = Date.now();
   let last = { text: '', count: 0, selector: null, source: 'none' };
   let lastChangeTs = Date.now();
   let probeCount = 0;
+  let sawStop = false;       // B: đã từng thấy nút "Stop" (đang sinh)
+  let sawAssistant = false;  // đã thấy element message trợ lý MỚI xuất hiện chưa (kể cả còn rỗng)
 
   while (Date.now() - t0 < totalTimeoutMs) {
-    // Method 1: thử selector
-    let cur = await getLastResponseText(win, config.responseSelectors);
+    // Method 1 (chính): đọc TRỰC TIẾP message trợ lý mới — không bao giờ lấy cả container.
+    let cur = await getNewAssistantText(win, config.responseSelectors, priorCount);
     let source = cur ? 'selector' : 'none';
+    if (cur) sawAssistant = true;
 
-    // Method 2: fallback text-diff nếu selector không match
-    if (!cur || cur.text.length < 40) {
+    // Method 2 (fallback text-diff): CHỈ cho provider không có selector trợ lý đáng tin (vd duck.ai),
+    // và CHỈ khi chưa thấy element trợ lý nào. ChatGPT đặt noTextDiff → bỏ qua hẳn (tránh vớ echo prompt).
+    if (!cur && !config.noTextDiff) {
       const containerText = await getChatContainerText(win, config.chatContainerSelectors);
       const newContent = extractNewContent(baselineText, containerText, prompt);
       if (newContent && newContent.length > 20) {
-        // Cố gắng lấy markdown thực sự bằng cách tìm DOM element chứa text này
         const markdown = await extractMarkdownForText(win, newContent);
         cur = {
           text: markdown && markdown.length > newContent.length * 0.8 ? markdown : newContent,
@@ -562,18 +599,38 @@ async function waitResponseStable(win, config, prompt, baselineText, {
       }
     }
 
-    if (cur && cur.text !== last.text) {
-      const delta = cur.text.length - last.text.length;
-      last = { ...cur, source };
+    const curText = cur ? stripChatUiNoise(cur.text) : last.text;   // luôn lọc nhãn/disclaimer trước khi so
+
+    if (cur && curText !== last.text) {
+      const delta = curText.length - last.text.length;
+      last = { text: curText, count: cur.count, selector: cur.selector, source };
       lastChangeTs = Date.now();
       if (probeCount++ % 4 === 0) {
-        log(`response growing… +${delta} chars (total ${cur.text.length}) via [${source}] "${cur.selector}"`);
+        log(`response growing… +${delta} chars (total ${curText.length}) via [${source}] "${cur.selector}"`);
       }
     }
-    if (last.text.length >= minChars && Date.now() - lastChangeTs >= stableMs) {
-      log(`response stable @ ${last.text.length} chars [${last.source}] "${last.selector}"`);
+
+    // B: nút "Stop" biến mất sau khi từng xuất hiện = sinh xong. Nếu selector nút Stop sai (sawStop luôn
+    //    false) → tự fallback về text-stability (stableMs) bên dưới.
+    const gen = await isGenerating(win);
+    if (gen) sawStop = true;
+    const idle = Date.now() - lastChangeTs;
+    const generationDone = sawStop && !gen;
+
+    // Hoàn tất: có đủ chữ (>= minChars) VÀ (sinh-xong-lặng | lặng đủ lâu). KHÔNG bao giờ chốt khi text
+    // còn ngắn hơn minChars → không chốt nhầm lúc câu trả lời còn rỗng / đang "nghĩ".
+    if (last.text.length >= minChars && ((generationDone && idle >= stopIdleMs) || idle >= stableMs)) {
+      log(`response done @ ${last.text.length} chars [${last.source}] via ${generationDone ? 'stop-button' : 'text-stable'}`);
       return last.text;
     }
+
+    // Sinh XONG nhưng message trợ lý vẫn RỖNG/quá ngắn → câu trả lời rỗng thật (rate-limit / chưa đăng
+    // nhập / bị chặn) → thoát sớm trả null để caller báo lỗi rõ ràng, KHÔNG trả rác.
+    if (generationDone && sawAssistant && idle >= stopIdleMs && last.text.length < minChars) {
+      logErr(`generation xong nhưng response rỗng (${last.text.length} chars) → coi như rỗng`);
+      return null;
+    }
+
     await sleep(pollMs);
   }
   logErr(`timeout sau ${totalTimeoutMs}ms, last text len=${last.text.length} [${last.source}]`);
@@ -595,7 +652,7 @@ async function summarizeViaWebChat(provider, prompt) {
 
   try {
     log('loading URL...');
-    await win.loadURL(config.url);
+    await win.loadURL(config.url);   // luôn mở trang sạch mỗi lần tóm tắt (cửa sổ mới hoặc reuse-rồi-reload)
     log(`URL loaded in ${Date.now() - t0}ms`);
     await sleep(2000);
 
@@ -638,30 +695,37 @@ async function summarizeViaWebChat(provider, prompt) {
     }
     await sleep(500);
 
-    // Snapshot text trước khi submit cho fallback diff
+    // Snapshot text trước khi submit cho fallback diff (provider không có selector trợ lý đáng tin)
     log('snapshot text trước submit...');
     const baselineText = await getChatContainerText(win, config.chatContainerSelectors);
     log(`baseline text length: ${baselineText.length}`);
 
+    // Đếm message trợ lý ĐANG CÓ (trước submit) → waitResponseStable chỉ nhận message MỚI sinh ra,
+    // không đọc nhầm answer của lần tóm tắt trước nếu trang chưa kịp sạch.
+    const priorCount = await exec(win, `(() => [...document.querySelectorAll(${JSON.stringify(config.responseSelectors[0])})].filter(el => el.offsetWidth > 0 && el.offsetHeight > 0).length)()`) || 0;
+    log('prior assistant messages:', priorCount);
+
     log('click submit...');
     await clickSubmit(win, config.submitSelectors);
 
-    await sleep(2500); // chờ response container xuất hiện
+    await sleep(1500); // C: chờ response container xuất hiện (giảm từ 2500)
     if (DEBUG) await probeDom(win, 'after submit');
 
     log('chờ response stable...');
-    const text = await waitResponseStable(win, config, prompt, baselineText);
+    let text = await waitResponseStable(win, config, prompt, baselineText, { priorCount });
 
     if (!text) {
       win.show(); win.focus();
       await probeDom(win, 'no response');
-      return { ok: false, error: `${config.label} không trả response trong 180s. Xem console log + window đang mở để debug.` };
+      return { ok: false, error: `${config.label} không trả lời (rỗng hoặc quá lâu). Có thể do giới hạn khi chưa đăng nhập — thử lại, hoặc đăng nhập ChatGPT trong cửa sổ vừa hiện.` };
     }
 
+    text = stripChatUiNoise(text);   // loại nhãn "ChatGPT said:" + disclaimer cuối trang nếu lọt vào
+
     log(`==== DONE ${provider} in ${Date.now() - t0}ms, ${text.length} chars ====`);
-    // Giải phóng renderer Chromium (~100-200MB) ngay sau khi xong thay vì chỉ hide().
-    // Session/login vẫn được giữ trên đĩa qua partition 'persist:…' nên lần sau không cần đăng nhập lại.
-    // CHỈ destroy ở nhánh thành công + không phải DEBUG (DEBUG/lỗi cố tình giữ window để inspect).
+    // Tóm tắt xong (CÓ output) → DESTROY cửa sổ: giải phóng renderer (~100-200MB) và để lần sau mở lại
+    // trình duyệt SẠCH từ đầu (tránh ChatGPT bắt đăng nhập do session sống lâu). Session/login vẫn lưu
+    // trên đĩa qua partition 'persist:…'. DEBUG hoặc lỗi (nhánh dưới) cố tình GIỮ window để inspect/login.
     if (!DEBUG) destroyWindow(provider);
 
     return { ok: true, text, model: config.label, elapsedMs: Date.now() - t0 };

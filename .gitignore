@@ -31,3 +31,8 @@ desktop.ini
 *.tmp
 *.temp
 
+# Bundled local-LLM assets (lớn — binary tải lúc build qua scripts/fetch-binaries.js; model đặt thủ công)
+bin/
+models/
+*.gguf
+
