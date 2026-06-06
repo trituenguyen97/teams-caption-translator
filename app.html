@@ -593,11 +593,16 @@
       }
     }
 
-    // Map: id → { author, original, translated } — lưu để tổng hợp cuộc họn
+    // Map: id → { author, original, translated } — lưu để tổng hợp cuộc họn (KHÔNG cap → giữ đủ cho summary/export)
     const captionData = new Map();
 
     // Map: id → div element (để cập nhật bản dịch in-place)
     const entryEls = new Map();
+
+    // Cap số node .entry trong DOM cho họp dài (RAM renderer + reflow). captionData vẫn giữ đủ.
+    // MAX phải lớn hơn nhiều số câu sinh ra trong ~3s (cửa sổ reuseId) để không evict nhầm dòng đang sống.
+    const MAX_ENTRIES = 300;
+    const _retired = new Set();   // id đã bị evict khỏi DOM → chỉ cập nhật data, không tái tạo node
 
     // Kiểm tra API key và lấy nguồn dịch khi khởi động
     api.getSettings().then(s => {
@@ -651,25 +656,39 @@
       }
     });
 
+    // Tạo cấu trúc DOM của 1 entry MỘT LẦN; lưu ref các text-node con để cập nhật in-place
+    // (tránh reparse toàn bộ innerHTML 2 lần/câu — pending rồi translated).
+    function buildEntry(el) {
+      const meta = document.createElement('div'); meta.className = 'entry-meta';
+      const a  = document.createElement('span'); a.className  = 'entry-author';
+      const tm = document.createElement('span'); tm.className = 'entry-time';
+      meta.appendChild(a); meta.appendChild(tm);
+      const orig = document.createElement('div'); orig.className = 'entry-original';
+      const tr   = document.createElement('div'); tr.className   = 'entry-translated';
+      el.appendChild(meta); el.appendChild(orig); el.appendChild(tr);
+      el._author = a; el._ts = tm; el._orig = orig; el._tr = tr;
+    }
+
+    // rAF auto-scroll: gộp nhiều caption vào 1 reflow/frame thay vì ép layout đồng bộ mỗi câu.
+    let _scrollPending = false;
+    function scheduleScroll() {
+      if (_scrollPending || !autoScroll) return;
+      _scrollPending = true;
+      requestAnimationFrame(() => {
+        _scrollPending = false;
+        if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+      });
+    }
+
     // ── Caption: hiển/cập nhật entry (pending rồi được dịch) ──
     api.onCaptionLive(({ id, author, original, translated, ts, tsMs }) => {
       listEl.querySelector('.empty, .hint-banner')?.remove();
 
-      let el = entryEls.get(id);
-      if (!el) {
-        el = document.createElement('div');
-        el.className = 'entry';
-        el.dataset.id = id;
-        listEl.appendChild(el);
-        entryEls.set(id, el);
-        count++;
-        countEl.textContent = count + ' câu';
-      }
-
       const isPending  = translated === '…';
       const isFailed   = translated === null;
 
-      // Cập nhật captionData cho summary (giữ tsMs lần đầu để tính duration meeting)
+      // Cập nhật captionData cho summary (giữ tsMs lần đầu để tính duration meeting) — LUÔN làm,
+      // kể cả khi node DOM đã bị evict, để export/summary không mất dòng.
       if (!isPending) {
         const prev = captionData.get(id);
         captionData.set(id, {
@@ -679,20 +698,45 @@
         });
       }
 
-      el.innerHTML = `
-        <div class="entry-meta">
-          <span class="entry-author">${esc(author)}</span>
-          <span class="entry-time">${esc(ts)}</span>
-        </div>
-        <div class="entry-original">${esc(original)}</div>
-        <div class="entry-translated">${isPending
-          ? '<span style="color:#555;font-style:italic">đang dịch…</span>'
-          : isFailed
-            ? '<span style="color:#444;font-style:italic">—</span>'
-            : esc(translated)}</div>
-      `;
+      // Entry đã bị evict khỏi DOM (họp dài) → chỉ giữ data ở trên, KHÔNG tái tạo node
+      // (tránh node mọc sai thứ tự + đếm 'câu' sai khi bản dịch tới muộn).
+      if (_retired.has(id)) return;
 
-      if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+      let el = entryEls.get(id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'entry';
+        el.dataset.id = id;
+        buildEntry(el);
+        listEl.appendChild(el);
+        entryEls.set(id, el);
+        count++;
+        countEl.textContent = count + ' câu';
+        // Cap DOM: evict entry CŨ NHẤT khi vượt ngưỡng (chỉ gỡ khỏi DOM + entryEls; giữ captionData & count).
+        while (entryEls.size > MAX_ENTRIES) {
+          const oldest = listEl.firstElementChild;
+          if (!oldest || !oldest.classList.contains('entry')) break;
+          const oid = Number(oldest.dataset.id);
+          listEl.removeChild(oldest);
+          entryEls.delete(oid);
+          _retired.add(oid);
+        }
+      }
+
+      // Cập nhật từng text-node con — chỉ ghi khi đổi (reuseId có thể đổi author/original).
+      // textContent tự escape nên không cần esc().
+      if (el._author.textContent !== (author || '')) el._author.textContent = author || '';
+      if (el._ts.textContent !== (ts || '')) el._ts.textContent = ts || '';
+      if (el._orig.textContent !== (original || '')) el._orig.textContent = original || '';
+      if (isPending) {
+        el._tr.innerHTML = '<span style="color:#555;font-style:italic">đang dịch…</span>';
+      } else if (isFailed) {
+        el._tr.innerHTML = '<span style="color:#444;font-style:italic">—</span>';
+      } else {
+        el._tr.textContent = translated;
+      }
+
+      scheduleScroll();
     });
 
     // ── CC state từ main process (5s check + sau toggle) ──
@@ -1371,6 +1415,7 @@
       listEl.innerHTML = '<div class="empty">Đã xóa. Chờ captions mới...</div>';
       entryEls.clear();
       captionData.clear();
+      _retired.clear();
       count = 0;
       countEl.textContent = '0 câu';
     });
@@ -1498,13 +1543,20 @@
     });
     // ── end Summary modal ──
 
-    // Tắt auto-scroll khi user cuộn lên
+    // Tắt auto-scroll khi user cuộn lên — throttle bằng rAF (scroll fire hàng chục lần/cử chỉ;
+    // mỗi lần đọc scrollHeight/scrollTop/clientHeight là 1 layout read).
+    let _schPending = false;
     listEl.addEventListener('scroll', () => {
-      const atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 60;
-      if (!atBottom && autoScroll) {
-        autoScroll = false;
-        scrollBtn.classList.remove('active');
-      }
+      if (_schPending) return;
+      _schPending = true;
+      requestAnimationFrame(() => {
+        _schPending = false;
+        const atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 60;
+        if (!atBottom && autoScroll) {
+          autoScroll = false;
+          scrollBtn.classList.remove('active');
+        }
+      });
     });
 
     function esc(s) {

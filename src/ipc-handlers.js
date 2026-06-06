@@ -220,8 +220,13 @@ function registerAll(app) {
     if (s.localBaseUrl    !== undefined) { Store.set('localBaseUrl',    s.localBaseUrl);    state.localBaseUrl    = s.localBaseUrl; }
     if (s.localModel      !== undefined) { Store.set('localModel',      s.localModel);      state.localModel      = s.localModel; }
     send('settings-saved', { ok: true });
-    // Auto-start nếu provider vừa đổi sang local + đã có model
+    // Auto-start nếu provider vừa đổi sang local + đã có model.
+    // Ngược lại: nếu vừa đổi SANG provider khác local → tắt llama-server để giải phóng
+    // ~1GB RAM (model bị --mlock ghim cứng, không pageable) — không request nào tới nó nữa.
     if (state.provider === 'local') ensureLocalServerStarted();
+    else if (s.provider !== undefined && s.provider !== 'local') {
+      try { localLlm.stopServer(); } catch {}
+    }
   });
 
   // ── Local LLM ─────────────────────────

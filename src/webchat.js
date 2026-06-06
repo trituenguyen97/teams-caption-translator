@@ -658,8 +658,11 @@ async function summarizeViaWebChat(provider, prompt) {
       return { ok: false, error: `${config.label} không trả response trong 180s. Xem console log + window đang mở để debug.` };
     }
 
-    if (!DEBUG && win.isVisible()) win.hide();
     log(`==== DONE ${provider} in ${Date.now() - t0}ms, ${text.length} chars ====`);
+    // Giải phóng renderer Chromium (~100-200MB) ngay sau khi xong thay vì chỉ hide().
+    // Session/login vẫn được giữ trên đĩa qua partition 'persist:…' nên lần sau không cần đăng nhập lại.
+    // CHỈ destroy ở nhánh thành công + không phải DEBUG (DEBUG/lỗi cố tình giữ window để inspect).
+    if (!DEBUG) destroyWindow(provider);
 
     return { ok: true, text, model: config.label, elapsedMs: Date.now() - t0 };
   } catch (e) {
@@ -669,6 +672,13 @@ async function summarizeViaWebChat(provider, prompt) {
   }
 }
 
+function destroyWindow(provider) {
+  const win = _windows.get(provider);
+  if (!win) return;
+  try { win._allowClose = true; win.destroy(); } catch {}
+  _windows.delete(provider);   // belt-and-suspenders (win.on('closed') cũng tự xóa)
+}
+
 function destroyAllWindows() {
   for (const w of _windows.values()) {
     try { w._allowClose = true; w.close(); } catch {}
@@ -676,4 +686,4 @@ function destroyAllWindows() {
   _windows.clear();
 }
 
-module.exports = { summarizeViaWebChat, PROVIDERS, destroyAllWindows };
+module.exports = { summarizeViaWebChat, PROVIDERS, destroyWindow, destroyAllWindows };

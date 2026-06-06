@@ -252,27 +252,18 @@ async function checkCaptionsActive() {
        document.querySelector('[data-tid="closed-caption-default-text"]') ||
        document.querySelector('[data-tid="closed-caption-text"]'));
 
-  let result = { found: false, tids: [] };
+  // Chỉ trả boolean: dùng lại CAPTION_EVAL (5 querySelector cố định). Trước đây còn quét TOÀN BỘ
+  // [data-tid] + map/filter rồi serialize mảng tids qua CDP mỗi lần gọi (hot path, vài lần/giây)
+  // dù không ai đọc tids → bỏ để tiết kiệm.
+  let found = false;
   if (state.meetingPage) {
-    result = await state.meetingPage.evaluate(() => {
-      const tids = [...document.querySelectorAll('[data-tid]')]
-        .map(el => el.getAttribute('data-tid'))
-        .filter(t => /caption|closed|cc/i.test(t));
-      return {
-        found: !!(document.querySelector('[data-tid="closed-caption-renderer-wrapper"]') ||
-                  document.querySelector('[data-tid="closed-caption-v2-window-wrapper"]') ||
-                  document.querySelector('[data-tid="captions-panel-dismiss-button"]') ||
-                  document.querySelector('[data-tid="closed-caption-default-text"]') ||
-                  document.querySelector('[data-tid="closed-caption-text"]')),
-        tids,
-      };
-    }).catch(async (e) => {
+    found = await state.meetingPage.evaluate(CAPTION_EVAL).catch(async (e) => {
       console.warn('[checkCaptions] page stale:', e.message);
       state.meetingPage = await findMeetingPage();
-      return { found: false, tids: [] };
+      return false;
     });
   }
-  if (result.found) return true;
+  if (found) return true;
 
   if (state.browser?.isConnected()) {
     const allPages = await state.browser.pages().catch(() => []);
@@ -302,9 +293,15 @@ async function checkCaptionsActive() {
 
 // ── Teams Token Capture via WebSocket ─────────────────
 
+// Theo dõi các WS monitor đang sống theo wsUrl → tránh stack socket trùng + cho phép dừng sạch.
+const _tokenSockets = new Map();   // wsUrl → { ws, stopped }
+
 function _monitorWorkerForToken(wsUrl, label) {
+  if (_tokenSockets.has(wsUrl)) return;   // đã monitor URL này → bỏ qua (tránh nhân đôi socket/listener)
   try {
     const ws = new WebSocket(wsUrl);
+    const entry = { ws, stopped: false };
+    _tokenSockets.set(wsUrl, entry);
     let msgId = 0, reqCount = 0;
     ws.on('open', () => {
       ws.send(JSON.stringify({ id: ++msgId, method: 'Network.enable', params: { maxPostDataSize: 256 } }));
@@ -329,13 +326,26 @@ function _monitorWorkerForToken(wsUrl, label) {
     ws.on('error', (e) => console.warn('[teams-token] WS error:', label, e.message));
     ws.on('close', () => {
       console.log('[teams-token] WS closed:', label, '| reqs:', reqCount);
+      // Chỉ xóa nếu entry này vẫn là entry đang giữ (tránh đè entry mới của lần chạy sau).
+      if (_tokenSockets.get(wsUrl) === entry) _tokenSockets.delete(wsUrl);
+      if (entry.stopped) return;   // dừng chủ động → không reconnect
       setTimeout(() => _monitorWorkerForToken(wsUrl, label), 5000);
     });
-  } catch {}
+  } catch { _tokenSockets.delete(wsUrl); }
+}
+
+// Đóng toàn bộ WS monitor + xóa map (gọi trước mỗi lần start để thay thế, không chồng chất).
+function stopTeamsTokenCapture() {
+  for (const entry of _tokenSockets.values()) {
+    entry.stopped = true;
+    try { entry.ws.close(); } catch {}
+  }
+  _tokenSockets.clear();
 }
 
 async function startTeamsTokenCapture(cdpPort) {
   if (!cdpPort) return;
+  stopTeamsTokenCapture();   // thay thế monitor cũ thay vì stack thêm mỗi lần runService chạy lại
   try {
     const raw = await new Promise(resolve => {
       const req = http.get({ hostname: '127.0.0.1', port: cdpPort, path: '/json/list' }, res => {

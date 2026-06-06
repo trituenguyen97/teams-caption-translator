@@ -29,6 +29,9 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // App là overlay meeting (thường bị minimize/che sau Teams). Mặc định Electron throttle
+      // timer renderer xuống ~1/s khi bị che → audio-chunk (MediaRecorder) + cập nhật caption bị giật.
+      backgroundThrottling: false,
     },
     title: 'Caption Translator',
     backgroundColor: '#1b1b1b',
@@ -123,19 +126,10 @@ app.whenReady().then(() => {
   registerAll(app);
   createWindow();
   startService();
-  // Auto-start local LLM server nếu provider=local + đã tải model
-  if (state.provider === 'local') {
-    setTimeout(() => {
-      try {
-        const localLlm = require('./src/local-llm');
-        const st = localLlm.serverStatus();
-        if (st.binaryReady && st.modelReady && !st.running) {
-          console.log('[boot] auto-start local LLM server...');
-          localLlm.startServer({ port: 8080 }).catch(e => console.warn('[boot] local server start:', e.message));
-        }
-      } catch (e) { console.warn('[boot] local-llm not ready:', e.message); }
-    }, 2000);
-  }
+  // KHÔNG auto-start local LLM server lúc boot nữa: tránh ghim ~1GB RAM (--mlock) khi app
+  // mở mà chưa vào họp. Server được khởi động lazy bởi ensureLocalServerStarted() khi user
+  // bấm ▶ (toggle-captions) hoặc chọn provider=local trong Cài đặt. Câu đầu tiên trong lúc
+  // server đang load sẽ tự fallback Google Free (translation.js) — đúng như hành vi đã có.
   app.on('activate', () => {
     if (!BrowserWindow.getAllWindows().length) createWindow();
   });

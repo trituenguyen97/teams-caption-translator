@@ -9,6 +9,10 @@ const POLL_MS = 200;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (ch, data) => state.win?.webContents?.send(ch, data);
 
+// CDP session bắt token của meeting page — giữ ref để detach trước khi tạo mới (runService chạy
+// lại trong vòng lặp self-restart; nếu không detach, listener Network.requestWillBeSent chồng chất).
+let _tokenCdpSession = null;
+
 function timestamp() {
   return new Date().toLocaleTimeString('vi-VN', { hour12: false });
 }
@@ -119,7 +123,9 @@ async function runService() {
   cdp.startTeamsTokenCapture(cdpPort);
 
   try {
+    if (_tokenCdpSession) { try { await _tokenCdpSession.detach(); } catch {} _tokenCdpSession = null; }
     const cdpSession = await page.createCDPSession();
+    _tokenCdpSession = cdpSession;
     await cdpSession.send('Network.enable', { maxPostDataSize: 256 });
     cdpSession.on('Network.requestWillBeSent', (params) => {
       const auth = params.request?.headers?.authorization || params.request?.headers?.Authorization;

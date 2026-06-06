@@ -65,6 +65,21 @@ const _msTranslatorLangMap = {
   'Portuguese': 'pt', 'Russian': 'ru', 'Thai': 'th', 'Indonesian': 'id',
 };
 
+// Map targetLang → mã ngôn ngữ của từng provider. Hoist ra module scope (trước đây tạo lại
+// object literal mỗi câu trong 4 hàm dịch cloud). Giữ 3 map RIÊNG vì giá trị khác nhau.
+const GOOGLE_LANG_CODES = {
+  'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-CN',
+  'Korean': 'ko', 'Japanese': 'ja', 'French': 'fr', 'German': 'de', 'Spanish': 'es',
+};
+const DEEPL_LANG_CODES = {
+  'Vietnamese': 'VI', 'English': 'EN', 'Simplified Chinese': 'ZH',
+  'Korean': 'KO', 'Japanese': 'JA', 'French': 'FR', 'German': 'DE', 'Spanish': 'ES',
+};
+const AZURE_LANG_CODES = {
+  'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-Hans',
+  'Korean': 'ko', 'Japanese': 'ja', 'French': 'fr', 'German': 'de', 'Spanish': 'es',
+};
+
 // ── Phrase Map ────────────────────────────────────────
 const PHRASE_MAP = {
   'こんにちは': 'Xin chào.', 'おはようございます': 'Chào buổi sáng.',
@@ -144,21 +159,23 @@ function lookupPhrase(text) {
 }
 
 // ── LLM Refusal Detection ─────────────────────────────
+// Hoist ra module scope: isLLMRefusal được gọi 2-3 lần/câu (qeSuspicion S5 + các gate orchestrator)
+// → trước đây biên dịch lại 12 regex mỗi lần gọi. Không g-flag nên .test() stateless, chia sẻ an toàn.
+const REFUSAL_PATTERNS = [
+  /i('m| am) (sorry|afraid|unable|not able)/i,
+  /i (cannot|can't|couldn't) (translate|understand|process)/i,
+  /sorry[,.]? (i |but )?(cannot|can't|am unable)/i,
+  /unable to (translate|understand|process)/i,
+  /xin lỗi[,.]? (nhưng )?tôi không thể/i,
+  /tôi xin lỗi[,.]/i,
+  /không thể (hiểu|dịch|xử lý)/i,
+  /văn bản đầu vào/i, /nội dung đầu vào/i,
+  /cannot (be translated|determine|identify)/i,
+  /please provide/i, /would you (like|want)/i,
+];
 function isLLMRefusal(output, input) {
   if (!output) return true;
-  const refusalPatterns = [
-    /i('m| am) (sorry|afraid|unable|not able)/i,
-    /i (cannot|can't|couldn't) (translate|understand|process)/i,
-    /sorry[,.]? (i |but )?(cannot|can't|am unable)/i,
-    /unable to (translate|understand|process)/i,
-    /xin lỗi[,.]? (nhưng )?tôi không thể/i,
-    /tôi xin lỗi[,.]/i,
-    /không thể (hiểu|dịch|xử lý)/i,
-    /văn bản đầu vào/i, /nội dung đầu vào/i,
-    /cannot (be translated|determine|identify)/i,
-    /please provide/i, /would you (like|want)/i,
-  ];
-  return refusalPatterns.some(p => p.test(output));
+  return REFUSAL_PATTERNS.some(p => p.test(output));
 }
 
 // ── Quality Estimation (chấm độ ngờ bản dịch — reference-free, #QE) ────
@@ -360,9 +377,7 @@ async function callGemini(apiKey, model, userPrompt, maxTokens = 4096, systemPro
 }
 
 async function translateGoogle(text, tgtLang, apiKey) {
-  const LANG_CODES = { 'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-CN',
-    'Korean': 'ko', 'Japanese': 'ja', 'French': 'fr', 'German': 'de', 'Spanish': 'es' };
-  const tgt = LANG_CODES[tgtLang] || 'vi';
+  const tgt = GOOGLE_LANG_CODES[tgtLang] || 'vi';
   const qs = `?key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(text)}&target=${tgt}&format=text`;
   const r = await httpsGet('translation.googleapis.com', '/language/translate/v2' + qs, {});
   if (!r.body) return null;
@@ -371,9 +386,7 @@ async function translateGoogle(text, tgtLang, apiKey) {
 
 // Google Translate (FREE) — endpoint công khai dùng bởi browser extensions, không cần API key
 async function translateGoogleFree(text, tgtLang) {
-  const LANG_CODES = { 'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-CN',
-    'Korean': 'ko', 'Japanese': 'ja', 'French': 'fr', 'German': 'de', 'Spanish': 'es' };
-  const tgt = LANG_CODES[tgtLang] || 'vi';
+  const tgt = GOOGLE_LANG_CODES[tgtLang] || 'vi';
   const path = `/translate_a/single?client=gtx&sl=auto&tl=${tgt}&dt=t&q=${encodeURIComponent(text)}`;
   const r = await httpsGet('translate.googleapis.com', path, {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -399,9 +412,7 @@ async function translateGoogleFree(text, tgtLang) {
 }
 
 async function translateDeepL(text, tgtLang) {
-  const LANG_CODES = { 'Vietnamese': 'VI', 'English': 'EN', 'Simplified Chinese': 'ZH',
-    'Korean': 'KO', 'Japanese': 'JA', 'French': 'FR', 'German': 'DE', 'Spanish': 'ES' };
-  const tgt = LANG_CODES[tgtLang] || 'VI';
+  const tgt = DEEPL_LANG_CODES[tgtLang] || 'VI';
   const id = (Math.floor(Math.random() * 99999) + 8300000) * 1000 + 1;
   const payload = {
     jsonrpc: '2.0', method: 'LMT_handle_translations', id,
@@ -427,9 +438,7 @@ async function translateDeepL(text, tgtLang) {
 }
 
 async function translateAzure(text, tgtLang, apiKey, region) {
-  const LANG_CODES = { 'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-Hans',
-    'Korean': 'ko', 'Japanese': 'ja', 'French': 'fr', 'German': 'de', 'Spanish': 'es' };
-  const tgt = LANG_CODES[tgtLang] || 'vi';
+  const tgt = AZURE_LANG_CODES[tgtLang] || 'vi';
   const body = JSON.stringify([{ Text: text }]);
   const r = await httpsPost('api.cognitive.microsofttranslator.com',
     `/translate?api-version=3.0&to=${tgt}`, {
@@ -646,14 +655,13 @@ async function checkLocalServer() {
 const _TM_MAX = 500;
 const _tm = new Map();
 const _tmKey = (text) => `${state.provider}|${state.targetLang}|${normJa(text)}`;
-function tmGet(text) {
-  const k = _tmKey(text);
+// tmGet/tmSet nhận KEY đã tính sẵn → 1 câu fresh chỉ chạy normJa 1 lần cho key (trước đây get+set = 2 lần).
+function tmGetByKey(k) {
   if (!_tm.has(k)) return undefined;
   const v = _tm.get(k); _tm.delete(k); _tm.set(k, v);   // chạm → mới nhất (LRU)
   return v;
 }
-function tmSet(text, val) {
-  const k = _tmKey(text);
+function tmSetByKey(k, val) {
   if (_tm.has(k)) _tm.delete(k);
   _tm.set(k, val);
   if (_tm.size > _TM_MAX) _tm.delete(_tm.keys().next().value);   // đẩy cũ nhất
@@ -662,11 +670,13 @@ function tmSet(text, val) {
 // ── Translation Orchestrator ──────────────────────────
 
 // Wrapper cache: tra TM trước; chỉ cache bản dịch THẬT (khác input) để tránh cache lỗi passthrough.
-async function translateText(text) {
-  const cached = tmGet(text);
+// precomputedKey: key đã tính ở enqueueTranslate (tránh tính lại normJa khi đi qua hàng đợi).
+async function translateText(text, precomputedKey) {
+  const k = precomputedKey || _tmKey(text);
+  const cached = tmGetByKey(k);
   if (cached !== undefined) return cached;
   const result = await _translateUncached(text);
-  if (result && result !== text) tmSet(text, result);
+  if (result && result !== text) tmSetByKey(k, result);
   return result;
 }
 
@@ -745,18 +755,22 @@ const _queue = [];
 let _running = 0;
 
 function enqueueTranslate(text) {
-  // Tất cả translation providers còn lại (teams-token / google-free / deepl / local) không cần API key
+  // Short-circuit cache TRƯỚC khi vào hàng đợi: câu trùng (chào hỏi/cụm lặp hay gặp) trả ngay ~0ms,
+  // không phải chờ sau inference local (concurrency=1, ~500ms/câu). Tất cả provider còn lại không cần key.
+  const k = _tmKey(text);
+  const cached = tmGetByKey(k);
+  if (cached !== undefined) return Promise.resolve(cached);
   return new Promise(resolve => {
-    _queue.push({ text, resolve });
+    _queue.push({ text, key: k, resolve });
     drainQueue();
   });
 }
 
 function drainQueue() {
   while (_running < getMaxConcurrent() && _queue.length > 0) {
-    const { text, resolve } = _queue.shift();
+    const { text, key, resolve } = _queue.shift();
     _running++;
-    translateText(text)
+    translateText(text, key)
       .then(result => { _running--; resolve(result); drainQueue(); })
       .catch(() => { _running--; resolve(text); drainQueue(); });
   }
