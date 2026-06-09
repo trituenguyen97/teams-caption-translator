@@ -7,7 +7,7 @@ const { app, BrowserWindow, desktopCapturer, Menu, nativeTheme } = require('elec
 const path = require('path');
 const state = require('./src/state');
 const Store = require('./src/store');
-const { registerAll, ensureLocalServerStarted } = require('./src/ipc-handlers');
+const { registerAll, ensureLocalServerStarted, ensureSttModelsDownloaded } = require('./src/ipc-handlers');
 const { LANG_NAMES, LANG_LABELS } = require('./src/translation');
 const { runUiaService, stopHelper: stopUiaHelper } = require('./src/uia-captions');
 const { runAudioService, stopSTTServer } = require('./src/audio-stt');
@@ -168,6 +168,10 @@ app.whenReady().then(() => {
     setTimeout(() => { try { ensureLocalServerStarted(); } catch (e) { console.warn('[boot] auto-start local:', e.message); } }, 2000);
   }
 
+  // Tải SẴN model STT Windows Live Captions 1 lần (lần chạy đầu, nếu thiếu) — chạy nền, % hiện ở menu Nguồn.
+  // Chỉ chạy khi Win11 có LC + chưa đủ model; tắt qua Store 'autoFetchSttModels'. Offline → helper tự bỏ.
+  setTimeout(() => { try { ensureSttModelsDownloaded(); } catch (e) { console.warn('[boot] auto-fetch STT models:', e.message); } }, 8000);
+
   // (KHÔNG prewarm ChatGPT nữa) — mỗi lần bấm Tóm tắt mới mở cửa sổ webchat, xong thì destroy. Giữ
   // session sống lâu khiến ChatGPT bắt đăng nhập ở lần hỏi thứ 2 nên không pre-warm/giữ cửa sổ nền.
 
@@ -179,11 +183,15 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopSTTServer();
   try { stopUiaHelper(); } catch {}
+  try { require('./src/win-livecaptions').shutdown(); } catch {}   // tắt cửa sổ LC ẩn (không để treo)
   try { require('./src/local-llm').stopServer(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   try { stopUiaHelper(); } catch {}
+  try { require('./src/win-livecaptions').shutdown(); } catch {}
+  // Kill ĐỒNG BỘ để chắc chắn LiveCaptions.exe (đang ẩn) chết HẲN trước khi app thoát (spawn async có thể bị cắt giữa chừng).
+  try { require('child_process').execSync('taskkill /F /IM LiveCaptions.exe', { stdio: 'ignore', windowsHide: true }); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
 });

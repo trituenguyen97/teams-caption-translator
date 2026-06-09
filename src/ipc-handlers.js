@@ -55,16 +55,41 @@ function ensureLocalServerStarted(notifyIfMissing = false) {
   } catch (e) { console.warn('[auto-start] exception:', e.message); }
 }
 
+// Tải SẴN model Windows Live Captions 1 LẦN (gọi lúc boot). Chỉ Win11 có LC + còn thiếu + chưa thử phiên này.
+// Chạy nền, có % qua 'stt-lc-progress'. Tắt bằng Store 'autoFetchSttModels'=false. (Offline → helper tự early-abort.)
+let _sttAutoFetchTried = false;
+async function ensureSttModelsDownloaded() {
+  if (_sttAutoFetchTried) return;
+  _sttAutoFetchTried = true;
+  if (Store.get('autoFetchSttModels', true) === false) return;
+  if (!winLc.isAvailable()) return;
+  try {
+    const { missing } = await winLc.checkInstalled();   // 4 locale LC: en-US/ja-JP/ko-KR/zh-CN
+    if (!missing.length) { console.log('[stt-autofetch] đủ model, bỏ qua'); return; }
+    console.log('[stt-autofetch] tải model LC còn thiếu:', missing.join(','));
+    const r = await winLc.downloadModels({ locales: missing, onProgress: (p) => send('stt-lc-progress', p) });
+    console.log('[stt-autofetch] xong, overall=', r && r.overall);
+  } catch (e) { console.warn('[stt-autofetch]', e.message); }
+}
+
 function registerAll(app) {
   // Áp dụng ngôn ngữ nguồn STT đã lưu (system/mic) lúc boot — Teams không dùng STT cục bộ.
   try { stt.setLanguage(Store.get('srcLang', '')); } catch {}
 
   // ── Language ──────────────────────────
   ipcMain.on('set-lang', (_, lang) => {
+    const changed = lang !== state.langCode;
     state.targetLang = LANG_NAMES[lang] || lang;
     state.targetLangLabel = LANG_LABELS[lang] || lang.toUpperCase();
     state.langCode = lang;
     Store.set('lang', lang);   // lưu để mở app giữ nguyên ngôn ngữ đích đã chọn
+    // Đổi ngôn ngữ ĐÍCH khi LC đang chạy → tắt LC + về idle (tránh treo LC ẩn; re-Play với target mới).
+    if (changed && winLc.isCaptioning()) {
+      try { winLc.stopCaptions(); } catch {}
+      state.userActive = false; state.audioPaused = true;
+      send('cc-state', { active: false });
+      send('status', { type: 'idle', key: 'status.idle' });
+    }
   });
 
   // ── Window ────────────────────────────
@@ -95,30 +120,39 @@ function registerAll(app) {
         send('status', { type: 'ended', key: 'status.recordingPaused' });
         return;
       }
-      // ── Routing: en/ja/ko/zh + Win11 có LC → Windows Live Captions (ẩn); vi (hoặc máy không có LC) → STT nội bộ ──
+      // STT nội bộ (Whisper/PhoWhisper): renderer capture PCM → handlePcm. Dùng cho mic / vi / máy không LC / LC lỗi.
+      const startLocalStt = (suffix) => {
+        try { resetSegmentation(); } catch {}   // bắt đầu phiên ghi mới → VAD sạch
+        send('start-audio-capture', { source: state.captureSource });
+        send('cc-state', { active: true });
+        send('status', { type: 'running', key: 'status.audioRecording', vars: { label: label + (suffix || '') } });
+      };
+      // ── Routing: CHỈ 'system' + en/ja/ko/zh + Win11 có LC → Live Captions (ẩn).
+      //    'mic' → STT nội bộ (LC mic là opt-in cộng dồn, không tách riêng mic). vi / không LC → STT nội bộ. ──
       const srcLang  = Store.get('srcLang', '') || 'ja';
       const lcLocale = winLc.LC_LANGS[srcLang];
-      if (lcLocale && winLc.isAvailable()) {
-        const chk = await winLc.checkInstalled([lcLocale]);
-        if (!chk.installed.includes(lcLocale)) {
-          state.userActive = false; state.audioPaused = true;
-          send('cc-state', { active: false });
-          send('status', { type: 'error', msg: `Cần tải model Live Captions cho "${srcLang}" — mở menu Nguồn → Tải model.` });
-          return;
-        }
-        const ok = winLc.startCaptionsService(lcLocale);
+      if (state.captureSource === 'system' && lcLocale && winLc.isAvailable()) {
+        // KHÔNG check model đồng bộ ở đây: checkInstalled spawn PowerShell ~1-2s → trễ phản hồi → user bấm lại
+        // 2-3 lần làm LẬT audioPaused (start/stop/start) → race. Start LC NGAY (đồng bộ, không await) → nút ăn
+        // ngay lần đầu. Model thiếu / LC lỗi → helper báo onFail → tự fallback STT nội bộ.
+        const onFail = (reason) => {
+          console.warn('[toggle] Live Captions lỗi (' + reason + ') → fallback STT nội bộ');
+          try { winLc.stopCaptions(); } catch {}
+          if (!state.userActive || state.audioPaused || state.captureSource === 'teams') return;
+          if (String(reason).includes('need-download')) {
+            send('status', { type: 'error', msg: `Chưa có model Live Captions cho "${srcLang}" (menu Nguồn → Tải model). Tạm dùng STT nội bộ.` });
+          }
+          startLocalStt(' (STT nội bộ)');
+        };
+        const ok = winLc.startCaptionsService(lcLocale, null, onFail);
         if (ok) {
           send('cc-state', { active: true });
           send('status', { type: 'running', key: 'status.audioRecording', vars: { label: 'Live Captions (' + lcLocale + ')' } });
           return;
         }
-        // startCaptionsService lỗi → rơi xuống STT nội bộ
+        // start lỗi ngay → rơi xuống STT nội bộ
       }
-      // STT nội bộ (Whisper/PhoWhisper) — cho vi, hoặc máy không có LC, hoặc LC khởi động lỗi
-      try { resetSegmentation(); } catch {}   // bắt đầu phiên ghi mới → VAD sạch
-      send('start-audio-capture', { source: state.captureSource });
-      send('cc-state', { active: true });
-      send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
+      startLocalStt();
       return;
     }
 
@@ -262,7 +296,15 @@ function registerAll(app) {
       Store.set('captureSource', s.captureSource);
     }
     if (s.micDeviceId     !== undefined) { Store.set('micDeviceId',     s.micDeviceId); }
-    if (s.srcLang         !== undefined) { Store.set('srcLang',         s.srcLang); try { stt.setLanguage(s.srcLang); } catch {} }
+    if (s.srcLang         !== undefined) {
+      const lcChanged = s.srcLang !== Store.get('srcLang', '');
+      Store.set('srcLang', s.srcLang); try { stt.setLanguage(s.srcLang); } catch {}
+      if (lcChanged && winLc.isCaptioning()) {   // đổi ngôn ngữ NGUỒN khi LC đang chạy → tắt LC + về idle (re-Play lang mới)
+        try { winLc.stopCaptions(); } catch {}
+        state.userActive = false; state.audioPaused = true;
+        send('cc-state', { active: false });
+      }
+    }
     if (s.overlayEnabled  !== undefined) { Store.set('overlayEnabled',  !!s.overlayEnabled); state.overlayEnabled = !!s.overlayEnabled; try { overlay.setEnabled(!!s.overlayEnabled); } catch {} }
     if (s.localBaseUrl    !== undefined) { Store.set('localBaseUrl',    s.localBaseUrl);    state.localBaseUrl    = s.localBaseUrl; }
     if (s.localModel      !== undefined) { Store.set('localModel',      s.localModel);      state.localModel      = s.localModel; }
@@ -330,4 +372,4 @@ function registerAll(app) {
   ipcMain.handle('export-summary', async (_, opts) => exportSummary(opts));
 }
 
-module.exports = { registerAll, ensureLocalServerStarted };
+module.exports = { registerAll, ensureLocalServerStarted, ensureSttModelsDownloaded };

@@ -146,16 +146,19 @@ try {
     }
     # poll tới khi package cài xong hoặc timeout
     $deadline = (Get-Date).AddMinutes(8)
-    $last = -999
+    $noProgDeadline = (Get-Date).AddSeconds(45)   # 45s không thấy % nào (offline/policy chặn) → bỏ, KHÔNG treo 8 phút
+    $last = -999; $seenProg = $false
     while ((Get-Date) -lt $deadline) {
       Start-Sleep -Milliseconds 1200
       ReHide
       if (PkgInstalled $locale) { break }
       $pct = ProgressPct
-      if ($pct -lt 0) { $pct = 0 }
-      if ($pct -ne $last) {
-        $last = $pct
-        Emit @{ t='progress'; overall=(Overall $pct); done=$completed; total=$total; lang=$locale; langPct=$pct; status='downloading' }
+      if ($pct -ge 0) { $seenProg = $true }
+      if (-not $seenProg -and (Get-Date) -gt $noProgDeadline) { Emit @{ t='err'; m="no progress (offline/blocked?): $locale" }; break }
+      $p2 = $pct; if ($p2 -lt 0) { $p2 = 0 }
+      if ($p2 -ne $last) {
+        $last = $p2
+        Emit @{ t='progress'; overall=(Overall $p2); done=$completed; total=$total; lang=$locale; langPct=$p2; status='downloading' }
       }
     }
     if (-not (PkgInstalled $locale)) { Emit @{ t='err'; m="timeout/failed: $locale" }; continue }

@@ -168,7 +168,7 @@ $AE=[System.Windows.Automation.AutomationElement]; $TS=[System.Windows.Automatio
 $nameCap=New-Object System.Windows.Automation.PropertyCondition($AE::NameProperty,'Live Captions')
 $wins=@()
 foreach($p in (Get-Process -Name ms-teams -EA SilentlyContinue|Select-Object -Expand Id)){ $c=New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty,[int]$p); try{ foreach($w in $root.FindAll($TS::Children,$c)){ $wins+=$w } }catch{} }
-foreach($w in $wins){ try{ if($w.FindFirst($TS::Descendants,$nameCap)){ Write-Output 'already-on'; exit } }catch{} }
+$alreadyOn=$false; foreach($w in $wins){ try{ if($w.FindFirst($TS::Descendants,$nameCap)){ $alreadyOn=$true; break } }catch{} }
 $meeting=$null
 foreach($w in $wins){ $n='';try{$n=$w.Current.Name}catch{}; if($n -match 'Meeting|Call' -and $n -notmatch '^(Chat|Captions|Sharing)'){ $meeting=$w; break } }
 if(-not $meeting){ foreach($w in $wins){ $n='';try{$n=$w.Current.Name}catch{}; if($n -notmatch '^(Chat|Captions|Sharing)' -and $n -match 'Microsoft Teams'){ $meeting=$w; break } } }
@@ -185,7 +185,10 @@ $t2=0;[void][FG]::GetWindowThreadProcessId($h,[ref]$t2)
 [void][FG]::AttachThreadInput($t1,$t2,$false)
 Start-Sleep -Milliseconds 250
 [System.Windows.Forms.SendKeys]::SendWait('%+c')
-Write-Output 'sent'
+# Panel đã tồn tại (caption ON) nhưng helper KHÔNG đọc được (a11y tree của Teams bị "cold" khi panel sống lâu):
+# %+c đầu = TẮT (huỷ panel) → 600ms → %+c sau = BẬT lại → panel MỚI → a11y tươi → helper đọc được.
+# (Tự động hoá đúng workaround thủ công: tắt rồi bật lại Live Captions.)
+if($alreadyOn){ Start-Sleep -Milliseconds 600; [System.Windows.Forms.SendKeys]::SendWait('%+c'); Write-Output 'refreshed' } else { Write-Output 'sent' }
 `;
 
 let _enabling = false;
