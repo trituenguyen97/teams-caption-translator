@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: transparent; overflow: hidden;
+    -webkit-user-select: none; user-select: none; cursor: default;
+    pointer-events: none;
+  }
+  #layer { position: absolute; inset: 0; }
+  .ct-trans {
+    position: absolute;
+    color: #ffffff;
+    font: 600 13px/1.35 "Segoe UI", system-ui, sans-serif;
+    background: #1e1e1e;
+    padding: 0 6px;
+    box-sizing: border-box;
+    overflow: hidden;
+    white-space: normal; word-break: break-word;
+    /* KHÔNG transition top/left → bám SÁT text gốc khi scroll (không trượt trễ); chỉ fade khi ẩn/hiện */
+    opacity: 0;
+    transition: opacity .1s ease;
+    pointer-events: none;
+    will-change: opacity;
+  }
+  .ct-trans.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="layer"></div>
+<script>
+  const layer = document.getElementById('layer');
+  const pool = new Map();   // key (text GỐC, ổn định) → div
+
+  // chọn màu chữ tương phản với nền (sáng→chữ tối, tối→chữ trắng)
+  function fgFor(bg) {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(bg || '');
+    if (!m) return '#ffffff';
+    const r = parseInt(m[1], 16), g = parseInt(m[2], 16), b = parseInt(m[3], 16);
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    return lum > 140 ? '#141414' : '#ffffff';
+  }
+
+  window.__overlay.onRows(({ rows, bg }) => {
+    const fg = fgFor(bg);
+    const seen = new Set();
+    for (const r of (rows || [])) {
+      if (!r.key || !r.text) continue;
+      seen.add(r.key);
+      let d = pool.get(r.key);
+      const isNew = !d;
+      if (isNew) {
+        d = document.createElement('div');
+        d.className = 'ct-trans';
+        layer.appendChild(d);
+        pool.set(r.key, d);
+      }
+      if (d.textContent !== r.text) d.textContent = r.text;
+      if (bg) { d.style.background = bg; d.style.color = fg; }   // theo theme Teams
+      d.style.left = r.x + 'px';      // snap (không transition) → đi cùng text khi scroll
+      d.style.top = r.y + 'px';
+      d.style.width = Math.max(80, r.w) + 'px';
+      d.style.minHeight = (r.minH || 16) + 'px';
+      d.style.maxHeight = r.maxH + 'px';
+      if (isNew) requestAnimationFrame(() => d.classList.add('show'));
+    }
+    for (const [k, d] of pool) {
+      if (!seen.has(k)) {
+        d.classList.remove('show');
+        pool.delete(k);
+        setTimeout(() => { try { d.remove(); } catch (e) {} }, 140);
+      }
+    }
+  });
+</script>
+</body>
+</html>

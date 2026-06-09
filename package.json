@@ -6,11 +6,13 @@
   "scripts": {
     "start": "electron .",
     "fetch-binaries": "node scripts/fetch-binaries.js",
-    "prebuild": "node scripts/fetch-binaries.js",
+    "fetch-stt-model": "node scripts/fetch-stt-model.js",
+    "prebuild": "node scripts/fetch-binaries.js && node scripts/fetch-stt-model.js",
     "build": "electron-builder"
   },
   "dependencies": {
-    "puppeteer-core": "^24.42.0"
+    "puppeteer-core": "^24.42.0",
+    "sherpa-onnx-node": "^1.13.2"
   },
   "devDependencies": {
     "electron": "^33.4.11",
@@ -29,7 +31,9 @@
       "src/**",
       "preload.js",
       "app.html",
-      "stt-server.py",
+      "overlay.html",
+      "overlay-preload.js",
+      "scripts/uia-captions-helper.ps1",
       "node_modules/**/*",
       "!node_modules/puppeteer-core/lib/{esm,es5-iife}/**",
       "!node_modules/chromium-bidi/**",
@@ -39,11 +43,24 @@
       "!node_modules/**/{test,tests,__tests__,example,examples,.github,docs,doc}/**"
     ],
     "asarUnpack": [
-      "stt-server.py"
+      "node_modules/sherpa-onnx-node/**",
+      "node_modules/sherpa-onnx-*/**"
     ],
     "extraResources": [
-      { "from": "bin", "to": "bin", "filter": ["**/*"] },
-      { "from": "models", "to": "models", "filter": ["**/*.gguf"] }
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "models",
+        "to": "models",
+        "filter": [
+          "**/*.gguf"
+        ]
+      }
     ]
   }
 }

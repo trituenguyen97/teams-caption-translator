@@ -2,7 +2,7 @@
  * caption-service.js — DOM injection + runService (Teams caption polling loop)
  */
 const state = require('./state');
-const { enqueueTranslate, preprocessText, storeTeamsToken, PROV_NAMES } = require('./translation');
+const { enqueueTranslate, preprocessText, storeTeamsToken, PROV_NAMES, hasUntranslatedCJK } = require('./translation');
 const cdp = require('./cdp-browser');
 
 const POLL_MS = 200;
@@ -73,7 +73,7 @@ async function injectTranslationBelowCaption(page, originalText, translatedText)
 // ── runService — Core caption polling loop ────────────
 
 async function runService() {
-  send('status', { type: 'connecting', msg: 'Đang kết nối CDP...' });
+  send('status', { type: 'connecting', key: 'status.connectingCDP' });
 
   const cdpEnvReady = await cdp.isCDPEnvSet();
   if (!cdpEnvReady) {
@@ -90,7 +90,7 @@ async function runService() {
 
   let page = await cdp.findMeetingPage();
   if (!page) {
-    send('status', { type: 'waiting', msg: 'Chờ meeting Teams...' });
+    send('status', { type: 'waiting', key: 'status.waitingMeeting' });
     while (!page) {
       await sleep(3000);
       if (state.captureSourceChanged) return;
@@ -100,8 +100,19 @@ async function runService() {
   if (state.browser && state.browser !== browser) browser = state.browser;
   state.meetingPage = page;
 
+  // ── No auto-play: đã kết nối + có meeting nhưng CHỜ user bấm ▶ mới bắt đầu dịch ──
+  if (!state.userActive) {
+    send('status', { type: 'idle', key: 'status.idle' });
+    send('cc-state', { active: false });
+    while (!state.userActive) {
+      if (state.captureSourceChanged) return;
+      if (!browser.isConnected()) return;
+      await sleep(300);
+    }
+  }
+
   if (!await cdp.checkCaptionsActive()) {
-    send('status', { type: 'waiting-captions', msg: 'Bật Live Captions trong Teams để bắt đầu dịch' });
+    send('status', { type: 'waiting-captions', key: 'status.enableCaptions' });
     let _ccTick = 0;
     while (!await cdp.checkCaptionsActive()) {
       if (state.captureSourceChanged) return;
@@ -115,7 +126,7 @@ async function runService() {
   }
 
   const provLabel = PROV_NAMES[state.provider] || state.provider;
-  send('status', { type: 'running', msg: `Đang dịch sang ${state.targetLangLabel} bằng ${provLabel}` });
+  send('status', { type: 'running', key: 'status.translating', vars: { lang: state.langCode, prov: provLabel } });
 
   const wsEndpoint = browser.wsEndpoint?.() || '';
   const portMatch = wsEndpoint.match(/:(\d+)\//);
@@ -138,7 +149,8 @@ async function runService() {
   } catch (e) { console.warn('[teams-token] CDP session error:', e.message); }
 
   const ccStateInterval = setInterval(async () => {
-    send('cc-state', { active: await cdp.checkCaptionsActive() });
+    // Nút play = userActive (ý định user); chỉ ⏹ khi đang dịch + caption Teams thật sự bật
+    send('cc-state', { active: state.userActive && await cdp.checkCaptionsActive() });
   }, 5000);
 
   const committed = new Map();
@@ -169,9 +181,24 @@ async function runService() {
 
   // Polling loop
   while (true) {
+    // user bấm ⏹ giữa chừng → dừng dịch, về idle, chờ ▶ lại (KHÔNG tự dịch tiếp)
+    if (!state.userActive) {
+      send('status', { type: 'idle', key: 'status.idle' });
+      send('cc-state', { active: false });
+      while (!state.userActive) {
+        if (state.captureSourceChanged) { clearInterval(ccStateInterval); return; }
+        if (!browser.isConnected()) { clearInterval(ccStateInterval); return; }
+        await sleep(300);
+      }
+      const provLabelR = PROV_NAMES[state.provider] || state.provider;
+      send('status', { type: 'running', key: 'status.translating', vars: { lang: state.langCode, prov: provLabelR } });
+      send('cc-state', { active: true });
+      isInit = true;   // re-baseline: không dịch lại loạt câu cũ đang hiển trên Teams
+    }
+
     const pages = await browser.pages().catch(() => []);
     if (!pages.length) {
-      send('status', { type: 'ended', msg: 'Meeting đã kết thúc' });
+      send('status', { type: 'ended', key: 'status.meetingEnded' });
       clearInterval(ccStateInterval); break;
     }
 
@@ -179,7 +206,7 @@ async function runService() {
       const newPage = await cdp.findMeetingPage();
       if (newPage) { page = newPage; state.meetingPage = newPage; isInit = true; }
       else {
-        send('status', { type: 'waiting', msg: 'Meeting kết thúc — chờ meeting mới...' });
+        send('status', { type: 'waiting', key: 'status.meetingEndedWaiting' });
         clearInterval(ccStateInterval); break;
       }
       await sleep(POLL_MS); continue;
@@ -191,7 +218,7 @@ async function runService() {
          document.querySelector('[data-tid="hangup-main-btn"]'))
     ).catch(() => false);
     if (!stillInMeeting) {
-      send('status', { type: 'waiting', msg: 'Meeting kết thúc — chờ meeting mới...' });
+      send('status', { type: 'waiting', key: 'status.meetingEndedWaiting' });
       clearInterval(ccStateInterval); break;
     }
 
@@ -285,8 +312,11 @@ async function runService() {
           const tsMs = Date.now();
           send('caption-live', { id, author, original: text, translated: '…', ts, tsMs });
           enqueueTranslate(cleaned).then(translated => {
-            const hasJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(translated);
-            const isTranslated = translated !== cleaned && translated !== text && !hasJapanese;
+            if (!state.userActive) return;   // user đã bấm ⏹ giữa lúc đang dịch → bỏ kết quả tới muộn
+            // #CJK: "s\u00F3t k\u00FD t\u1EF1 ngu\u1ED3n" ph\u1EA3i x\u00E9t theo ng\u00F4n ng\u1EEF \u0111\u00EDch \u2014 n\u1EBFu kh\u00F4ng, b\u1EA3n d\u1ECBch sang
+            // Nh\u1EADt/Trung (v\u1ED1n d\u00F9ng kana/H\u00E1n) b\u1ECB hi\u1EC3u nh\u1EA7m l\u00E0 ch\u01B0a d\u1ECBch \u2192 tr\u1EA3 null \u2192 app hi\u1EC7n g\u1EA1ch ngang.
+            const stillSource = hasUntranslatedCJK(translated);
+            const isTranslated = translated !== cleaned && translated !== text && !stillSource;
             send('caption-live', { id, author, original: text, translated: isTranslated ? translated : null, ts: timestamp(), tsMs });
             if (isTranslated) {
               const normText = text.replace(/[\u3002\u3001\uff01\uff1f!?.,\s]+$/, '').trim();
@@ -309,16 +339,19 @@ async function runService() {
     if (state.captureSourceChanged) { clearInterval(ccStateInterval); break; }
 
     if (!await cdp.checkCaptionsActive().catch(() => false)) {
-      send('status', { type: 'waiting-captions', msg: 'Captions tắt — dùng nút ▶ hoặc Alt+Shift+C để bật lại' });
+      send('status', { type: 'waiting-captions', key: 'status.captionsOff' });
       send('cc-state', { active: false });
       while (!await cdp.checkCaptionsActive().catch(() => false)) {
         if (!browser.isConnected()) { clearInterval(ccStateInterval); return; }
         if (state.captureSourceChanged) { clearInterval(ccStateInterval); return; }
+        if (!state.userActive) break;   // user bấm ⏹ → thoát chờ; vòng trên sẽ về idle
         await sleep(2000);
       }
-      const provLabel2 = PROV_NAMES[state.provider] || state.provider;
-      send('status', { type: 'running', msg: `Đang dịch sang ${state.targetLangLabel} bằng ${provLabel2}` });
-      send('cc-state', { active: true });
+      if (state.userActive && await cdp.checkCaptionsActive().catch(() => false)) {
+        const provLabel2 = PROV_NAMES[state.provider] || state.provider;
+        send('status', { type: 'running', key: 'status.translating', vars: { lang: state.langCode, prov: provLabel2 } });
+        send('cc-state', { active: true });
+      }
     }
   }
 

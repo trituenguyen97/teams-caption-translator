@@ -3,12 +3,13 @@
  * Electron app lifecycle + createWindow + startService loop.
  * Táº¥t cáº£ logic Ä‘Ã£ Ä‘Æ°á»£c tÃ¡ch sang src/ modules.
  */
-const { app, BrowserWindow, desktopCapturer } = require('electron');
+const { app, BrowserWindow, desktopCapturer, Menu, nativeTheme } = require('electron');
 const path = require('path');
 const state = require('./src/state');
 const Store = require('./src/store');
 const { registerAll, ensureLocalServerStarted } = require('./src/ipc-handlers');
-const { runService } = require('./src/caption-service');
+const { LANG_NAMES, LANG_LABELS } = require('./src/translation');
+const { runUiaService, stopHelper: stopUiaHelper } = require('./src/uia-captions');
 const { runAudioService, stopSTTServer } = require('./src/audio-stt');
 
 // Táº¯t GPU hardware acceleration
@@ -23,18 +24,19 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 500,
     height: 720,
-    minWidth: 360,
-    minHeight: 400,
+    minWidth: 520,
+    minHeight: 500,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       // App là overlay meeting (thường bị minimize/che sau Teams). Mặc định Electron throttle
-      // timer renderer xuống ~1/s khi bị che → audio-chunk (MediaRecorder) + cập nhật caption bị giật.
+      // timer renderer xuống ~1/s khi bị che → thu audio PCM (Web Audio) + cập nhật caption bị giật.
       backgroundThrottling: false,
     },
     title: 'Caption Translator',
-    backgroundColor: '#1b1b1b',
+    frame: false,   // frameless → header app tự đóng vai title bar (kéo di chuyển + nút min/close tự vẽ)
+    backgroundColor: (state.theme === 'dark' || (state.theme !== 'light' && nativeTheme.shouldUseDarkColors)) ? '#131314' : '#f6f8fc',
     alwaysOnTop: false,
     show: false,
   });
@@ -70,15 +72,20 @@ function createWindow() {
   win.on('restore', () => {
     if (state.pinned) { win?.setAlwaysOnTop(true, 'screen-saver'); win?.focus(); }
   });
+  win.on('maximize',   () => { try { win.webContents.send('window-max-state', { max: true }); } catch {} });
+  win.on('unmaximize', () => { try { win.webContents.send('window-max-state', { max: false }); } catch {} });
 }
 
 // â”€â”€ Service loop â€” tá»± restart khi máº¥t káº¿t ná»‘i â”€â”€
 async function startService() {
   while (true) {
     state.captureSourceChanged = false;
+    // Mỗi lần (re)connect/restart (boot, mất kết nối, meeting kết thúc, đổi nguồn) → về IDLE, chờ user bấm ▶.
+    // Tránh auto-play: KHÔNG tự dịch lại meeting/nguồn mới chỉ vì lần trước đã từng bấm play.
+    state.userActive = false;
     try {
       if (state.captureSource === 'teams') {
-        await runService();
+        await runUiaService();   // Teams: đọc Live Captions qua UI Automation (không CDP)
       } else {
         await runAudioService();
       }
@@ -100,18 +107,28 @@ async function startService() {
 // â”€â”€ App lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app.whenReady().then(() => {
   // Migrate: mọi provider dịch online cũ (cloud LLM + MS/Google/DeepL riêng lẻ) → gộp về 'online'
-  // (1 nhánh cascade Google→MS→DeepL trong translation.js). Chỉ còn 2 lựa chọn: 'online' | 'local'.
+  // (1 nhánh cascade Google→MS trong translation.js). Chỉ còn 2 lựa chọn: 'online' | 'local'.
+  // Giữ 'deepl' trong danh sách để store cũ còn chọn DeepL vẫn migrate đúng về 'online'.
   const savedProvider = Store.get('provider', 'online');
   const _legacyOnline = ['groq', 'gemini', 'openai', 'teams-token', 'google-free', 'deepl'];
   if (_legacyOnline.includes(savedProvider)) {
-    console.log('[migrate] provider', savedProvider, '→ online (gộp MS/Google/DeepL thành 1 nhánh cascade)');
+    console.log('[migrate] provider', savedProvider, '→ online (gộp MS/Google thành 1 nhánh cascade)');
     Store.set('provider', 'online');
     state.provider = 'online';
   } else {
     state.provider = savedProvider;
   }
   state.apiKey        = Store.get('apiKey',        '');
+  state.theme         = Store.get('theme',         'auto');
+  state.uiLang        = Store.get('uiLang',        'vi');
+  // Khôi phục ngôn ngữ ĐÍCH đã lưu (backend đúng ngay từ boot, trước khi renderer gửi set-lang)
+  const _savedLang = Store.get('lang', 'vi');
+  state.langCode        = _savedLang;
+  state.targetLang      = LANG_NAMES[_savedLang]  || state.targetLang;
+  state.targetLangLabel = LANG_LABELS[_savedLang] || state.targetLangLabel;
+  Menu.setApplicationMenu(null);   // bỏ menu bar "File Edit View Window Help"
   state.captureSource = Store.get('captureSource', 'teams');
+  state.overlayEnabled = Store.get('overlayEnabled', true);
   state.localBaseUrl       = Store.get('localBaseUrl',       state.localBaseUrl);
   state.localModel         = Store.get('localModel',         state.localModel);
   state.localBinaryVariant = Store.get('localBinaryVariant', state.localBinaryVariant);
@@ -161,10 +178,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopSTTServer();
+  try { stopUiaHelper(); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
+  try { stopUiaHelper(); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
 });

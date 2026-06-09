@@ -36,3 +36,9 @@ bin/
 models/
 *.gguf
 
+# Claude Code local/session (transient)
+.claude/
+
+# Generated test output (sinh bởi scripts/test-translate.js)
+scripts/_translate-results.json
+

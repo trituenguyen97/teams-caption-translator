@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('__caption', {
   onStartAudioCapture: cb => ipcRenderer.on('start-audio-capture', (_, d) => cb(d)),
   onStopAudioCapture:  cb => ipcRenderer.on('stop-audio-capture',  ()    => cb()),
   sendAudioChunk:  data => ipcRenderer.send('audio-chunk', data),
+  sendAudioPcm:    buf  => ipcRenderer.send('audio-pcm', buf),
   setLang:        lang => ipcRenderer.send('set-lang',     lang),
   setSttLang:     lang => ipcRenderer.send('set-stt-lang', lang),
   getSttLang:     ()   => ipcRenderer.invoke('get-stt-lang'),
@@ -21,6 +22,10 @@ contextBridge.exposeInMainWorld('__caption', {
   setWebTab:          t        => ipcRenderer.invoke('set-web-tab', t),
   setAlwaysOnTop: v    => ipcRenderer.send('set-always-on-top', v),
   focusWindow:    ()   => ipcRenderer.send('focus-window'),
+  windowMinimize: ()   => ipcRenderer.send('window-minimize'),
+  windowMaximize: ()   => ipcRenderer.send('window-maximize'),
+  windowClose:    ()   => ipcRenderer.send('window-close'),
+  onMaxState:     cb   => ipcRenderer.on('window-max-state', (_, d) => cb(d)),
   toggleCaptions: (desired) => ipcRenderer.send('toggle-captions', desired),
   openExternal:   url  => ipcRenderer.send('open-external', url),
   copyToClipboard: text => ipcRenderer.invoke('copy-to-clipboard', text),
@@ -37,4 +42,11 @@ contextBridge.exposeInMainWorld('__caption', {
   startLocalServer:    (opts)    => ipcRenderer.invoke('local-llm-start', opts || {}),
   stopLocalServer:     ()        => ipcRenderer.invoke('local-llm-stop'),
   onLocalProgress:     cb        => ipcRenderer.on('local-llm-progress', (_, d) => cb(d)),
+
+  // Windows Live Captions STT models (source = system/mic)
+  lcAvailable:         ()        => ipcRenderer.invoke('stt-lc-available'),
+  checkSttModels:      (o)       => ipcRenderer.invoke('stt-lc-check-models', o || {}),
+  downloadSttModels:   (o)       => ipcRenderer.invoke('stt-lc-download-models', o || {}),
+  cancelSttDownload:   ()        => ipcRenderer.invoke('stt-lc-cancel-download'),
+  onSttDownloadProgress: cb      => ipcRenderer.on('stt-lc-progress', (_, d) => cb(d)),
 });

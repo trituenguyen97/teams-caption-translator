@@ -11,10 +11,10 @@ const EDGE_TOKEN_TTL = 9 * 60 * 1000;
 const getMaxConcurrent = () => state.provider === 'local' ? 1 : 3;
 
 // ── Online cascade: cooldown per-engine ───────────────
-// Provider 'online' gộp Google → MS → DeepL. Engine nào dính 429/403 → né tạm ONLINE_COOLDOWN_MS để
-// 2 engine còn lại gánh (không hammer endpoint đang bị chặn). Hết cooldown tự gọi lại bình thường.
-const ONLINE_COOLDOWN_MS = 30000;
-const _engineCooldown = { google: 0, ms: 0, deepl: 0 };
+// Provider 'online' gộp Google → MS. Engine nào dính 429/403 → né tạm ONLINE_COOLDOWN_MS để
+// engine còn lại gánh (không hammer endpoint đang bị chặn). Hết cooldown tự gọi lại bình thường.
+const ONLINE_COOLDOWN_MS = 12000;   // 429/403 → né engine 12s (cũ 30s quá lâu → caption mất dịch cả đoạn)
+const _engineCooldown = { google: 0, ms: 0 };
 const _engineReady = (e) => Date.now() - _engineCooldown[e] >= ONLINE_COOLDOWN_MS;
 const _engineTrip  = (e) => { _engineCooldown[e] = Date.now(); console.warn('[online] cooldown', e, `${ONLINE_COOLDOWN_MS}ms`); };
 
@@ -26,39 +26,31 @@ const LOCAL_DEFAULTS = {
 
 const LANG_NAMES = {
   'vi': 'Vietnamese', 'en': 'English', 'zh-CN': 'Simplified Chinese',
-  'ko': 'Korean', 'ja': 'Japanese', 'fr': 'French',
-  'de': 'German', 'es': 'Spanish',
+  'ko': 'Korean', 'ja': 'Japanese',
 };
 
 const LANG_LABELS = {
   'vi': 'tiếng Việt', 'en': 'tiếng Anh', 'zh-CN': 'tiếng Trung',
-  'ko': 'tiếng Hàn', 'ja': 'tiếng Nhật', 'fr': 'tiếng Pháp',
-  'de': 'tiếng Đức', 'es': 'tiếng Tây Ban Nha',
+  'ko': 'tiếng Hàn', 'ja': 'tiếng Nhật',
 };
 
 const PROV_NAMES = {
   online: 'Online (auto)', local: 'Local LLM',
   // legacy — giữ để log/label câu cũ còn đọc được trước khi migrate sang 'online'
-  'teams-token': 'MS Translator', deepl: 'DeepL',
+  'teams-token': 'MS Translator',
   'google-free': 'Google Translate',
 };
 
 const _msTranslatorLangMap = {
   'Vietnamese': 'vi', 'English': 'en', 'Japanese': 'ja', 'Korean': 'ko',
-  'Simplified Chinese': 'zh-Hans', 'Traditional Chinese': 'zh-Hant',
-  'French': 'fr', 'German': 'de', 'Spanish': 'es', 'Italian': 'it',
-  'Portuguese': 'pt', 'Russian': 'ru', 'Thai': 'th', 'Indonesian': 'id',
+  'Simplified Chinese': 'zh-Hans',
 };
 
-// Map targetLang → mã ngôn ngữ của từng provider. Hoist ra module scope (trước đây tạo lại
-// object literal mỗi câu trong 4 hàm dịch cloud). Giữ 2 map RIÊNG (Google/DeepL) vì giá trị khác nhau.
+// Map targetLang → mã ngôn ngữ của Google. Hoist ra module scope (trước đây tạo lại object literal
+// mỗi câu trong hàm dịch cloud).
 const GOOGLE_LANG_CODES = {
   'Vietnamese': 'vi', 'English': 'en', 'Simplified Chinese': 'zh-CN',
-  'Korean': 'ko', 'Japanese': 'ja', 'French': 'fr', 'German': 'de', 'Spanish': 'es',
-};
-const DEEPL_LANG_CODES = {
-  'Vietnamese': 'VI', 'English': 'EN', 'Simplified Chinese': 'ZH',
-  'Korean': 'KO', 'Japanese': 'JA', 'French': 'FR', 'German': 'DE', 'Spanish': 'ES',
+  'Korean': 'ko', 'Japanese': 'ja',
 };
 
 // ── Phrase Map ────────────────────────────────────────
@@ -159,6 +151,21 @@ function isLLMRefusal(output, input) {
   return REFUSAL_PATTERNS.some(p => p.test(output));
 }
 
+// ── Sót ký tự nguồn chưa dịch — TÙY NGÔN NGỮ ĐÍCH (#CJK) ──
+// Trước đây mọi guard dùng cứng /[kana+Hán]/ để phát hiện "dịch chưa xong". Nhưng tiếng TRUNG dùng
+// Hán (一-鿿) và tiếng NHẬT dùng kana+Hán → bản dịch ĐÚNG sang CN/JA bị hiểu nhầm là "còn nguyên Nhật"
+// ⇒ orchestrator trả nguyên văn + app hiện gạch ngang (—). Hệ quả: KHÔNG dịch được sang Nhật/Trung
+// (mọi nguồn). Sửa: phán đoán theo đích —
+//   · Japanese          → kana+Hán đều HỢP LỆ ⇒ không bao giờ coi là sót.
+//   · Simplified Chinese → Hán hợp lệ; chỉ kana (hira/kata) mới là sót Nhật.
+//   · vi/en/ko          → mọi kana/Hán đều là sót nguồn chưa dịch (hành vi cũ, đúng).
+function hasUntranslatedCJK(out, targetLang) {
+  const t = targetLang || state.targetLang;
+  if (t === 'Japanese') return false;
+  if (t === 'Simplified Chinese') return /[぀-ゟ゠-ヿ]/.test(out || '');
+  return /[぀-ゟ゠-ヿ一-鿿]/.test(out || '');
+}
+
 // ── Quality Estimation (chấm độ ngờ bản dịch — reference-free, #QE) ────
 // Mức A = tín hiệu chuỗi/độ dài S1–S5 (rẻ). Ngờ cao → fallback Google.
 // S6 (logprob, Mức B) GIỮ trong code nhưng MẶC ĐỊNH TẮT: translateLocalMiLMMT không gửi n_probs
@@ -170,7 +177,7 @@ let _lastMilmmtQE = 1;        // độ ngờ lần MiLMMT gần nhất (local co
 function qeSuspicion(jaSrc, vi, avgLogprob) {
   if (!vi || vi.trim().length < 2) return 1;                                        // rỗng / quá ngắn
   let s = 0;
-  if (/[぀-ゟ゠-ヿ一-鿿]/.test(vi)) s += 0.6;                                          // S1: sót ký tự Nhật
+  if (hasUntranslatedCJK(vi)) s += 0.6;                                             // S1: sót ký tự nguồn (tùy ngôn ngữ đích)
   if (vi.length > 10 && state.targetLang === 'Vietnamese' && !_VI_DIACRITIC.test(vi)) s += 0.5; // S2: không có dấu Việt
   const r = vi.length / Math.max(1, (jaSrc || '').length);
   if (r < 0.5 || r > 4) s += 0.3;                                                   // S3: tỉ lệ độ dài bất thường
@@ -408,37 +415,6 @@ async function translateGoogleFree(text, tgtLang) {
   }
 }
 
-async function translateDeepL(text, tgtLang) {
-  const tgt = DEEPL_LANG_CODES[tgtLang] || 'VI';
-  const id = (Math.floor(Math.random() * 99999) + 8300000) * 1000 + 1;
-  const payload = {
-    jsonrpc: '2.0', method: 'LMT_handle_translations', id,
-    params: {
-      texts: [{ text, requestAlternatives: 0 }], splitting: 'newlines',
-      lang: { source_lang_user_selected: 'auto', target_lang: tgt },
-    }
-  };
-  let iCount = (text.match(/i/g) || []).length;
-  let ts = Date.now();
-  if (iCount !== 0) ts = ts - (ts % (iCount + 1)) + (iCount + 1);
-  const raw = JSON.stringify(payload);
-  const body = (id + 3) % 13 === 0 || (id + 5) % 29 === 0
-    ? raw.replace('"method":"', '"method" : "') : raw;
-  const r = await httpsPost('www2.deepl.com', '/jsonrpc', {
-    'Content-Type': 'application/json',
-    'User-Agent': 'DeepLBrowserExtension/1.28.0 Mozilla/5.0',
-    'Origin': 'chrome-extension://cofdbpoegempjloogbagkncekinflcnj',
-    'Referer': 'https://www.deepl.com/',
-  }, body);
-  if (r.status === 429 || r.status === 403) {
-    _engineTrip('deepl');   // né DeepL trong cascade 'online' tới khi hết cooldown
-    console.warn('[deepl] rate-limited hoặc bị chặn:', r.status);
-    return null;
-  }
-  if (!r.body) return null;
-  try { return JSON.parse(r.body).result?.texts?.[0]?.text || null; } catch { return null; }
-}
-
 // ── Edge Translator (FREE) ────────────────────────────
 
 async function getEdgeTranslateToken() {
@@ -557,16 +533,20 @@ const LOCAL_FAIL_COOLDOWN_MS = 8000;
 const MILMMT_LANG_NAMES = {
   'Vietnamese': 'Vietnamese', 'English': 'English', 'Japanese': 'Japanese',
   'Korean': 'Korean', 'Simplified Chinese': 'Chinese (Simplified)',
-  'Traditional Chinese': 'Chinese (Traditional)', 'French': 'French',
-  'German': 'German', 'Spanish': 'Spanish',
 };
 const milmmtLangName = (appLang) => MILMMT_LANG_NAMES[appLang] || appLang;
 
-// Phát hiện ngôn ngữ nguồn — app dùng chủ yếu cho meeting tiếng Nhật → Việt.
-// kana = chắc chắn Nhật; hangul = Hàn; kanji-only mặc định Nhật (bối cảnh app); còn lại = Anh.
+// Phát hiện ngôn ngữ nguồn (offline MiLMMT). Thứ tự: dấu hiệu chắc chắn → mơ hồ.
+//   kana ⇒ Nhật · hangul ⇒ Hàn · dấu tiếng Việt ⇒ Việt · ký tự giản thể đặc trưng ⇒ Trung ·
+//   Hán-thuần (không có dấu hiệu trên) ⇒ Nhật (caption họp Nhật luôn có kana, Hán-thuần hiếm) · Latin ⇒ Anh.
+const _VI_SRC = /[ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/i;
+// Ký tự giản thể THƯỜNG GẶP mà tiếng Nhật hiện đại KHÔNG dùng (đã loại các shinjitai dùng chung như 写/区/医/双/没).
+const _ZH_SIMPLIFIED = /[这们吗呢请谢说语还给让过进边远运适选题课师级电视门问间实现习务试话怎您帮东车书见长对开关发变难风飞马鸟鱼鸡龙买卖红绿蓝页脑网络议检觉]/;
 function detectSourceLang(text) {
   if (/[぀-ゟ゠-ヿ]/.test(text)) return 'Japanese';
   if (/[가-힯]/.test(text)) return 'Korean';
+  if (_VI_SRC.test(text)) return 'Vietnamese';
+  if (_ZH_SIMPLIFIED.test(text)) return 'Simplified Chinese';
   if (/[一-鿿]/.test(text)) return 'Japanese';
   return 'English';
 }
@@ -676,21 +656,21 @@ async function _translateUncached(text) {
     // Local = MiLMMT-46 (model dịch JP→VI chuyên dụng, duy nhất). /completion greedy + QE.
     const lResult = await translateLocalMiLMMT(text, state.targetLang);
     const lOk = lResult && lResult !== text && !isLLMRefusal(lResult, text)
-      && !/[぀-ゟ゠-ヿ一-鿿]/.test(lResult);
+      && !hasUntranslatedCJK(lResult);
     // #QE: chỉ tin MiLMMT khi độ ngờ thấp; ngờ cao (vd bịa tên / lệch nghĩa) → để Google xử lý
     const suspicious = _lastMilmmtQE >= QE_THRESHOLD;
     if (lOk && !suspicious) return lResult;
     // MiLMMT ngờ hoặc lỗi → thử Google (thường chuẩn hơn cho tên/kanji)
     const gResult = await translateGoogleFree(text, state.targetLang);
     if (gResult && gResult !== text && !isLLMRefusal(gResult, text)
-        && !/[぀-ゟ゠-ヿ一-鿿]/.test(gResult)) return gResult;
+        && !hasUntranslatedCJK(gResult)) return gResult;
     // Google fail → giữ MiLMMT (dù ngờ) còn hơn trả nguyên văn
     if (lOk) return lResult;
     return text;
   }
 
   // Mọi provider online gộp thành 1 nhánh cascade (mặc định 'online'; provider cũ teams-token/
-  // google-free/deepl đã migrate về 'online' ở main.js, nhưng vẫn rơi đúng vào đây nếu store còn sót).
+  // google-free đã migrate về 'online' ở main.js, nhưng vẫn rơi đúng vào đây nếu store còn sót).
   return await translateOnline(text);
 }
 
@@ -698,12 +678,12 @@ async function _translateUncached(text) {
 // Gom đúng 3 điều kiện vốn nằm rải rác ở các nhánh provider cũ → 1 cổng kiểm tra dùng chung cho cascade.
 function _onlineResultOk(result, text) {
   return !!result && result !== text && !isLLMRefusal(result, text)
-    && !/[぀-ゟ゠-ヿ一-鿿]/.test(result);
+    && !hasUntranslatedCJK(result);
 }
 
-// Cascade online: Google → MS (Edge→Teams) → DeepL. Engine cho kết quả tốt → return NGAY (engine sau
+// Cascade online: Google → MS (Edge→Teams). Engine cho kết quả tốt → return NGAY (engine sau
 // khỏi gọi → không thêm latency). Engine đang cooldown (429/403 gần đây) bị skip để né endpoint chết.
-// Cả 3 fail/cooldown → trả nguyên văn (giữ hành vi cũ: thà nguyên gốc còn hơn rác).
+// Cả 2 fail/cooldown → trả nguyên văn (giữ hành vi cũ: thà nguyên gốc còn hơn rác).
 async function translateOnline(text) {
   // 1) Google free — JP→VI tốt, ưu tiên chạy đầu
   if (_engineReady('google')) {
@@ -718,13 +698,6 @@ async function translateOnline(text) {
       const teams = await translateViaTeamsToken(text);
       if (_onlineResultOk(teams, text)) return teams;
     }
-  }
-  // 3) DeepL — last resort (endpoint không chính thức dễ chết, JP→VI yếu hơn)
-  if (_engineReady('deepl')) {
-    let d = null;
-    try { d = await translateDeepL(text, state.targetLang); }
-    catch (e) { console.warn('[deepl] error:', e.message); }
-    if (_onlineResultOk(d, text)) return d;
   }
   return text;
 }
@@ -745,22 +718,36 @@ function enqueueTranslate(text) {
   });
 }
 
+const _MAX_TRANSLATE_RETRY = 2;   // câu online dịch hỏng (429 cooldown) → thử lại để tự lành thay vì mất dịch
+
 function drainQueue() {
   while (_running < getMaxConcurrent() && _queue.length > 0) {
-    const { text, key, resolve } = _queue.shift();
+    const item = _queue.shift();
     _running++;
-    translateText(text, key)
-      .then(result => { _running--; resolve(result); drainQueue(); })
-      .catch(() => { _running--; resolve(text); drainQueue(); });
+    translateText(item.text, item.key)
+      .then(result => {
+        _running--;
+        // Online trả NGUYÊN VĂN mà nguồn vẫn còn CJK = chưa dịch (thường do cả Google+MS đang cooldown 429).
+        // Re-queue sau (qua cooldown) thay vì bỏ → caption sẽ được cập nhật khi engine hồi. KHÔNG retry local.
+        const failed = result === item.text && state.provider !== 'local' && hasUntranslatedCJK(item.text);
+        if (failed && (item.tries || 0) < _MAX_TRANSLATE_RETRY) {
+          item.tries = (item.tries || 0) + 1;
+          setTimeout(() => { _queue.push(item); drainQueue(); }, ONLINE_COOLDOWN_MS / 2 + item.tries * 1500);
+        } else {
+          item.resolve(result);
+        }
+        drainQueue();
+      })
+      .catch(() => { _running--; item.resolve(item.text); drainQueue(); });
   }
 }
 
 // ── Exports ───────────────────────────────────────────
 module.exports = {
   LANG_NAMES, LANG_LABELS, PROV_NAMES,
-  lookupPhrase, isLLMRefusal, preprocessText,
+  lookupPhrase, isLLMRefusal, hasUntranslatedCJK, preprocessText,
   translateText, enqueueTranslate,
-  translateGoogleFree, translateDeepL,
+  translateGoogleFree,
   translateViaEdge, translateViaTeamsToken,
   storeTeamsToken, parseJwtAudience,
   translateLocalMiLMMT, checkLocalServer, LOCAL_DEFAULTS,

@@ -71,7 +71,7 @@ async function freePort9222IfNeeded() {
       /widgets/i.test(t.title || '') || /windows\.msn\.com/i.test(t.url || ''));
     if (hasWidgets) {
       console.log('[CDP] Port 9222 có Widgets → kill Widgets...');
-      send('status', { type: 'connecting', msg: 'Giải phóng CDP port (kill Widgets)...' });
+      send('status', { type: 'connecting', key: 'status.freeingPort' });
       await new Promise(resolve =>
         exec('taskkill /F /IM widgets.exe /T 2>nul & taskkill /F /IM WidgetService.exe /T 2>nul', () => resolve()));
       await sleep(2500);
@@ -466,22 +466,22 @@ function restartTeams() {
 async function autoSetupCDP() {
   const cdpSet = await isCDPEnvSet();
   if (!cdpSet) {
-    send('status', { type: 'connecting', msg: '⚙️ Ghi debug port vào registry (1 lần duy nhất)...' });
+    send('status', { type: 'connecting', key: 'status.writingRegistry' });
     await setCDPEnv();
   }
 
   const running = await isTeamsRunning();
   if (!running) {
-    send('status', { type: 'waiting', msg: 'Mở Teams rồi vào meeting để bắt đầu' });
+    send('status', { type: 'waiting', key: 'status.openTeams' });
     for (let i = 0; i < 300; i++) {
       await sleep(1000);
       if (state.captureSourceChanged) return null;
       if (await isTeamsRunning()) break;
-      if (i === 299) { send('status', { type: 'error', msg: 'Không tìm thấy Teams' }); return null; }
+      if (i === 299) { send('status', { type: 'error', key: 'status.teamsNotFound' }); return null; }
     }
   }
 
-  send('status', { type: 'connecting', msg: '⏳ Chờ Teams CDP sẵn sàng...' });
+  send('status', { type: 'connecting', key: 'status.waitingCDP' });
   for (let i = 0; i < 15; i++) {
     await sleep(1000);
     if (state.captureSourceChanged) return null;
@@ -490,19 +490,19 @@ async function autoSetupCDP() {
     if (b) return b;
   }
 
-  send('status', { type: 'connecting', msg: '🔄 Restart Teams để bật debug port 9222...' });
+  send('status', { type: 'connecting', key: 'status.restartTeams' });
   await restartTeams();
 
-  send('status', { type: 'connecting', msg: '⏳ Chờ Teams khởi động...' });
+  send('status', { type: 'connecting', key: 'status.waitingTeamsStart' });
   for (let i = 0; i < 90; i++) {
     await sleep(1000);
     if (state.captureSourceChanged) return null;
     await freePort9222IfNeeded();
     const b = await connectToTeamsBrowser();
     if (b) return b;
-    if ((i + 1) % 10 === 0) send('status', { type: 'connecting', msg: `⏳ Chờ Teams... (${i + 1}s)` });
+    if ((i + 1) % 10 === 0) send('status', { type: 'connecting', key: 'status.waitingTeams', vars: { n: i + 1 } });
   }
-  send('status', { type: 'error', msg: 'Không kết nối được debug port. Thử tắt/mở Teams thủ công.' });
+  send('status', { type: 'error', key: 'status.cdpFailed' });
   return null;
 }
 

@@ -14,7 +14,11 @@ const {
   checkCaptionsActive, tryPowerShellSendKeys,
   getSttLanguage, setSttLanguage,
 } = require('./cdp-browser');
-const { handleAudioChunk } = require('./audio-stt');
+const { handlePcm, resetSegmentation } = require('./audio-stt');
+const stt = require('./stt');
+const uia = require('./uia-captions');
+const winLc = require('./win-livecaptions');
+const overlay = require('./caption-overlay');
 const { timestamp } = require('./caption-service');
 const { summarizeMeeting, exportSummary } = require('./summary');
 
@@ -32,19 +36,19 @@ function ensureLocalServerStarted(notifyIfMissing = false) {
     if (st.running) return;
     if (!st.binaryReady || !st.modelReady) {
       console.warn('[auto-start] thiếu binary/model — bỏ qua (tải xong sẽ tự start)');
-      if (notifyIfMissing) send('status', { type: 'error', msg: '⚠ Local LLM chưa cài đủ — vào ⚙️ → Local LLM → Tải tất cả' });
+      if (notifyIfMissing) send('status', { type: 'error', key: 'status.localMissing' });
       return;
     }
     console.log('[auto-start] khởi động local LLM server…');
-    send('status', { type: 'loading', msg: '⏳ Đang khởi động Local LLM server…' });
+    send('status', { type: 'loading', key: 'status.localStarting' });
     localLlm.startServer({ port: 8080 })
       .then(r => {
         if (r.ok) {
           console.log('[auto-start] local server OK', r.pid);
-          send('status', { type: 'running', msg: `▶ Local LLM ready (PID ${r.pid}, -t ${r.threads || '?'})` });
+          send('status', { type: 'running', key: 'status.localReady', vars: { pid: r.pid, threads: r.threads || '?' } });
         } else {
           console.warn('[auto-start] fail:', r.error);
-          send('status', { type: 'error', msg: '❌ Local LLM start: ' + r.error });
+          send('status', { type: 'error', key: 'status.localStartFail', vars: { error: r.error } });
         }
       })
       .catch(e => console.warn('[auto-start] error:', e.message));
@@ -52,14 +56,22 @@ function ensureLocalServerStarted(notifyIfMissing = false) {
 }
 
 function registerAll(app) {
+  // Áp dụng ngôn ngữ nguồn STT đã lưu (system/mic) lúc boot — Teams không dùng STT cục bộ.
+  try { stt.setLanguage(Store.get('srcLang', '')); } catch {}
+
   // ── Language ──────────────────────────
   ipcMain.on('set-lang', (_, lang) => {
     state.targetLang = LANG_NAMES[lang] || lang;
     state.targetLangLabel = LANG_LABELS[lang] || lang.toUpperCase();
+    state.langCode = lang;
+    Store.set('lang', lang);   // lưu để mở app giữ nguyên ngôn ngữ đích đã chọn
   });
 
   // ── Window ────────────────────────────
   ipcMain.on('focus-window', () => { state.win?.show(); state.win?.focus(); });
+  ipcMain.on('window-minimize', () => { try { state.win?.minimize(); } catch {} });
+  ipcMain.on('window-maximize', () => { const w = state.win; if (!w) return; try { w.isMaximized() ? w.unmaximize() : w.maximize(); } catch {} });
+  ipcMain.on('window-close',    () => { try { state.win?.close(); } catch {} });
 
   ipcMain.on('set-always-on-top', (_, v) => {
     state.pinned = v;
@@ -74,78 +86,97 @@ function registerAll(app) {
     // Audio mode
     if (state.captureSource !== 'teams') {
       state.audioPaused = !state.audioPaused;
+      state.userActive  = !state.audioPaused;   // đồng bộ cờ play với audio (nhất quán teams/audio)
       const label = state.captureSource === 'mic' ? 'Microphone' : 'System Audio';
       if (state.audioPaused) {
+        try { winLc.stopCaptions(); } catch {}   // dừng cả 2 nhánh cho an toàn
         send('stop-audio-capture', {});
         send('cc-state', { active: false });
-        send('status', { type: 'ended', msg: 'Ghi âm dừng — nhấn ▶ để tiếp tục' });
-      } else {
-        send('start-audio-capture', { source: state.captureSource });
-        send('cc-state', { active: true });
-        send('status', { type: 'running', msg: `🎙️ Đang ghi âm (${label})` });
+        send('status', { type: 'ended', key: 'status.recordingPaused' });
+        return;
       }
+      // ── Routing: en/ja/ko/zh + Win11 có LC → Windows Live Captions (ẩn); vi (hoặc máy không có LC) → STT nội bộ ──
+      const srcLang  = Store.get('srcLang', '') || 'ja';
+      const lcLocale = winLc.LC_LANGS[srcLang];
+      if (lcLocale && winLc.isAvailable()) {
+        const chk = await winLc.checkInstalled([lcLocale]);
+        if (!chk.installed.includes(lcLocale)) {
+          state.userActive = false; state.audioPaused = true;
+          send('cc-state', { active: false });
+          send('status', { type: 'error', msg: `Cần tải model Live Captions cho "${srcLang}" — mở menu Nguồn → Tải model.` });
+          return;
+        }
+        const ok = winLc.startCaptionsService(lcLocale);
+        if (ok) {
+          send('cc-state', { active: true });
+          send('status', { type: 'running', key: 'status.audioRecording', vars: { label: 'Live Captions (' + lcLocale + ')' } });
+          return;
+        }
+        // startCaptionsService lỗi → rơi xuống STT nội bộ
+      }
+      // STT nội bộ (Whisper/PhoWhisper) — cho vi, hoặc máy không có LC, hoặc LC khởi động lỗi
+      try { resetSegmentation(); } catch {}   // bắt đầu phiên ghi mới → VAD sạch
+      send('start-audio-capture', { source: state.captureSource });
+      send('cc-state', { active: true });
+      send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
       return;
     }
 
-    // Refresh meetingPage trước khi toggle
-    const freshPage = await findMeetingPage();
-    if (freshPage) state.meetingPage = freshPage;
-
-    if (!state.meetingPage) {
-      console.log('[toggle-captions] không có meetingPage → fallback PowerShell SendKeys');
-      await tryPowerShellSendKeys();
+    // ── Teams mode (UIA): nút ▶/⏹ chỉ điều khiển userActive. KHÔNG còn CDP/inject. ──
+    // ▶ (wantOn): bật dịch — runUiaService đọc panel 'Live Captions' qua UIA. User tự bật Live Captions
+    //   trong Teams (Alt+Shift+C) nếu chưa bật; helper tự phát hiện panel → cc-state active.
+    // ⏹ (!wantOn): dừng dịch (runUiaService tự về idle + ẩn overlay).
+    const wantOn = (typeof desired === 'boolean') ? desired : !state.userActive;
+    if (!wantOn) {
+      state.userActive = false;
+      send('cc-state', { active: false });
+      send('status', { type: 'idle', key: 'status.idle' });
+      console.log('[toggle-captions] ⏹ userActive=false (dừng dịch)');
       return;
     }
 
-    const stateBefore = await checkCaptionsActive();
-    console.log('[toggle-captions] state trước:', stateBefore, '| muốn:', desired);
-
-    // Nếu caption đã ở đúng trạng thái mong muốn (vd đã bật sẵn mà user bấm ▶ để play)
-    // → KHÔNG toggle (tránh tắt nhầm caption đang chạy), chỉ đồng bộ trạng thái nút.
-    if (typeof desired === 'boolean' && stateBefore === desired) {
-      console.log('[toggle-captions] đã đúng trạng thái → giữ nguyên, chỉ đồng bộ');
-      send('cc-state', { active: stateBefore });
-      return;
-    }
-
-    // Cách 1: inject Alt+Shift+C
-    await injectToggleCaptionsKey();
-    await sleep(1500);
-    const stateAfter = await checkCaptionsActive();
-    console.log('[toggle-captions] state sau inject key:', stateAfter, '| đổi:', stateAfter !== stateBefore);
-
-    // Cách 2: DOM click
-    if (stateAfter === stateBefore) {
-      console.log('[toggle-captions] inject key không hiệu quả, thử DOM click...');
-      const domResult = await tryToggleCaptionsViaDOM();
-      console.log('[toggle-captions] DOM click:', domResult);
-      await sleep(1200);
-    }
-
-    // Cách 3: PowerShell SendKeys
-    if (await checkCaptionsActive() === stateBefore) {
-      console.log('[toggle-captions] thử PowerShell SendKeys...');
-      await tryPowerShellSendKeys();
-    }
-
-    const active = await checkCaptionsActive();
-    console.log('[toggle-captions] cc-state cuối:', active);
+    state.userActive = true;
+    const active = uia.isCaptionsOn();
+    console.log('[toggle-captions] ▶ userActive=true | UIA captions:', active);
     send('cc-state', { active });
+    if (!active) {
+      // Pin TẠM app dịch (nếu chưa pin sẵn) → Teams focus + Alt+Shift+C không che/ẩn nó; bỏ pin khi caption lên.
+      if (!state.pinned && !state._tempPin) {
+        state._tempPin = true;
+        try { state.win?.setAlwaysOnTop(true, 'screen-saver'); } catch {}
+        setTimeout(() => {   // an toàn: caption không lên sau 8s → bỏ pin tạm
+          if (state._tempPin) { state._tempPin = false; try { state.win?.setAlwaysOnTop(!!state.pinned, state.pinned ? 'screen-saver' : 'normal'); } catch {} }
+        }, 8000);
+      }
+      // Caption đang tắt → tự bật: focus cửa sổ meeting + gửi Alt+Shift+C (helper sẽ phát hiện panel).
+      send('status', { type: 'enabling-captions', key: 'status.enablingCaptions' });
+      try { uia.enableCaptions(); } catch {}
+    }
   });
 
-  // ── Audio chunk (STT) ─────────────────
-  ipcMain.on('audio-chunk', async (_, { buffer, mimeType }) => {
-    await handleAudioChunk(buffer, mimeType);
+  // ── Overlay dịch nổi trên Teams (bật/tắt) ──
+  ipcMain.on('set-overlay-enabled', (_, v) => {
+    state.overlayEnabled = !!v;
+    Store.set('overlayEnabled', !!v);
+    try { overlay.setEnabled(!!v); } catch {}
   });
 
-  // ── STT language ──────────────────────
-  ipcMain.on('set-stt-lang', async (_, langText) => {
-    const ok = await setSttLanguage(langText);
-    const current = await getSttLanguage();
-    send('stt-lang', { current, ok });
+  // ── Audio PCM (STT) — renderer gửi Float32 @16k qua Web Audio ─────────────────
+  ipcMain.on('audio-pcm', async (_, data) => {
+    let f32;
+    if (data instanceof Float32Array) f32 = data;
+    else if (Buffer.isBuffer(data)) f32 = new Float32Array(data.buffer, data.byteOffset, Math.floor(data.byteLength / 4));
+    else if (data instanceof ArrayBuffer) f32 = new Float32Array(data);
+    else if (data && data.buffer) f32 = new Float32Array(data.buffer, data.byteOffset || 0, Math.floor((data.byteLength || 0) / 4));
+    else return;
+    try { await handlePcm(f32); } catch (e) { console.warn('[audio-pcm] handlePcm lỗi:', e.message); }
   });
 
-  ipcMain.handle('get-stt-lang', async () => getSttLanguage());
+  // ── Ngôn ngữ caption Teams (spoken language) ──
+  // KHÔNG tự đặt: spoken language là cài đặt CHUNG của meeting — đổi sẽ đổi cho MỌI người trong cuộc họp.
+  // Để Teams tự dò theo người nói (auto). (No-op giữ để renderer cũ gọi không lỗi.)
+  ipcMain.on('set-stt-lang', () => {});
+  ipcMain.handle('get-stt-lang', async () => null);
 
   // ── Debug browser ─────────────────────
   ipcMain.handle('launch-debug-browser', async (_, { port }) => {
@@ -202,8 +233,13 @@ function registerAll(app) {
     provider:        Store.get('provider',        'online'),
     apiKey:          Store.get('apiKey',          ''),
     providerKeys:    Store.get('providerKeys',    {}),
+    theme:           Store.get('theme',           'auto'),
+    uiLang:          Store.get('uiLang',          'vi'),
+    lang:            Store.get('lang',            'vi'),
     captureSource:   Store.get('captureSource',   'teams'),
     micDeviceId:     Store.get('micDeviceId',     ''),
+    srcLang:         Store.get('srcLang',         ''),
+    overlayEnabled:  Store.get('overlayEnabled',  true),
     localPreset:        Store.get('localPreset',        'milmmt'),
     localBaseUrl:       Store.get('localBaseUrl',       LOCAL_DEFAULTS.baseUrl),
     localModel:         Store.get('localModel',         LOCAL_DEFAULTS.model),
@@ -214,12 +250,20 @@ function registerAll(app) {
     if (s.provider      !== undefined) { Store.set('provider',      s.provider);      state.provider = s.provider; }
     if (s.apiKey        !== undefined) { Store.set('apiKey',        s.apiKey);        state.apiKey   = s.apiKey; }
     if (s.providerKeys  !== undefined) { Store.set('providerKeys',  s.providerKeys); }
+    if (s.theme         !== undefined) { Store.set('theme',         s.theme);         state.theme  = s.theme; }
+    if (s.uiLang        !== undefined) { Store.set('uiLang',        s.uiLang);        state.uiLang = s.uiLang; }
     if (s.captureSource !== undefined) {
-      if (s.captureSource !== state.captureSource) state.captureSourceChanged = true;
+      if (s.captureSource !== state.captureSource) {
+        state.captureSourceChanged = true;
+        state.userActive = false;   // đổi nguồn → reset về idle, không auto-play nguồn mới (cũng tránh teams auto-resume)
+        try { winLc.stopCaptions(); } catch {}   // đổi nguồn → dừng LC nếu đang chạy
+      }
       state.captureSource = s.captureSource;
       Store.set('captureSource', s.captureSource);
     }
     if (s.micDeviceId     !== undefined) { Store.set('micDeviceId',     s.micDeviceId); }
+    if (s.srcLang         !== undefined) { Store.set('srcLang',         s.srcLang); try { stt.setLanguage(s.srcLang); } catch {} }
+    if (s.overlayEnabled  !== undefined) { Store.set('overlayEnabled',  !!s.overlayEnabled); state.overlayEnabled = !!s.overlayEnabled; try { overlay.setEnabled(!!s.overlayEnabled); } catch {} }
     if (s.localBaseUrl    !== undefined) { Store.set('localBaseUrl',    s.localBaseUrl);    state.localBaseUrl    = s.localBaseUrl; }
     if (s.localModel      !== undefined) { Store.set('localModel',      s.localModel);      state.localModel      = s.localModel; }
     send('settings-saved', { ok: true });
@@ -260,6 +304,13 @@ function registerAll(app) {
   ipcMain.handle('local-llm-cancel-download', (_, { task }) => ({ ok: localLlm.cancelDownload(task) }));
   ipcMain.handle('local-llm-start', async (_, opts = {}) => localLlm.startServer(opts));
   ipcMain.handle('local-llm-stop',  () => localLlm.stopServer());
+
+  // ── Windows Live Captions STT (source = system/mic, ngôn ngữ en/ja/ko/zh) ──
+  ipcMain.handle('stt-lc-available',       () => winLc.isAvailable());
+  ipcMain.handle('stt-lc-check-models',    async (_, opts = {}) => winLc.checkInstalled(opts.locales));
+  ipcMain.handle('stt-lc-download-models', async (_, opts = {}) =>
+    winLc.downloadModels({ locales: opts.locales, onProgress: (p) => send('stt-lc-progress', p) }));
+  ipcMain.handle('stt-lc-cancel-download', () => ({ ok: winLc.cancelDownload() }));
 
   // ── External links ────────────────────
   ipcMain.on('open-external', (_, url) => {

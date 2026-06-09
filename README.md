@@ -18,16 +18,12 @@
 
 > Chế độ System Audio / Microphone dùng **SenseVoice-Small** chạy hoàn toàn offline (CPU), tự tải model ~110MB lần đầu. Hỗ trợ: Tiếng Nhật, Trung, Anh, Hàn, Quảng Đông. Tích hợp lọc im lặng (RMS gating) + lọc ảo giác (hallucination filter).
 
-### Provider dịch thuật (4 lựa chọn, không cần API key)
+### Provider dịch thuật (2 lựa chọn, không cần API key)
 
 | Provider | Loại | Yêu cầu |
 |----------|------|---------|
-| 🌐 **MS Translator** | Microsoft Edge / Teams translator API | Không cần key (token lấy tự động) |
-| 🌐 **Google Translate** | Endpoint công khai (browser extension API) | Không cần key (có thể bị rate-limit) |
-| 🌐 **DeepL** | Endpoint extension không chính thức | Không cần key |
+| 🌐 **Online (auto)** | Cascade Google Translate → MS (Edge/Teams) translator API | Không cần key (token lấy tự động, có thể bị rate-limit) |
 | 🖥️ **LOCAL TRANSLATE** | LLM cục bộ — llama.cpp + **MiLMMT-46-1B** (model dịch JP→VI chuyên dụng) | Tải model trong app (~1.22 GB), chạy offline |
-
-> Cloud LLM (Groq / OpenAI / Gemini) **đã được loại bỏ** khỏi phần dịch thuật. Nếu cấu hình cũ còn lưu một trong các provider này, app sẽ tự migrate về `google-free`.
 
 **LOCAL TRANSLATE** chạy llama.cpp server cục bộ (OpenAI-compatible) với **một model dịch chuyên dụng — MiLMMT-46-1B**:
 
@@ -252,7 +248,7 @@ captions → prompt Markdown → webchat.js mở BrowserWindow ẩn (ChatGPT)
 ## Lưu ý
 
 - **CDP port 9222 không có xác thực** — chỉ mở khi đang dùng; tắt bằng cách xóa env var/registry và restart Teams.
-- **Google Translate / DeepL** dùng endpoint công khai (browser-extension style), không có SLA nhưng ổn định cho cá nhân; có thể bị rate-limit (429/403) nếu dùng quá nhiều.
+- **Google Translate** dùng endpoint công khai (browser-extension style), không có SLA nhưng ổn định cho cá nhân; có thể bị rate-limit (429/403) nếu dùng quá nhiều.
 - **MS Translator** dùng token lấy tự động từ Edge translator API hoặc capture từ phiên Teams; token có TTL nên app tự refresh.
 - **LOCAL TRANSLATE** chạy hoàn toàn offline sau khi tải model — phù hợp khi cần bảo mật nội dung hoặc không có mạng ổn định.
 - **Tóm tắt qua ChatGPT** dùng chế độ logged-out trong cửa sổ ẩn; lần đầu có thể hiện cửa sổ để dismiss "Stay logged out"/cookie banner, sau đó chạy ngầm.

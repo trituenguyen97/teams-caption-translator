@@ -6,441 +6,1071 @@
         content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
   <title>Caption Translator</title>
   <style>
+    /* ============================================================
+       FINAL — "Google Material 3 minimal" dark overlay
+       Direction C (winner) + grafts from A (focus rigor, elevation
+       tokens) and B (radial canvas, card top-light, live accent
+       strip, modal shadow-pop, single hero gradient, motion tokens).
+       Drop-in replacement for the <style> inner content.
+       Tonal surfaces · state-layer hovers · 8/12/16 radii ·
+       one restrained blue accent · quick physical 150-200ms motion.
+       NOTE: every interactive element gets a 2px focus-visible ring;
+       the blue->violet gradient is used ONLY on the two primary
+       buttons (.btn-save, #sum-generate-btn) and never on the
+       always-visible status dot or live-caption strip.
+       ============================================================ */
+    :root {
+      /* tonal neutral ramp */
+      --m3-bg:        #131314;   /* window base                       */
+      --m3-surf:      #1e1f20;   /* default surface (status/footer)   */
+      --m3-surf-1:    #232425;   /* slightly raised (entries/list bg) */
+      --m3-surf-2:    #28292a;   /* raised (header, modal)            */
+      --m3-surf-3:    #303133;   /* controls / inputs                 */
+      --m3-surf-4:    #3a3b3d;   /* control hover settle              */
+      --m3-line:      rgba(255,255,255,.07);  /* hairline outline     */
+      --m3-line-2:    rgba(255,255,255,.11);
+
+      /* near-black canvas with a faint radial top-light (graft: B) */
+      --m3-canvas:    radial-gradient(120% 90% at 50% -10%, #1a1b1d 0%, #131314 58%);
+      /* subtle top-light sheen for raised cards (graft: B) */
+      --m3-sheen:     linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 44%);
+
+      /* state-layer overlays (M3 interaction model) */
+      --m3-hover:     rgba(255,255,255,.06);
+      --m3-press:     rgba(255,255,255,.11);
+      --m3-hover-on:  rgba(138,180,248,.12); /* hover over accent      */
+
+      /* one restrained accent */
+      --m3-accent:    #8ab4f8;            /* primary (blue on dark)    */
+      --m3-accent-d:  #aecbfa;
+      --m3-accent-ctr:#2d3c54;            /* primary container         */
+      --m3-accent-on: #d7e3f8;            /* text on container         */
+      /* ONE hero gradient — primary affordances only (graft: B, restrained) */
+      --m3-grad:      linear-gradient(135deg, #2b6fe0 0%, #5a6bf0 60%, #7b6bf2 100%);
+      --m3-grad-h:    linear-gradient(135deg, #3b7ef0 0%, #6a7bff 60%, #8b7bff 100%);
+
+      /* semantic (kept calm — softest variants of the three) */
+      --m3-ok:        #6dd3b3;
+      --m3-ok-ctr:    #173a31;
+      --m3-warn:      #f2c97d;
+      --m3-err:       #f2b8b5;
+      --m3-err-ctr:   #3a1f1d;
+
+      /* text ramp — tăng tương phản (sáng hơn) */
+      --m3-on:        #f2f2f2;  /* high emphasis  */
+      --m3-on-2:      #dadcdb;  /* medium         */
+      --m3-on-3:      #b6bcc1;  /* low / labels    */
+      --m3-on-4:      #888d92;  /* disabled / faint*/
+
+      /* elevation tokens (graft: A — two tiers for this small window) */
+      --m3-e1:        0 1px 2px rgba(0,0,0,.40), 0 1px 3px 1px rgba(0,0,0,.26);
+      --m3-e2:        0 6px 18px rgba(0,0,0,.46), 0 2px 6px rgba(0,0,0,.30);
+      --m3-pop:       0 24px 60px rgba(0,0,0,.55), 0 6px 18px rgba(0,0,0,.40);
+      /* back-compat aliases for original names */
+      --m3-shadow-1:  var(--m3-e1);
+      --m3-shadow-3:  var(--m3-pop);
+
+      /* focus ring token (graft: A 2px width + B higher-alpha values) */
+      --m3-ring-edge: rgba(138,180,248,.85);
+      --m3-ring-glow: rgba(138,180,248,.32);
+
+      /* motion — M3 emphasized decelerate, quick & physical */
+      --m3-ease:      cubic-bezier(.2,0,0,1);
+      --m3-dur:       .16s;
+      --m3-t:         .18s var(--m3-ease);  /* tidy single token (graft: B) */
+
+      --m3-font: "Roboto", "Inter", system-ui, "Segoe UI", -apple-system,
+                 BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      --m3-mono: "Roboto Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
+    *::selection { background: rgba(138,180,248,.30); color: #fff; }
+
     body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #1b1b1b;
-      color: #d4d4d4;
+      font-family: var(--m3-font);
+      background: var(--m3-bg);
+      background-image: var(--m3-canvas);
+      color: var(--m3-on);
       height: 100vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
       user-select: none;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      font-size: 13px;
+      letter-spacing: .1px;
+      accent-color: var(--m3-accent);
     }
 
-    /* ── Header ── */
+    /* Universal focus ring — keyboard focus only, on EVERY interactive
+       element (graft: A coverage + B alpha). 2px solid edge + soft glow. */
+    :focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--m3-ring-edge), 0 0 0 5px var(--m3-ring-glow);
+    }
+
+    /* ── Header (top app bar) ── */
     .header {
-      background: #2d2d30;
-      padding: 8px 12px;
+      background: var(--m3-sheen), var(--m3-surf-2);
+      padding: 10px 12px 10px 14px;
       display: flex;
       align-items: center;
       gap: 8px;
-      border-bottom: 1px solid #3e3e42;
+      border-bottom: 1px solid var(--m3-line);
       flex-shrink: 0;
+      box-shadow: var(--m3-e1);
+      z-index: 5;
       -webkit-app-region: drag;
     }
+    .header > span:first-child { line-height: 1; }
     .header-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: #cccccc;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: .1px;
+      color: var(--m3-on);
       flex: 1;
     }
     .header-controls {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
       -webkit-app-region: no-drag;
     }
 
+    /* ── Base controls (tonal, state-layer hover) ──
+       Hover via background-image overlay so any inline background-color
+       still shows the state-layer through it (graft: A safety net). */
     select, button {
       font-family: inherit;
-      font-size: 12px;
-      border-radius: 4px;
-      border: 1px solid #3e3e42;
-      background: #3c3c3c;
-      color: #cccccc;
+      font-size: 12.5px;
+      font-weight: 500;
+      letter-spacing: .1px;
+      line-height: 1.2;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background-color: var(--m3-surf-3);
+      background-image: linear-gradient(transparent, transparent);
+      color: var(--m3-on-2);
       cursor: pointer;
-      padding: 3px 8px;
+      padding: 6px 12px;
       outline: none;
-      transition: background 0.15s;
+      position: relative;
+      transition: background-color var(--m3-t),
+                  background-image var(--m3-t),
+                  color var(--m3-t),
+                  border-color var(--m3-t),
+                  box-shadow var(--m3-t),
+                  transform var(--m3-dur) var(--m3-ease);
     }
-    select:hover, button:hover { background: #4a4a4a; }
+    select:hover,
+    button:hover {
+      background-color: var(--m3-surf-4);
+      background-image: linear-gradient(var(--m3-hover), var(--m3-hover));
+      color: var(--m3-on);
+    }
+    button:active {
+      background-image: linear-gradient(var(--m3-press), var(--m3-press));
+      transform: translateY(.5px) scale(.985);
+    }
     button.active {
-      background: #264f78;
-      border-color: #3794ff;
-      color: #fff;
+      background-color: var(--m3-accent-ctr);
+      border-color: transparent;
+      color: var(--m3-accent-on);
     }
+    button.active:hover { background-color: #344768; }
+    button:disabled { opacity: .45; cursor: default; }
+
+    /* select dropdown — restyle native chevron */
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      padding-right: 26px;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--m3-on-3) 50%),
+        linear-gradient(135deg, var(--m3-on-3) 50%, transparent 50%);
+      background-position:
+        calc(100% - 14px) 50%,
+        calc(100% - 9px) 50%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+    }
+    select:hover {
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--m3-accent) 50%),
+        linear-gradient(135deg, var(--m3-accent) 50%, transparent 50%);
+    }
+    select option { background: var(--m3-surf-2); color: var(--m3-on); }
+
+    /* header icon buttons (settings / pin) */
+    #menu-btn, #pin-btn { color: var(--m3-on-2); }
+    /* Pin: TẮT = xám (desaturate emoji), BẬT = đỏ (màu gốc); KHÔNG nền khi active */
+    #pin-btn { filter: grayscale(1); opacity: .55; }
+    #pin-btn.active { filter: none; opacity: 1; background: transparent; }
 
     /* ── Status bar ── */
     .status {
       display: flex;
       align-items: center;
-      gap: 7px;
-      padding: 4px 12px;
-      font-size: 11px;
-      color: #999;
-      background: #252526;
-      border-bottom: 1px solid #3e3e42;
+      gap: 8px;
+      padding: 7px 12px;
+      font-size: 11.5px;
+      letter-spacing: .15px;
+      color: var(--m3-on-3);
+      background: var(--m3-surf);
+      border-bottom: 1px solid var(--m3-line);
       flex-shrink: 0;
     }
+    #status-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
     .dot {
-      width: 7px; height: 7px;
+      width: 8px; height: 8px;
       border-radius: 50%;
-      background: #555;
+      background: var(--m3-on-4);
       flex-shrink: 0;
-      transition: background 0.3s;
+      transition: background .3s var(--m3-ease), box-shadow .3s var(--m3-ease);
     }
     .status.connecting   .dot,
     .status.waiting      .dot,
     .status.loading      .dot,
-    .status.waiting-captions .dot { background: #dcdcaa; animation: blink 1.2s infinite; }
-    .status.running      .dot { background: #4ec9b0; }
-    .status.error        .dot { background: #f44747; }
-    .status.ended        .dot { background: #555; }
+    .status.waiting-captions .dot {
+      background: var(--m3-warn);
+      box-shadow: 0 0 0 3px rgba(242,201,125,.16);
+      animation: blink 1.2s infinite;
+    }
+    .status.running .dot {
+      background: var(--m3-ok);
+      box-shadow: 0 0 0 3px rgba(109,211,179,.18);
+    }
+    .status.error .dot {
+      background: var(--m3-err);
+      box-shadow: 0 0 0 3px rgba(242,184,181,.16);
+    }
+    .status.ended .dot { background: var(--m3-on-4); }
 
+    /* ── CC toggle + export-orig (small tonal buttons in status) ── */
     #cc-btn {
       margin-left: auto;
-      font-size: 11px;
-      padding: 2px 7px;
-      border-radius: 3px;
-      border: 1px solid #3e3e42;
-      background: #3c3c3c;
-      color: #aaa;
+      font-size: 11.5px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: var(--m3-surf-3);
+      color: var(--m3-on-3);
       cursor: pointer;
       flex-shrink: 0;
-      transition: background 0.15s, color 0.15s;
+      transition: background var(--m3-t), color var(--m3-t),
+                  border-color var(--m3-t), box-shadow var(--m3-t),
+                  transform var(--m3-dur) var(--m3-ease);
     }
-    #cc-btn:hover { background: #4a4a4a; }
+    #cc-btn:hover { background: var(--m3-surf-4); color: var(--m3-on); }
+    #cc-btn:active { transform: translateY(.5px) scale(.985); }
     #cc-btn.active {
-      background: #1a4a1a;
-      border-color: #4ec9b0;
-      color: #4ec9b0;
+      background: var(--m3-ok-ctr);
+      border-color: transparent;
+      color: var(--m3-ok);
     }
     #cc-btn.loading {
-      opacity: 0.6;
+      opacity: .6;
       pointer-events: none;
-      animation: blink 0.8s infinite;
+      animation: blink .8s infinite;
     }
 
-    /* ── Settings modal ── */
+    /* ── Modal scrim + dialog ── */
     .modal-overlay {
       display: none;
       position: fixed; inset: 0;
-      background: rgba(0,0,0,0.6);
+      background: rgba(8,9,11,.62);
       z-index: 100;
       align-items: center;
       justify-content: center;
+      padding: 16px;
+      animation: scrimIn var(--m3-dur) var(--m3-ease);
     }
     .modal-overlay.open { display: flex; }
+    @keyframes scrimIn { from { opacity: 0; } to { opacity: 1; } }
+
     .modal {
-      background: #252526;
-      border: 1px solid #3e3e42;
-      border-radius: 8px;
-      padding: 20px;
+      background: var(--m3-sheen), var(--m3-surf-2);
+      border: 1px solid var(--m3-line);
+      border-radius: 16px;
+      padding: 22px 22px 20px;
       width: 340px;
-      max-height: calc(100vh - 40px);
+      max-height: calc(100vh - 32px);
       overflow-y: auto;
+      box-shadow: var(--m3-pop);
       -webkit-app-region: no-drag;
+      animation: dialogIn .19s var(--m3-ease);
     }
-    .modal h3 { font-size: 14px; color: #ccc; margin-bottom: 14px; }
-    .modal label { display: block; font-size: 11px; color: #888; margin-bottom: 4px; }
-    .modal input[type="password"], .modal input[type="text"] {
-      width: 100%; padding: 6px 9px; font-size: 12px;
-      background: #3c3c3c; border: 1px solid #3e3e42;
-      border-radius: 4px; color: #eee; outline: none;
-      font-family: monospace;
+    .modal::-webkit-scrollbar { width: 8px; }
+    .modal::-webkit-scrollbar-thumb { background: var(--m3-surf-4); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+    .modal::-webkit-scrollbar-track { background: transparent; }
+    @keyframes dialogIn {
+      from { opacity: 0; transform: translateY(8px) scale(.97); }
+      to   { opacity: 1; transform: translateY(0)   scale(1); }
     }
-    .modal input:focus { border-color: #3794ff; }
-    .modal .hint { font-size: 10px; color: #555; margin-top: 4px; }
-    .modal .hint a { color: #3794ff; text-decoration: none; }
-    .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
-    .modal-actions button { font-size: 12px; padding: 5px 14px; }
-    .modal-actions .btn-save { background: #1a4a78; border-color: #3794ff; color: #fff; }
-    .modal-actions .btn-save:hover { background: #1a5a98; }
+    .modal h3 {
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: .1px;
+      color: var(--m3-on);
+      margin-bottom: 16px;
+    }
+    .modal label {
+      display: block;
+      font-size: 11.5px;
+      font-weight: 500;
+      letter-spacing: .3px;
+      color: var(--m3-on-3);
+      margin-bottom: 6px;
+    }
+    .modal input[type="password"],
+    .modal input[type="text"],
+    /* inline-styled inputs/selects in the modal — unify */
+    #s-apikey,
+    #s-provider,
+    #s-capture,
+    #s-mic-device {
+      width: 100%;
+      padding: 9px 11px !important;
+      font-size: 12.5px !important;
+      background: var(--m3-surf-3) !important;
+      border: 1px solid var(--m3-line-2) !important;
+      border-radius: 8px !important;
+      color: var(--m3-on) !important;
+      outline: none;
+      transition: border-color var(--m3-t),
+                  box-shadow var(--m3-t),
+                  background var(--m3-t);
+    }
+    .modal input[type="password"],
+    .modal input[type="text"],
+    #s-apikey { font-family: var(--m3-mono); }
+    .modal input::placeholder { color: var(--m3-on-4); }
+    .modal input:hover,
+    #s-provider:hover, #s-capture:hover, #s-mic-device:hover { background: var(--m3-surf-4) !important; }
+    /* Khôi phục chevron ▾ cho select trong modal (bị 'background' shorthand !important ở trên xoá background-image) */
+    #s-provider, #s-capture, #s-mic-device,
+    #s-provider:hover, #s-capture:hover, #s-mic-device:hover {
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--m3-on-3) 50%),
+        linear-gradient(135deg, var(--m3-on-3) 50%, transparent 50%) !important;
+      background-position: calc(100% - 16px) 53%, calc(100% - 11px) 53% !important;
+      background-size: 5px 5px, 5px 5px !important;
+      background-repeat: no-repeat !important;
+      padding-right: 30px !important;
+    }
+    .modal input:focus,
+    #s-apikey:focus,
+    #s-provider:focus,
+    #s-capture:focus,
+    #s-mic-device:focus {
+      border-color: var(--m3-accent) !important;
+      box-shadow: 0 0 0 2px var(--m3-ring-edge), 0 0 0 5px var(--m3-ring-glow);
+    }
+    .modal .hint {
+      font-size: 10.5px;
+      line-height: 1.6;
+      color: var(--m3-on-4);
+      margin-top: 6px;
+    }
+    .modal .hint a, .modal .hint .ext-link { color: var(--m3-accent); text-decoration: none; }
+    .modal .hint a:hover, .modal .hint .ext-link:hover { text-decoration: underline; }
 
-    /* Tabs */
-    .tab-bar { display:flex; border-bottom:1px solid #3e3e42; margin-bottom:14px; }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 22px;
+      justify-content: flex-end;
+    }
+    .modal-actions button {
+      font-size: 12.5px;
+      padding: 9px 18px;
+      border-radius: 20px;        /* M3 pill text/filled buttons */
+    }
+    /* cancel = text/tonal button */
+    #settings-cancel {
+      background: transparent;
+      color: var(--m3-accent);
+      border-color: transparent;
+    }
+    #settings-cancel:hover { background: var(--m3-hover-on); color: var(--m3-accent-d); }
+    /* save = the ONE hero gradient (primary affordance only) */
+    .modal-actions .btn-save {
+      background-image: var(--m3-grad);
+      background-color: transparent;
+      border-color: transparent;
+      color: #fff;
+      font-weight: 600;
+      box-shadow: 0 2px 10px rgba(50,90,220,.30);
+    }
+    .modal-actions .btn-save:hover {
+      background-image: var(--m3-grad-h);
+      color: #fff;
+      box-shadow: 0 4px 16px rgba(70,110,240,.42);
+    }
+    .modal-actions .btn-save:active { transform: translateY(.5px) scale(.99); }
+
+    /* show/hide key visibility toggle */
+    #s-toggle-vis {
+      flex-shrink: 0;
+      padding: 6px 12px !important;
+      font-size: 11.5px !important;
+      border-radius: 8px !important;
+      background: var(--m3-surf-3) !important;
+      color: var(--m3-on-2) !important;
+      border: 1px solid var(--m3-line-2) !important;
+    }
+    #s-toggle-vis:hover { background: var(--m3-surf-4) !important; color: var(--m3-on) !important; }
+
+    /* ── Tabs ── */
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--m3-line);
+      margin-bottom: 18px;
+    }
     .tab-btn {
-      flex:1; padding:7px 8px; font-size:12px; background:none; border:none;
-      border-bottom:2px solid transparent; color:#888; border-radius:0;
-      cursor:pointer; transition:color 0.15s, border-color 0.15s;
+      flex: 1;
+      padding: 10px 8px;
+      font-size: 12.5px;
+      font-weight: 500;
+      letter-spacing: .2px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--m3-on-3);
+      border-radius: 8px 8px 0 0;
+      cursor: pointer;
+      transition: color var(--m3-t),
+                  border-color var(--m3-t),
+                  background var(--m3-t);
     }
-    .tab-btn:hover { color:#ccc; background:#2a2a2a; }
-    .tab-btn.active { color:#3794ff; border-bottom-color:#3794ff; }
-    .tab-panel { display:none; }
-    .tab-panel.active { display:block; }
+    .tab-btn:hover { color: var(--m3-on); background: var(--m3-hover); }
+    .tab-btn.active { color: var(--m3-accent); border-bottom-color: var(--m3-accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; animation: dialogIn .2s var(--m3-ease); }
 
-    /* Window picker */
+    /* ── Window picker cards ── */
     .win-card {
-      background:#252526; border:2px solid transparent;
-      border-radius:5px; overflow:hidden;
-      cursor:pointer; transition:border-color 0.15s, background 0.15s;
-      display:flex; flex-direction:column;
+      background: var(--m3-sheen), var(--m3-surf-1);
+      border: 1px solid var(--m3-line);
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: pointer;
+      box-shadow: var(--m3-e1);
+      transition: border-color var(--m3-t),
+                  background var(--m3-t),
+                  box-shadow var(--m3-t),
+                  transform var(--m3-dur) var(--m3-ease);
+      display: flex;
+      flex-direction: column;
     }
-    .win-card:hover { border-color:#555; }
-    .win-card.selected { border-color:#3794ff; background:#1a2535; }
-    .win-card img.win-thumb { width:100%; aspect-ratio:16/10; object-fit:cover; display:block; background:#111; }
+    .win-card:hover {
+      border-color: var(--m3-line-2);
+      box-shadow: var(--m3-e2);
+      transform: translateY(-1px);
+    }
+    .win-card.selected {
+      border-color: var(--m3-accent);
+      background: var(--m3-accent-ctr);
+      box-shadow: 0 0 0 1px var(--m3-accent), var(--m3-e2);
+    }
+    .win-card:focus-visible {
+      box-shadow: 0 0 0 2px var(--m3-ring-edge), 0 0 0 5px var(--m3-ring-glow);
+    }
+    .win-card img.win-thumb {
+      width: 100%;
+      aspect-ratio: 16/10;
+      object-fit: cover;
+      display: block;
+      background: #0c0c0d;
+    }
     .win-card .win-title {
-      font-size:10px; color:#ccc; padding:4px 6px;
-      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-      display:flex; align-items:center; gap:4px;
+      font-size: 10.5px;
+      color: var(--m3-on-2);
+      padding: 6px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 5px;
     }
-    .win-card.selected .win-title { color:#7cb8ef; }
+    .win-card.selected .win-title { color: var(--m3-accent-d); }
 
-    @keyframes blink {
-      0%, 100% { opacity: 1; } 50% { opacity: 0.2; }
-    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
 
     /* ── Caption list ── */
     .list {
       flex: 1;
       overflow-y: auto;
-      padding: 8px 10px;
+      padding: 10px 10px 14px;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
+      scroll-behavior: smooth;
+      scrollbar-width: thin;
+      scrollbar-color: var(--m3-surf-4) transparent;
     }
-    .list::-webkit-scrollbar { width: 5px; }
-    .list::-webkit-scrollbar-thumb { background: #3e3e42; border-radius: 3px; }
+    .list::-webkit-scrollbar { width: 8px; }
+    .list::-webkit-scrollbar-thumb {
+      background: var(--m3-surf-4);
+      border-radius: 8px;
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+    .list::-webkit-scrollbar-thumb:hover { background: #4a4b4d; background-clip: content-box; }
     .list::-webkit-scrollbar-track { background: transparent; }
 
     .empty {
-      color: #555;
-      font-size: 12px;
+      color: var(--m3-on-4);
+      font-size: 12.5px;
       text-align: center;
-      margin-top: 48px;
-      line-height: 1.8;
+      margin-top: 56px;
+      line-height: 1.9;
     }
+    .empty span { color: var(--m3-on-4) !important; }
 
-    /* ── Caption entry ── */
+    /* ── Caption entry (filled tonal card with subtle top-light) ── */
     .entry {
-      background: #252526;
-      border: 1px solid #3e3e42;
-      border-radius: 6px;
-      padding: 8px 10px;
-      animation: fadeUp 0.18s ease;
+      position: relative;
+      background: var(--m3-sheen), var(--m3-surf-1);
+      border: 1px solid var(--m3-line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: var(--m3-e1);
+      animation: fadeUp .18s var(--m3-ease);
+      transition: border-color var(--m3-t), box-shadow var(--m3-t);
     }
+    .entry:hover { border-color: var(--m3-line-2); box-shadow: var(--m3-e2); }
     @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(5px); }
+      from { opacity: 0; transform: translateY(6px); }
       to   { opacity: 1; transform: translateY(0); }
     }
 
     .entry-meta {
       display: flex;
       align-items: baseline;
-      margin-bottom: 3px;
+      margin-bottom: 5px;
     }
     .entry-author {
       font-size: 11px;
       font-weight: 600;
-      color: #9cdcfe;
+      letter-spacing: .15px;
+      color: var(--m3-accent);
     }
     .entry-time {
       font-size: 10px;
-      color: #555;
+      letter-spacing: .2px;
+      color: var(--m3-on-4);
       margin-left: auto;
+      font-variant-numeric: tabular-nums;
     }
     .entry-original {
       font-size: 12px;
-      color: #6a6a6a;
-      line-height: 1.45;
-      margin-bottom: 3px;
+      color: var(--m3-on-3);
+      line-height: 1.5;
+      margin-bottom: 4px;
     }
     .entry-translated {
-      font-size: 13px;
-      color: #d4d4d4;
-      line-height: 1.5;
+      font-size: 13.5px;
+      color: var(--m3-on);
+      line-height: 1.55;
+      letter-spacing: .1px;
     }
 
-    /* ── Live entry (caption đang được nói) ── */
+    /* ── Live entry (currently being spoken) — FOCAL POINT ──
+       Flat-blue left accent strip leads the eye to the translated line
+       (graft: B mechanism, C's single blue, no gradient). */
     .entry.live {
-      border-color: #264f78;
-      background: #1a2535;
+      border-color: transparent;
+      background: var(--m3-accent-ctr);
+      box-shadow: 0 0 0 1px rgba(138,180,248,.30), var(--m3-e1);
     }
-    .entry.live .entry-translated { color: #7cb8ef; }
+    .entry.live::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 9px; bottom: 9px;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--m3-accent);
+    }
+    .entry.live .entry-author { color: var(--m3-accent-d); }
+    .entry.live .entry-translated { color: var(--m3-accent-d); }
     .live-dot {
       display: inline-block;
-      width: 5px; height: 5px;
+      width: 6px; height: 6px;
       border-radius: 50%;
-      background: #4ec9b0;
-      margin-left: 5px;
+      background: var(--m3-ok);
+      margin-left: 6px;
       vertical-align: middle;
+      box-shadow: 0 0 0 3px rgba(109,211,179,.2);
       animation: blink 1s infinite;
     }
 
     /* ── Error banner ── */
     .error-banner {
-      background: #3b1a1a;
-      border: 1px solid #6b2020;
-      border-radius: 6px;
-      padding: 10px 12px;
-      font-size: 11px;
-      color: #f88c8c;
-      line-height: 1.7;
-    }
-
-    /* ── Hint banner (bật captions thủ công) ── */
-    .hint-banner {
-      background: #1e2030;
-      border: 1px solid #3a4060;
-      border-radius: 6px;
+      background: var(--m3-err-ctr);
+      border: 1px solid rgba(242,184,181,.22);
+      border-radius: 12px;
       padding: 12px 14px;
-      font-size: 11px;
-      color: #9db4d8;
-      line-height: 2;
+      font-size: 11.5px;
+      color: var(--m3-err);
+      line-height: 1.75;
+      box-shadow: var(--m3-e1);
     }
-    .hint-banner b { color: #c8d8f0; }
-    .hint-banner kbd {
-      display: inline-block;
-      background: #2d3050;
-      border: 1px solid #505880;
-      border-radius: 3px;
-      padding: 1px 5px;
-      font-size: 10px;
-      font-family: monospace;
-      color: #d0e0ff;
-    }
+    .error-banner b { color: #f6cecb; }
     .error-banner code {
       display: block;
-      background: #2a1010;
-      padding: 5px 8px;
-      border-radius: 3px;
-      margin: 4px 0;
+      background: rgba(0,0,0,.32);
+      padding: 7px 9px;
+      border-radius: 8px;
+      margin: 6px 0;
       font-size: 10px;
-      color: #ce9178;
+      font-family: var(--m3-mono);
+      color: #f0c0a8;
       word-break: break-all;
       user-select: text;
     }
+    /* Theme sáng: nền banner hồng nhạt → chữ phải đỏ đậm để nổi (tránh chìm vào nền) */
+    :root[data-theme="light"] .error-banner   { color: #8c1d16; }
+    :root[data-theme="light"] .error-banner b { color: #5e0f0a; }
 
-    /* ── Footer ── */
+    /* ── Hint banner (manual caption enable help) ── */
+    .hint-banner {
+      background: var(--m3-sheen), var(--m3-accent-ctr);
+      border: 1px solid rgba(138,180,248,.2);
+      border-radius: 12px;
+      padding: 14px 16px;
+      font-size: 11.5px;
+      color: var(--m3-on-2);
+      line-height: 2;
+      box-shadow: var(--m3-e1);
+    }
+    .hint-banner b { color: var(--m3-accent-d); font-weight: 600; }
+    .hint-banner kbd {
+      display: inline-block;
+      background: rgba(255,255,255,.08);
+      border: 1px solid var(--m3-line-2);
+      border-bottom-width: 2px;
+      border-radius: 6px;
+      padding: 1px 7px;
+      font-size: 10px;
+      font-family: var(--m3-mono);
+      color: var(--m3-on);
+      box-shadow: 0 1px 0 rgba(0,0,0,.3);
+    }
+
+    /* ── Footer (bottom action bar) ── */
     .footer {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 5px 10px;
-      background: #252526;
-      border-top: 1px solid #3e3e42;
+      gap: 8px;
+      padding: 8px 10px;
+      background: var(--m3-surf);
+      border-top: 1px solid var(--m3-line);
+      box-shadow: 0 -1px 2px rgba(0,0,0,.22);
       flex-shrink: 0;
     }
+    .footer button { font-size: 12px; padding: 6px 12px; }
     .footer-count {
-      font-size: 11px;
-      color: #555;
+      font-size: 11.5px;
+      color: var(--m3-on-3);
+      letter-spacing: .15px;
+      font-variant-numeric: tabular-nums;
     }
     .spacer { flex: 1; }
+    /* auto-scroll toggle uses generic .active accent-container already */
 
     /* ── Summary modal ── */
     .summary-body {
       flex: 1;
       overflow-y: auto;
-      background: #1e1e1e;
-      border: 1px solid #3e3e42;
-      border-radius: 5px;
-      padding: 12px 14px;
-      font-size: 12px;
-      line-height: 1.5;
-      color: #d4d4d4;
+      background: var(--m3-surf-1);
+      border: 1px solid var(--m3-line);
+      border-radius: 12px;
+      padding: 16px 18px;
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: var(--m3-on-2);
       white-space: normal;
       word-break: break-word;
       user-select: text;
       min-height: 200px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--m3-surf-4) transparent;
     }
+    .summary-body::-webkit-scrollbar { width: 8px; }
+    .summary-body::-webkit-scrollbar-thumb {
+      background: var(--m3-surf-4); border-radius: 8px;
+      border: 2px solid transparent; background-clip: content-box;
+    }
+    .summary-body::-webkit-scrollbar-track { background: transparent; }
     .summary-body h1, .summary-body h2, .summary-body h3, .summary-body h4 {
-      color: #9cdcfe; margin: 12px 0 4px;
+      color: var(--m3-accent-d);
+      margin: 16px 0 6px;
+      line-height: 1.3;
+      font-weight: 600;
+      letter-spacing: .1px;
     }
-    .summary-body h1 { font-size: 15px; }
-    .summary-body h2 { font-size: 13px; }
-    .summary-body h3 { font-size: 12px; }
-    .summary-body h4 { font-size: 12px; font-weight: 600; }
-    .summary-body p { margin: 5px 0; }
-    .summary-body ul, .summary-body ol { padding-left: 20px; margin: 5px 0; }
+    .summary-body h1 { font-size: 17px; }
+    .summary-body h2 {
+      font-size: 14.5px;
+      color: var(--m3-accent);
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--m3-line);
+    }
+    .summary-body h3 { font-size: 13px; }
+    .summary-body h4 { font-size: 12.5px; font-weight: 600; color: var(--m3-on); }
+    .summary-body p { margin: 7px 0; }
+    .summary-body ul, .summary-body ol { padding-left: 22px; margin: 7px 0; }
     .summary-body ul { list-style: disc; }
     .summary-body ol { list-style: decimal; }
-    .summary-body li { margin: 1px 0; }
-    .summary-body strong { color: #dcdcaa; }
-    .summary-body em { color: #ce9178; }
-    .summary-body code { background:#2a2a2a; border-radius:3px; padding:1px 4px; font-family:monospace; font-size:11px; }
-    .summary-body hr { border-color: #3e3e42; margin: 10px 0; }
-    .summary-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 11.5px; }
-    .summary-body th, .summary-body td { border: 1px solid #3e3e42; padding: 4px 8px; text-align: left; vertical-align: top; }
-    .summary-body th { background: #2d2d30; color: #9cdcfe; font-weight: 600; }
-    .summary-body tbody tr:nth-child(even) td { background: #232323; }
-    .summary-placeholder { color: #555; font-style: italic; text-align: center; padding: 40px 0; }
+    .summary-body li { margin: 3px 0; }
+    .summary-body li::marker { color: var(--m3-on-4); }
+    .summary-body strong { color: var(--m3-warn); font-weight: 600; }
+    .summary-body em { color: var(--m3-accent-d); font-style: italic; }
+    .summary-body a { color: var(--m3-accent); text-decoration: none; }
+    .summary-body a:hover { text-decoration: underline; }
+    .summary-body code {
+      background: rgba(138,180,248,.12);
+      border-radius: 6px;
+      padding: 1px 5px;
+      font-family: var(--m3-mono);
+      font-size: 11px;
+      color: var(--m3-accent-d);
+    }
+    .summary-body hr { border: none; border-top: 1px solid var(--m3-line); margin: 14px 0; }
+    .summary-body table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 10px 0;
+      font-size: 11.5px;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 0 0 1px var(--m3-line);
+    }
+    .summary-body th, .summary-body td {
+      border: 1px solid var(--m3-line);
+      padding: 6px 9px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .summary-body th { background: var(--m3-surf-3); color: var(--m3-accent-d); font-weight: 600; }
+    .summary-body tbody tr:nth-child(even) td { background: rgba(255,255,255,.025); }
+    .summary-body tbody tr:hover td { background: rgba(138,180,248,.06); }
+    .summary-placeholder {
+      color: var(--m3-on-4);
+      font-style: italic;
+      text-align: center;
+      padding: 44px 0;
+      line-height: 1.8;
+    }
+    .summary-placeholder b { color: var(--m3-accent-d); font-style: normal; }
+
+    /* Summary modal action buttons (inline-styled in markup → unify here) */
+    #sum-export-btn {
+      background: var(--m3-ok-ctr) !important;
+      border-color: transparent !important;
+      color: var(--m3-ok) !important;
+      border-radius: 20px !important;
+      padding: 7px 14px !important;
+    }
+    #sum-export-btn:hover:not(:disabled) { background: #1d4b3f !important; }
+    #sum-copy-btn {
+      border-radius: 20px !important;
+      padding: 7px 14px !important;
+      background: var(--m3-surf-3) !important;
+      color: var(--m3-on-2) !important;
+      border-color: transparent !important;
+    }
+    #sum-copy-btn:hover:not(:disabled) { background: var(--m3-surf-4) !important; color: var(--m3-on) !important; }
+    #sum-close-btn {
+      border-radius: 50% !important;
+      width: 30px; height: 30px;
+      padding: 0 !important;
+      background: transparent !important;
+      color: var(--m3-on-3) !important;
+      border-color: transparent !important;
+    }
+    #sum-close-btn:hover { background: var(--m3-hover) !important; color: var(--m3-on) !important; }
+    /* generate = the ONE hero gradient (primary affordance only) */
+    #sum-generate-btn {
+      background-image: var(--m3-grad) !important;
+      background-color: transparent !important;
+      border-color: transparent !important;
+      color: #fff !important;
+      font-weight: 600;
+      border-radius: 20px !important;
+      padding: 8px 18px !important;
+      box-shadow: 0 2px 10px rgba(50,90,220,.30);
+    }
+    #sum-generate-btn:hover:not(:disabled) {
+      background-image: var(--m3-grad-h) !important;
+      box-shadow: 0 4px 16px rgba(70,110,240,.42);
+    }
+    #sum-status { font-size: 11.5px !important; color: var(--m3-on-3) !important; }
+
+    /* ── Reduced motion (cross-cutting a11y fix none of the candidates
+       addressed). At meeting cadence the per-caption entrance fires
+       constantly; honor the OS preference and drop the translateY so
+       captions settle without visual fatigue. ── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+      }
+      .entry { animation: none; }
+      .live-dot, .status .dot, #cc-btn.loading { animation: none !important; }
+    }
+
+    /* ============ PATCH: light theme + frameless controls + icon sizing ============ */
+    :root[data-theme="light"] {
+      /* Warm cream (be-cam ấm nhè nhẹ) — nền KHÔNG trắng chói, tonal elevation M3, WCAG-verified contrast */
+      --m3-bg:#f3ece0; --m3-surf:#fbf6ee; --m3-surf-1:#f7f1e6; --m3-surf-2:#fdfbf6;
+      --m3-surf-3:#ece4d6; --m3-surf-4:#e2d8c6;
+      --m3-line:rgba(64,52,30,.10); --m3-line-2:rgba(64,52,30,.16);
+      --m3-canvas:radial-gradient(120% 90% at 50% -10%, #fdfbf6 0%, #f3ece0 60%);
+      --m3-sheen:linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0) 46%);
+      --m3-hover:rgba(60,48,28,.05); --m3-press:rgba(60,48,28,.10); --m3-hover-on:rgba(26,98,212,.10);
+      --m3-accent:#1a62d4; --m3-accent-d:#1750b8; --m3-accent-ctr:#dce8fb; --m3-accent-on:#0c2c63;
+      --m3-ok:#1f7a5e; --m3-ok-ctr:#cdeadd; --m3-warn:#8a5e10; --m3-err:#b3261e; --m3-err-ctr:#f7d9d6;
+      --m3-on:#15120c; --m3-on-2:#322e27; --m3-on-3:#4f493f; --m3-on-4:#6f685b;
+      --m3-e1:0 1px 2px rgba(74,58,32,.16), 0 1px 3px 1px rgba(74,58,32,.10);
+      --m3-e2:0 6px 18px rgba(64,50,28,.16), 0 2px 6px rgba(64,50,28,.11);
+      --m3-pop:0 24px 60px rgba(50,40,24,.22), 0 6px 18px rgba(50,40,24,.16);
+      --m3-ring-edge:rgba(26,98,212,.85); --m3-ring-glow:rgba(26,98,212,.22);
+    }
+    body, .header, .status, .footer, .modal, .entry, .win-card { transition: background-color .2s ease, color .2s ease, border-color .2s ease; }
+
+    /* Task 1: đồng bộ height icon header (gear/pin) — bỏ lệch do inline style cũ */
+    .icon-btn { width:30px; height:30px; padding:0 !important; display:inline-flex; align-items:center; justify-content:center; font-size:14px; line-height:1; border-radius:8px; }
+
+    /* Frameless: nút điều khiển cửa sổ tự vẽ trong header */
+    .win-ctrls { display:inline-flex; align-items:center; gap:2px; margin-left:2px; -webkit-app-region:no-drag; }
+    .win-ctrl { width:30px; height:30px; padding:0; border:none; border-radius:8px; background:transparent; color:var(--m3-on-2); font-size:13px; line-height:1; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:background var(--m3-t), color var(--m3-t); }
+    .win-ctrl svg { display:block; pointer-events:none; }
+    .win-ctrl:hover { background:var(--m3-hover); color:var(--m3-on); }
+    .win-close:hover { background:#e81123; color:#fff; }
+    .empty-hint { font-size:11px; }
+
+    /* ── Flag picker (chip: cờ SVG + tên — emoji cờ không render trên Windows) ── */
+    .flagrow { display:flex; gap:6px; flex-wrap:wrap; }
+    .flag-btn {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:5px 10px 5px 7px !important; border-radius:999px !important;
+      border:1px solid var(--m3-line-2) !important; background:var(--m3-surf-3) !important;
+      color:var(--m3-on-2) !important; font-size:11.5px; font-weight:600; line-height:1; cursor:pointer;
+      opacity:.7; filter:grayscale(.45);
+      transition:opacity var(--m3-t), background var(--m3-t), color var(--m3-t), box-shadow var(--m3-t), transform var(--m3-dur) var(--m3-ease);
+    }
+    .flag-btn .fl { width:21px; height:14px; border-radius:3px; overflow:hidden; flex-shrink:0; display:inline-flex; box-shadow:0 0 0 1px rgba(0,0,0,.12); }
+    .flag-btn .fl svg { width:100%; height:100%; display:block; }
+    .flag-btn .fl.auto { font-size:13px; align-items:center; justify-content:center; box-shadow:none; }
+    .flag-btn .fl-name { pointer-events:none; }
+    .flag-btn svg, .flag-btn .fl { pointer-events:none; }
+    .flag-btn:hover { opacity:.95; filter:none; }
+    .flag-btn:active { transform:scale(.96); }
+    .flag-btn.active { opacity:1; filter:none; background:var(--m3-accent-ctr) !important; color:var(--m3-accent-on) !important; border-color:transparent !important; box-shadow:0 0 0 1px var(--m3-accent); }
+
+    /* ── Quick language selector cạnh nút ▶ (nguồn → đích) ── */
+    .lang-quick { position:relative; display:inline-flex; align-items:center; gap:5px; flex-shrink:0; }
+    .lq-flag { width:30px; height:20px; padding:0 !important; border-radius:5px !important; overflow:hidden; border:1px solid var(--m3-line-2) !important; background:var(--m3-surf-3) !important; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:box-shadow var(--m3-t), transform var(--m3-dur) var(--m3-ease); }
+    .lq-flag:hover { box-shadow:0 0 0 2px var(--m3-line-2); }
+    .lq-flag:active { transform:scale(.94); }
+    .lq-flag .fl { width:100%; height:100%; display:inline-flex; }
+    .lq-flag .fl svg { width:100%; height:100%; display:block; }
+    .lq-arrow { color:var(--m3-on-3); font-size:12px; font-weight:700; line-height:1; }
+    .lq-pop { position:absolute; top:calc(100% + 7px); z-index:65; display:none; flex-wrap:wrap; gap:6px; width:max-content; max-width:230px; background:var(--m3-surf-2); border:1px solid var(--m3-line); border-radius:14px; padding:8px; box-shadow:var(--m3-pop); -webkit-app-region:no-drag; }
+    #lq-src-pop { left:0; } #lq-tgt-pop { left:34px; }
+    .lq-pop.open { display:flex; animation:dialogIn .16s var(--m3-ease); }
+    .lq-flag.lq-disabled { opacity:.55; cursor:default; }
+    .lq-flag .fl.auto { align-items:center; justify-content:center; font-size:12px; }
+
+    /* ── Theme switch (☀️ ⟷ 🌙) — bên nào đang chọn thì sáng + núm trượt sang đó ── */
+    .theme-switch { position:relative; width:52px; height:26px; flex-shrink:0; padding:0 !important; border-radius:999px !important; border:1px solid var(--m3-line-2) !important; background:var(--m3-surf-3) !important; display:inline-flex; align-items:center; cursor:pointer; }
+    .theme-switch .theme-ic { position:relative; z-index:1; width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; font-size:13px; line-height:1; opacity:.4; transition:opacity .18s var(--m3-ease); }
+    .theme-switch .theme-knob { position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:var(--m3-accent-ctr); box-shadow:var(--m3-e1); transition:transform .2s var(--m3-ease); z-index:0; }
+    :root[data-theme="dark"]  .theme-switch .theme-knob { transform:translateX(26px); }
+    :root[data-theme="light"] .theme-switch .sun  { opacity:1; }
+    :root[data-theme="dark"]  .theme-switch .moon { opacity:1; }
+
+    /* ── Radio dịch vụ (Online / Offline) ── */
+    .radio-row { display:flex; gap:8px; }
+    .radio-opt { flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:7px 10px; border-radius:999px; border:1px solid var(--m3-line-2); background:var(--m3-surf-3); color:var(--m3-on-2); font-size:12px; font-weight:600; cursor:pointer; transition:background var(--m3-t), color var(--m3-t), box-shadow var(--m3-t); }
+    .radio-opt input { accent-color:var(--m3-accent); width:13px; height:13px; margin:0; cursor:pointer; }
+    .radio-opt:has(input:checked), .radio-opt.active { background:var(--m3-accent-ctr); color:var(--m3-accent-on); border-color:transparent; box-shadow:0 0 0 1px var(--m3-accent); }
+
+
+    /* ── Group label trong menu ── */
+    .app-menu .menu-group-label { font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:var(--m3-on-3); padding:8px 8px 2px; }
+
+
+    /* ── Popup chọn kiểu xuất (gốc / cả hai / bản dịch) — nổi phía trên nút Xuất ── */
+    .export-wrap { position:relative; display:inline-flex; }
+    .export-menu {
+      position:absolute; bottom:calc(100% + 8px); right:0; z-index:70;
+      display:none; flex-direction:column; gap:2px; min-width:172px;
+      background:var(--m3-surf-2); border:1px solid var(--m3-line);
+      border-radius:14px; padding:6px; box-shadow:var(--m3-pop);
+    }
+    .export-menu.open { display:flex; animation:dialogIn .16s var(--m3-ease); }
+    .export-menu .export-opt {
+      display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+      background:transparent !important; border:none !important; color:var(--m3-on-2) !important;
+      padding:9px 11px; border-radius:9px !important; font-size:12.5px; font-weight:600; cursor:pointer;
+      transition:background var(--m3-t), color var(--m3-t);
+    }
+    .export-menu .export-opt:hover { background:var(--m3-hover) !important; color:var(--m3-on) !important; }
+
+    /* ===================== Material 3 EXPRESSIVE restyle (append → cascade override) =====================
+       Màu rực hơn (cả dark/light) · shape lớn & đa dạng (pill buttons, card/modal bo to) · motion nảy (springy)
+       · type đậm hơn. Layer LÊN token/component có sẵn — không phá CSS chức năng. ============================ */
+    :root {
+      --m3-ease: cubic-bezier(.34, 1.46, .64, 1);   /* springy overshoot */
+      --m3-dur:  .2s;
+      --m3-t:    .22s cubic-bezier(.34, 1.46, .64, 1);
+      --m3-accent:#a8c7ff; --m3-accent-d:#c9dcff; --m3-accent-ctr:#29426e; --m3-accent-on:#dbe8ff;
+      --m3-grad:   linear-gradient(135deg,#3b6ef0 0%,#6a5cf0 55%,#9a5cf0 100%);
+      --m3-grad-h: linear-gradient(135deg,#4d7eff 0%,#7b6cff 55%,#ab6cff 100%);
+      --m3-ok:#79e0b8; --m3-warn:#f7cf86;
+    }
+    :root[data-theme="light"] {
+      --m3-accent:#1a56d6; --m3-accent-d:#1648b8; --m3-accent-ctr:#dde6fc; --m3-accent-on:#0c2860;
+      --m3-grad:   linear-gradient(135deg, #1a62d4 0%, #3f5be8 60%, #5a4fe0 100%);
+      --m3-grad-h: linear-gradient(135deg, #2b71e6 0%, #506cf2 60%, #6a5ff0 100%);
+    }
+    /* Shape — expressive radii (pill cho buttons, bo to cho card/modal) */
+    .btn-save, #settings-cancel, #sum-export-btn, #sum-copy-btn, #sum-generate-btn, #sum-cancel-btn,
+    #scroll-btn, #sum-btn, #clear-btn, #cc-btn, #export-orig-btn, #s-toggle-vis,
+    .icon-btn, .win-ctrl, .modal-x { border-radius: 999px !important; }
+    select, #s-apikey, #s-provider, #s-capture, #s-mic-device,
+    .modal input[type="password"], .modal input[type="text"] { border-radius: 14px !important; }
+    .entry, .win-card, .hint-banner, .error-banner, .summary-body { border-radius: 20px; }
+    .modal { border-radius: 28px !important; }
+    .entry.live::before { width: 4px; border-radius: 0 4px 4px 0; }
+    /* Type — đậm/expressive hơn */
+    .header-title { font-weight: 700; letter-spacing: .2px; }
+    .modal h3 { font-weight: 700; }
+    .modal label { font-weight: 600; letter-spacing: .4px; }
+    .entry-author { font-weight: 700; }
+    .tab-btn { font-weight: 600; }
+    select, button { font-weight: 600; }
+    /* Motion — nhấn nảy nhẹ (springy); .win-card nhấc cao hơn khi hover */
+    button:active { transform: scale(.96); }
+    .win-card:hover { transform: translateY(-2px); }
+    .entry.live { box-shadow: 0 0 0 1.5px var(--m3-accent), var(--m3-e1); }
+
+    /* ── M3 loading indicators (circular indeterminate) ── */
+    @keyframes m3-spin { to { transform: rotate(360deg); } }
+    /* Status dot → spinner vòng khi loading/connecting/waiting (running=dot xanh, error=dot đỏ giữ nguyên) */
+    .status.loading .dot, .status.connecting .dot,
+    .status.waiting .dot, .status.waiting-captions .dot {
+      width: 13px; height: 13px;
+      background: transparent !important;
+      border: 2px solid var(--m3-warn);
+      border-top-color: transparent;
+      box-shadow: none !important;
+      animation: m3-spin .7s linear infinite !important;
+    }
+    /* Spinner lớn cho Summary đang tạo */
+    .m3-spinner-lg {
+      width: 42px; height: 42px; border-radius: 50%;
+      border: 3.5px solid var(--m3-accent-ctr);
+      border-top-color: var(--m3-accent);
+      animation: m3-spin .85s cubic-bezier(.5,.15,.5,.85) infinite;
+      margin: 0 auto 16px;
+    }
+    .summary-loading { text-align: center; padding: 44px 0; color: var(--m3-on-3); font-size: 12.5px; }
+    /* Spinner nhỏ trong nút (vd nút Tóm tắt đang chạy) */
+    .m3-spinner-sm {
+      display: inline-block; width: 13px; height: 13px; vertical-align: -2px;
+      border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%;
+      animation: m3-spin .7s linear infinite;
+    }
+
+    /* ── Header ⋮ dropdown (gộp ngôn ngữ dịch / ngôn ngữ app / theme / export / settings) ── */
+    .header, .status { position: relative; }
+    .app-menu {
+      position: absolute; top: calc(100% + 6px); right: 6px; z-index: 60;
+      display: none; flex-direction: column; gap: 2px; width: 280px; max-width: calc(100vw - 12px);
+      max-height: calc(100vh - 56px); overflow-x: hidden; overflow-y: auto;
+      background: var(--m3-surf-2); border: 1px solid var(--m3-line);
+      border-radius: 18px; padding: 8px; box-shadow: var(--m3-pop);
+      -webkit-app-region: no-drag;
+      scrollbar-width: thin; scrollbar-color: var(--m3-surf-4) transparent;
+    }
+    .app-menu::-webkit-scrollbar { width: 8px; }
+    .app-menu::-webkit-scrollbar-thumb { background: var(--m3-surf-4); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+    .app-menu::-webkit-scrollbar-track { background: transparent; }
+    .app-menu.open { display: flex; animation: dialogIn .16s var(--m3-ease); }
+    /* separator giữa các nhóm trong menu */
+    .app-menu .menu-sep { height: 1px; background: var(--m3-line); margin: 4px 6px; }
+    .app-menu .menu-row { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 8px; }
+    /* field trong menu: bỏ viền, giữ nền fill phẳng.
+       Phải nâng specificity (.app-menu #id) để đè border !important của ID selector từ CSS modal cũ. */
+    .app-menu select,
+    .app-menu #s-provider,
+    .app-menu #s-capture,
+    .app-menu #s-mic-device { border: none !important; max-width: 100%; }
+    .app-menu .menu-row > span { font-size: 11px; font-weight: 600; color: var(--m3-on-3); letter-spacing: .3px; }
+    .app-menu .menu-row select { width: 100%; }
+    .app-menu .menu-item {
+      display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+      background: transparent !important; border: none !important; color: var(--m3-on-2) !important;
+      padding: 9px 10px; border-radius: 12px !important; font-size: 12.5px; font-weight: 600; cursor: pointer;
+      transition: background var(--m3-t), color var(--m3-t);
+    }
+    .app-menu .menu-item:hover:not(:disabled) { background: var(--m3-hover) !important; color: var(--m3-on) !important; }
+    .app-menu .menu-item:disabled { opacity: .4; cursor: default; }
+    .app-menu .menu-item > span:first-child { width: 18px; text-align: center; }
+
+    /* ── Status bar: play (▶/⏹) bên trái; ⋮ menu đẩy sang phải cùng hàng; dot CHỈ hiện làm spinner khi đang load ── */
+    #cc-btn { margin-left: 0 !important; }
+    /* theme + ⋮ gom về cạnh phải status; theme nằm trái ⋮ */
+    #status #theme-btn, #status #menu-btn { flex-shrink: 0; }
+    #status #theme-btn { margin-left: auto; }
+    .status .dot { display: none; }
+    .status.loading .dot, .status.connecting .dot, .status.waiting .dot, .status.waiting-captions .dot { display: block; }
+    #status-msg { font-size: 11.5px; color: var(--m3-on-3); margin-left: 4px; }
+    .status.error #status-msg { color: var(--m3-err); }
+
+    /* Fix #1: chống bể layout khi cửa sổ hẹp — tiêu đề CO LẠI + cắt gọn (…) thay vì xếp dọc từng ký tự */
+    .header-title { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #summary-modal h3 { min-width:88px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #summary-modal .modal > div:first-child { flex-wrap: wrap; row-gap: 6px; }
+    /* Fix #2: scroll summary mượt — cô lập layout/paint (đã bỏ backdrop-filter blur ở .modal-overlay) */
+    .summary-body { contain: content; }
+
+    /* Việc mới: X đóng ở header Settings (giống ✕ summary) + nút Hủy ở Summary (giống Hủy settings) */
+    .modal-x { border-radius:50% !important; width:30px; height:30px; padding:0 !important; display:inline-flex; align-items:center; justify-content:center; background:transparent !important; color:var(--m3-on-3) !important; border:none !important; font-size:13px; cursor:pointer; flex-shrink:0; transition:background var(--m3-t), color var(--m3-t); }
+    .modal-x:hover { background:var(--m3-hover) !important; color:var(--m3-on) !important; }
+    #sum-cancel-btn { border-radius:20px !important; padding:7px 14px !important; background:transparent !important; color:var(--m3-accent) !important; border-color:transparent !important; }
+    #sum-cancel-btn:hover { background:var(--m3-hover-on) !important; color:var(--m3-accent-d) !important; }
+
   </style>
 </head>
 <body>
 
   <!-- Summary Modal -->
   <div class="modal-overlay" id="summary-modal">
-    <div class="modal" style="width:72vw;max-width:1000px;min-width:340px;height:80vh;max-height:calc(100vh - 24px);display:flex;flex-direction:column">
+    <div class="modal" style="width:72vw;max-width:1000px;min-width:480px;height:80vh;max-height:calc(100vh - 24px);display:flex;flex-direction:column">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-shrink:0">
-        <h3 style="flex:1;margin:0">📋 Tóm tắt cuộc họn</h3>
-        <button id="sum-export-btn" style="padding:4px 12px;font-size:12px;background:#1a4a1a;border-color:#4ec9b0;color:#4ec9b0" disabled>⬇ Xuất .md</button>
-        <button id="sum-copy-btn" style="padding:4px 12px;font-size:12px" disabled>&#x2398; Copy</button>
+        <h3 style="flex:1;margin:0">📋 <span data-i18n="summary.title">Tóm tắt cuộc họp</span></h3>
+        <button id="sum-export-btn" style="padding:4px 12px;font-size:12px;background:#1a4a1a;border-color:#4ec9b0;color:#4ec9b0" disabled>⬇ <span data-i18n="summary.exportMd">Xuất .md</span></button>
+        <button id="sum-copy-btn" style="padding:4px 12px;font-size:12px" disabled>⎘ <span data-i18n="summary.copy">Copy</span></button>
         <button id="sum-close-btn" style="padding:4px 8px;font-size:12px">✕</button>
       </div>
       <div class="summary-body" id="sum-body">
-        <div class="summary-placeholder">Nhấn <b>✨ Tóm tắt</b> để tổng hợp nội dung cuộc họn bằng AI</div>
+        <div class="summary-placeholder" data-i18n-html="summary.placeholder">Nhấn <b>✨ Tóm tắt</b> để tổng hợp nội dung cuộc họp bằng AI</div>
       </div>
       <div style="margin-top:10px;flex-shrink:0;display:flex;align-items:center;gap:8px">
         <span id="sum-status" style="font-size:11px;color:#888;flex:1"></span>
-        <button id="sum-generate-btn" style="padding:5px 16px;background:#1a4a78;border-color:#3794ff;color:#fff">&#x2728; Tóm tắt</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Settings Modal -->
-  <div class="modal-overlay" id="settings-modal">
-    <div class="modal" style="width:420px">
-      <h3>⚙️ Cài đặt</h3>
-
-      <div class="tab-bar">
-        <button class="tab-btn active" data-tab="translate">🌐 Dịch thuật</button>
-        <button class="tab-btn" data-tab="source">🎙 Nguồn dịch</button>
-      </div>
-
-      <!-- Tab 1: Dịch thuật -->
-      <div class="tab-panel active" id="tab-translate">
-        <div style="margin-bottom:12px">
-          <label>Dịch vụ</label>
-          <select id="s-provider" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
-            <option value="online">🌐 Online</option>
-            <option value="local">🖥️ Offline</option>
-          </select>
-          <div class="hint" id="s-provider-note" style="margin-top:4px"></div>
-        </div>
-
-        <div id="s-key-row" style="margin-bottom:12px">
-          <label id="s-key-label">API Key</label>
-          <div style="display:flex;gap:6px;align-items:center">
-            <input type="password" id="s-apikey" placeholder="" autocomplete="off" spellcheck="false"
-              style="flex:1;padding:6px 9px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee;outline:none;font-family:monospace">
-            <button id="s-toggle-vis" style="flex-shrink:0;padding:4px 8px;font-size:11px">Show</button>
-          </div>
-          <div class="hint" id="s-key-hint"></div>
-        </div>
-
-      </div>
-
-      <!-- Tab 2: Nguồn dịch -->
-      <div class="tab-panel" id="tab-source">
-        <div style="margin-bottom:12px">
-          <label>Nguồn âm thanh</label>
-          <select id="s-capture" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee">
-            <option value="teams">📹 Teams (Live Captions)</option>
-            <option value="system">🔊 Audio System (âm thanh hệ thống)</option>
-            <option value="mic">🎤 Microphone</option>
-          </select>
-        </div>
-
-        <div id="s-teams-note" style="margin-bottom:12px;font-size:10px;color:#888;background:#1e1e1e;border:1px solid #3e3e42;border-radius:4px;padding:6px 9px;line-height:1.7;display:none">
-          ℹ️ Kết nối qua <strong style="color:#aaa">Teams App desktop</strong> (WebView2 debug port 9222).<br>
-          Teams Web không hỗ trợ tự động — cần mở trình duyệt với flag <code style="color:#ce9178">--remote-debugging-port</code>.
-        </div>
-
-        <div id="s-mic-row" style="margin-bottom:12px;display:none">
-          <label>Chọn Microphone</label>
-          <select id="s-mic-device" style="width:100%;padding:5px 8px;font-size:12px;background:#3c3c3c;border:1px solid #3e3e42;border-radius:4px;color:#eee"></select>
-        </div>
-
-        <div id="s-stt-info" style="margin-bottom:4px;display:none;font-size:10px;color:#888;background:#1e1e1e;border:1px solid #3e3e42;border-radius:4px;padding:6px 9px">
-          🎙️ STT: <strong style="color:#4ec9b0">SenseVoice-Small</strong> (sherpa-onnx, chạy cục bộ, không cần API)
-        </div>
-      </div>
-
-      <div class="modal-actions">
-        <button id="settings-cancel">Hủy</button>
-        <button class="btn-save" id="settings-save">Lưu</button>
+        <button id="sum-cancel-btn" data-i18n="settings.cancel">Hủy</button>
+        <button id="sum-generate-btn" style="padding:5px 16px;background:#1a4a78;border-color:#3794ff;color:#fff">✨ <span data-i18n="summary.generate">Tóm tắt</span></button>
       </div>
     </div>
   </div>
@@ -450,34 +1080,86 @@
     <span style="font-size:15px;line-height:1">💬</span>
     <span class="header-title">Caption Translator</span>
     <div class="header-controls">
-      <select id="lang" title="Ngôn ngữ dịch">
-        <option value="vi">🇻🇳 Việt</option>
-        <option value="en">🇺🇸 English</option>
-        <option value="zh-CN">🇨🇳 中文</option>
-        <option value="ko">🇰🇷 한국어</option>
-        <option value="ja">🇯🇵 日本語</option>
-        <option value="fr">🇫🇷 Français</option>
-        <option value="de">🇩🇪 Deutsch</option>
-        <option value="es">🇪🇸 Español</option>
-      </select>
-      <button id="settings-btn" title="Cài đặt API" style="padding:2px 7px;font-size:13px;">⚙️</button>
-      <button id="pin-btn" title="Luôn trên đầu (đang tắt)">📌</button>
+      <span class="win-ctrls">
+        <button id="pin-btn" class="win-ctrl" data-i18n-title="header.pinOff" title="Luôn trên đầu (đang tắt)">📌</button>
+        <button id="win-min" class="win-ctrl" data-i18n-title="header.minimize" title="Thu nhỏ"><svg viewBox="0 0 11 11" width="11" height="11" aria-hidden="true"><path d="M2.5 5.5h6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg></button>
+        <button id="win-max" class="win-ctrl" data-i18n-title="header.maximize" title="Phóng to"><svg viewBox="0 0 11 11" width="11" height="11" aria-hidden="true"><rect x="2.4" y="2.4" width="6.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button>
+        <button id="win-close" class="win-ctrl win-close" data-i18n-title="header.close" title="Đóng"><svg viewBox="0 0 11 11" width="11" height="11" aria-hidden="true"><path d="M3 3l5 5M8 3l-5 5" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg></button>
+      </span>
     </div>
   </div>
 
   <!-- Status -->
-  <div class="status connecting" id="status">
+  <div class="status" id="status">
+    <button id="cc-btn" data-i18n-title="status.ccTitle" title="Bật/tắt Live Captions trên Teams">▶</button>
+    <div class="lang-quick" id="lang-quick">
+      <button class="lq-flag" id="lq-src" title="Ngôn ngữ nguồn"></button>
+      <span class="lq-arrow" aria-hidden="true">→</span>
+      <button class="lq-flag" id="lq-tgt" data-i18n-title="header.langTitle" title="Ngôn ngữ dịch"></button>
+      <div class="lq-pop" id="lq-src-pop"></div>
+      <div class="lq-pop" id="lq-tgt-pop"></div>
+    </div>
     <div class="dot"></div>
-    <span id="status-msg">Đang khởi động...</span>
-      <button id="cc-btn" title="Bật/tắt Live Captions trên Teams">▶</button>
-      <button id="export-orig-btn" title="Xuất nội dung gốc (time + người nói + nội dung)" style="font-size:11px;padding:2px 7px;border-radius:3px;border:1px solid #3e3e42;background:#3c3c3c;color:#aaa;cursor:pointer;flex-shrink:0;margin-left:4px">💾</button>
+    <span id="status-msg"></span>
+    <button id="theme-btn" class="theme-switch" data-i18n-title="theme.dark" title="Sáng / Tối">
+      <span class="theme-ic sun" aria-hidden="true">☀️</span>
+      <span class="theme-ic moon" aria-hidden="true">🌙</span>
+      <span class="theme-knob"></span>
+    </button>
+    <button id="menu-btn" class="icon-btn" data-i18n-title="header.menu" title="Menu">⋮</button>
+    <div id="app-menu" class="app-menu">
+
+      <!-- Nhóm: Nguồn (âm thanh + ngôn ngữ nguồn) -->
+      <div class="menu-group-label" data-i18n="group.source">Nguồn</div>
+      <div class="menu-row">
+        <span data-i18n="settings.audioSource">Nguồn âm thanh</span>
+        <select id="s-capture">
+          <option value="teams" data-i18n="capture.teams">📹 Teams (Live Captions)</option>
+          <option value="system" data-i18n="capture.system">🔊 Audio hệ thống</option>
+          <!-- <option value="mic" data-i18n="capture.mic">🎤 Microphone</option> -->
+        </select>
+      </div>
+      <div class="menu-row" id="s-mic-row" style="display:none">
+        <span data-i18n="settings.chooseMic">Chọn Microphone</span>
+        <select id="s-mic-device"></select>
+      </div>
+      <div class="menu-row" id="s-stt-dl-row" style="display:none; flex-direction:column; align-items:stretch; gap:6px">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px">
+          <span>Model STT (Live Captions)</span>
+          <button id="s-stt-dl-btn" style="display:none; padding:3px 10px; border-radius:6px; cursor:pointer; border:1px solid rgba(127,127,127,.4); background:transparent; color:inherit; font-size:12px">Tải model</button>
+        </div>
+        <div id="s-stt-dl-status" style="font-size:11px; opacity:.7"></div>
+        <div id="s-stt-dl-bar-wrap" style="display:none; height:6px; background:rgba(127,127,127,.25); border-radius:3px; overflow:hidden">
+          <div id="s-stt-dl-bar" style="height:100%; width:0%; background:#3aa776; transition:width .25s"></div>
+        </div>
+      </div>
+
+      <div class="menu-sep"></div>
+
+      <!-- Nhóm: Dịch thuật (dịch vụ) — ngôn ngữ nguồn/đích đã ra status bar cạnh ▶ -->
+      <div class="menu-group-label" data-i18n="group.translate">Dịch thuật</div>
+      <div class="menu-row">
+        <span data-i18n="settings.service">Dịch vụ</span>
+        <div class="radio-row" id="provider-radio">
+          <label class="radio-opt"><input type="radio" name="provider" value="online">🌐 Online</label>
+          <label class="radio-opt"><input type="radio" name="provider" value="local">🖥️ Offline</label>
+        </div>
+      </div>
+
+      <div class="menu-sep"></div>
+
+      <div class="menu-row">
+        <span data-i18n="settings.uiLang">Ngôn ngữ giao diện</span>
+        <div class="flagrow" id="uilang-row"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Caption list -->
   <div class="list" id="list">
     <div class="empty">
-      Chờ captions từ Teams...<br>
-      <span style="color:#444;font-size:11px;">Vào meeting → bật Live Captions</span>
+      <span data-i18n="list.emptyTitle">Chờ captions từ Teams…</span><br>
+      <span class="empty-hint" data-i18n="list.emptyHint">Vào meeting → bật Live Captions</span>
     </div>
   </div>
 
@@ -485,11 +1167,20 @@
   <div class="footer">
     <span class="footer-count" id="count">0 câu</span>
     <div class="spacer"></div>
-    <button id="scroll-btn" class="active" title="Tự cuộn xuống">↓ Auto</button>
-    <button id="sum-btn" title="Tóm tắt cuộc họn">📋 Tóm tắt</button>
-    <button id="clear-btn">Xóa</button>
+    <button id="scroll-btn" class="active" data-i18n-title="footer.autoScrollTitle" title="Tự cuộn xuống">↓ <span data-i18n="footer.auto">Auto</span></button>
+    <button id="sum-btn" data-i18n-title="footer.summarizeTitle" title="Tóm tắt cuộc họp">📋 <span data-i18n="footer.summarize">Tóm tắt</span></button>
+    <span class="export-wrap">
+      <button id="export-orig-btn" data-i18n-title="status.exportOrigTitle" title="Xuất nội dung" disabled>💾 <span data-i18n="footer.export">Xuất</span></button>
+      <div id="export-menu" class="export-menu">
+        <button class="export-opt" data-mode="orig">📄 <span data-i18n="export.orig">Bản gốc</span></button>
+        <button class="export-opt" data-mode="both">🔁 <span data-i18n="export.both">Cả hai (gốc + dịch)</span></button>
+        <button class="export-opt" data-mode="trans">🌐 <span data-i18n="export.trans">Bản dịch</span></button>
+      </div>
+    </span>
+    <button id="clear-btn" data-i18n="footer.clear">Xóa</button>
   </div>
 
+  <script src="src/i18n.js"></script>
   <script>
     const api = window.__caption;
     const listEl    = document.getElementById('list');
@@ -499,8 +1190,38 @@
     const scrollBtn = document.getElementById('scroll-btn');
     const pinBtn      = document.getElementById('pin-btn');
     const ccBtn       = document.getElementById('cc-btn');
-    const settingsBtn = document.getElementById('settings-btn');
-    const settingsModal = document.getElementById('settings-modal');
+    const exportOrigBtn = document.getElementById('export-orig-btn');
+
+    // ── i18n (giao diện) + theme ──────────────────────────
+    const I18N = window.I18N || {};
+    const LOCALES = window.I18N_LOCALES || [{ code: 'vi', name: 'Tiếng Việt' }];
+    let _uiLang = 'vi';
+    function t(key, vars) {
+      let str = (I18N[_uiLang] && I18N[_uiLang][key]) || (I18N.en && I18N.en[key]) || key;
+      if (vars) for (const k in vars) str = str.split('{' + k + '}').join(vars[k]);
+      return str;
+    }
+    function applyI18n(lang) {
+      _uiLang = I18N[lang] ? lang : 'vi';
+      try { document.documentElement.lang = _uiLang; } catch (e) {}
+      document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+      document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
+      document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.getAttribute('data-i18n-title')); });
+      document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.getAttribute('data-i18n-ph')); });
+      try { countEl.textContent = t('footer.count', { n: count }); } catch (e) {}
+      try { pinBtn.title = t(pinned ? 'header.pinOn' : 'header.pinOff'); } catch (e) {}
+      try { if (_lastStatus && (_lastStatus.type === 'error' || _lastStatus.type === 'idle') && _lastStatus.key) statusMsg.textContent = t(_lastStatus.key, _statusVars(_lastStatus.vars)); } catch (e) {}
+      try { updateThemeIcon(); } catch (e) {}
+      try { renderEmpty(); } catch (e) {}
+    }
+    let _themePref = 'auto';
+    const _mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    function applyTheme(pref) {
+      _themePref = pref || 'auto';
+      const dark = _themePref === 'dark' || (_themePref !== 'light' && (_mql ? _mql.matches : true));
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    }
+    if (_mql && _mql.addEventListener) _mql.addEventListener('change', () => { if (_themePref === 'auto') applyTheme('auto'); });
 
     let autoScroll  = true;
     let pinned      = false;
@@ -508,10 +1229,11 @@
     let captionsOn  = false;
     let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
     let _currentProvider = 'online';  // theo dõi provider hiện tại
+    let _srcLang = 'ja';           // ngôn ngữ nguồn đã chọn (system/mic); Teams thì auto theo Teams
     const PROVIDER_NAMES = {
       online: 'Online (auto)', local: 'LOCAL TRANSLATE',
       // legacy — store cũ chưa migrate vẫn hiển đúng tên
-      'teams-token': 'MS Translator', 'google-free': 'Google Translate', deepl: 'DeepL',
+      'teams-token': 'MS Translator', 'google-free': 'Google Translate',
     };
     let _mediaRecorder  = null;
     let _audioStream    = null;
@@ -524,10 +1246,20 @@
       // Đồng bộ icon theo trạng thái (⏹ đang chạy / ▶ chưa chạy) — bỏ qua khi đang chờ ⏳ sau click.
       if (!ccBtn.classList.contains('loading')) ccBtn.textContent = on ? '⏹' : '▶';
       if (_currentSource === 'teams') {
-        ccBtn.title = on ? 'Captions đang bật — click để tắt' : 'Captions đang tắt — click để bật';
+        ccBtn.title = t(on ? 'cc.captionsOn' : 'cc.captionsOff');
       } else {
-        ccBtn.title = on ? 'Ghi âm đang chạy — click để tạm dừng' : 'Ghi âm tạm dừng — click để tiếp tục';
+        ccBtn.title = t(on ? 'cc.recOn' : 'cc.recOff');
       }
+    }
+
+    // Placeholder rỗng theo nguồn: Teams → "Chờ captions từ Teams…"; system/mic → "Đang nghe âm thanh…".
+    // force=true: ép vẽ lại (dùng cho nút Xóa). Không ép: chỉ cập nhật khi list đang trống.
+    function renderEmpty(force) {
+      if (!force && !listEl.querySelector('.empty')) return;
+      const audio = _currentSource !== 'teams';
+      listEl.innerHTML =
+        '<div class="empty"><span>' + t(audio ? 'list.emptyAudioTitle' : 'list.emptyTitle') + '</span><br>' +
+        '<span class="empty-hint">' + t(audio ? 'list.emptyAudioHint' : 'list.emptyHint') + '</span></div>';
     }
 
     // Map: id → { author, original, translated } — lưu để tổng hợp cuộc họn (KHÔNG cap → giữ đủ cho summary/export)
@@ -543,52 +1275,63 @@
 
     // Kiểm tra API key và lấy nguồn dịch khi khởi động
     api.getSettings().then(s => {
+      applyTheme(s.theme || 'auto');
+      applyI18n(s.uiLang || 'vi');
+      updateThemeIcon();
+      try { setFlagActive(uilangRow, s.uiLang || 'vi'); } catch (e) {}
+      // Khôi phục ngôn ngữ ĐÍCH (quick selector cạnh ▶) + báo backend.
+      const _lang = s.lang || 'vi';
+      try { setQuickFlag(lqTgt, _lang); setFlagActive(lqTgtPop, _lang); } catch (e) {}
+      api.setLang(_lang);
+      // Ngôn ngữ NGUỒN (system/mic): mặc định 'ja' (app JP→VI) nếu chưa lưu → lưu để feed Whisper.
+      // (Hiển thị cờ/auto do applyCaptureUI quyết theo nguồn — Teams = auto.)
+      _srcLang = s.srcLang || 'ja';
+      try { setFlagActive(lqSrcPop, _srcLang); } catch (e) {}
+      if (!s.srcLang) api.saveSettings({ srcLang: _srcLang });
       _currentSource = s.captureSource || 'teams';
+      try { renderEmpty(); } catch (e) {}
       const prov = s.provider || 'online';
       _currentProvider = prov;
-      const provInfo = PROVIDER_INFO[prov];
-      const needsKey = !(provInfo && provInfo.noKey);
-      if (needsKey && !s.apiKey && !(s.providerKeys && s.providerKeys[prov])) {
-        settingsBtn.textContent = '⚠️';
-        settingsBtn.title = 'Chưa có API key — click để cài đặt';
-      }
+      try {
+        setProviderRadio(prov);
+        if (sCapture)  { sCapture.value = _currentSource; applyCaptureUI(_currentSource); }
+        if (_currentSource === 'mic') loadMicDevices(s.micDeviceId || '');
+      } catch (e) {}
     });
 
-    // Gửi lang mặc định ngay lập tức
-    api.setLang(document.getElementById('lang').value);
+    // (Ngôn ngữ đích khôi phục từ settings đã lưu trong api.getSettings().then ở trên)
 
     // ── Status ──
-    api.onStatus(({ type, msg }) => {
-      statusEl.className = 'status ' + type;
-      statusMsg.textContent = msg;
-      setCaptionsState(type === 'running');
+    // Lưu status gần nhất + resolve var {lang} (code → tên ngôn ngữ bản địa) để hiển theo UI lang.
+    let _lastStatus = null;
+    function _statusVars(v) {
+      if (!v) return v;
+      if (v.lang) { const L = LOCALES.find(l => l.code === v.lang); return Object.assign({}, v, { lang: L ? L.name : v.lang }); }
+      return v;
+    }
+    api.onStatus(({ type, msg, key, vars }) => {
+      _lastStatus = { type, msg, key, vars };
+      statusEl.className = 'status ' + type;            // dot → spinner khi loading/connecting/waiting
+      // Nút play KHÔNG bám status 'running' nữa (tránh local-LLM 'ready'/infra làm nút tự thành ⏹ lúc boot).
+      // Trạng thái play do cc-state quyết định (= userActive ở main) — xem api.onCcState bên dưới.
+      // Routine/loading: KHÔNG hiện text (play + spinner đã thể hiện). Hiện text khi LỖI hoặc IDLE (gợi ý bấm ▶).
+      statusMsg.textContent = (type === 'error' || type === 'idle') ? (key ? t(key, _statusVars(vars)) : (msg || '')) : '';
 
       if (type === 'waiting-captions') {
         if (!listEl.querySelector('.entry')) {
           listEl.innerHTML = '';
           const banner = document.createElement('div');
           banner.className = 'hint-banner';
-          banner.innerHTML =
-            '<b>Cần bật Live Captions trong Teams:</b><br>' +
-            '• Trong Teams: nhấn <b>More (...)</b> → <b>Language and speech</b> → <b>Turn on live captions</b><br>' +
-            '• Phím tắt: <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd><br>' +
-            '• Hoặc nhấn nút <b>▶</b> ở thanh trạng thái bên dưới';
+          banner.innerHTML = t('banner.captionHelp');
           listEl.appendChild(banner);
         }
       }
-
-      if (type === 'error') {
+      // Banner hướng dẫn CDP CHỈ cho lỗi kết nối Teams (không phải mọi lỗi như STT/LLM)
+      if (type === 'error' && (key === 'status.cdpFailed' || key === 'status.teamsNotFound')) {
         listEl.innerHTML = '';
         const banner = document.createElement('div');
         banner.className = 'error-banner';
-        banner.innerHTML = `
-          <b>Cần bật CDP debug port — làm 1 lần duy nhất:</b><br><br>
-          1. Mở PowerShell và chạy:
-          <code>[System.Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS","--remote-debugging-port=9222","User")</code>
-          2. Đóng Teams hoàn toàn (kể cả system tray)<br>
-          3. Mở lại Teams<br>
-          4. Khởi động lại app này
-        `;
+        banner.innerHTML = t('banner.cdpHelp');
         listEl.appendChild(banner);
       }
     });
@@ -633,6 +1376,7 @@
           ts:   ts   || prev?.ts,
           tsMs: prev?.tsMs || tsMs || Date.now(),
         });
+        exportOrigBtn.disabled = false;   // có nội dung → bật nút export
       }
 
       // Entry đã bị evict khỏi DOM (họp dài) → chỉ giữ data ở trên, KHÔNG tái tạo node
@@ -648,7 +1392,7 @@
         listEl.appendChild(el);
         entryEls.set(id, el);
         count++;
-        countEl.textContent = count + ' câu';
+        countEl.textContent = t('footer.count', { n: count });
         // Cap DOM: evict entry CŨ NHẤT khi vượt ngưỡng (chỉ gỡ khỏi DOM + entryEls; giữ captionData & count).
         while (entryEls.size > MAX_ENTRIES) {
           const oldest = listEl.firstElementChild;
@@ -666,9 +1410,9 @@
       if (el._ts.textContent !== (ts || '')) el._ts.textContent = ts || '';
       if (el._orig.textContent !== (original || '')) el._orig.textContent = original || '';
       if (isPending) {
-        el._tr.innerHTML = '<span style="color:#555;font-style:italic">đang dịch…</span>';
+        el._tr.innerHTML = '<span style="color:var(--m3-on-2);font-style:italic">đang dịch…</span>';
       } else if (isFailed) {
-        el._tr.innerHTML = '<span style="color:#444;font-style:italic">—</span>';
+        el._tr.innerHTML = '<span style="color:var(--m3-on-4);font-style:italic">—</span>';
       } else {
         el._tr.textContent = translated;
       }
@@ -681,53 +1425,51 @@
       setCaptionsState(active);
     });
 
-    // ── Settings modal ──
-    const PROVIDER_INFO = {
-      online: { label: '', placeholder: '', hint: 'Google Translator, MS Translator, DeepL', link: '', showModel: false, noKey: true },
-      'teams-token': { label: '', placeholder: '', hint: 'Dùng Microsoft Edge Translator API miễn phí — không cần API key', link: '', showModel: false, noKey: true },
-      'google-free': { label: '', placeholder: '', hint: 'Dùng Google Translate public endpoint — không cần API key (có thể bị rate-limit nếu dùng quá nhiều)', link: '', showModel: false, noKey: true },
-      deepl:  { label: '', placeholder: '', hint: 'Free 500K ký tự/tháng — không cần API key', link: '', showModel: false, noKey: true },
-      local:  { label: '', placeholder: '', hint: 'Dịch local offline dưới máy', link: '', showModel: false, noKey: true, isLocal: true },
-      duckai:  { label: '', placeholder: '', hint: 'DuckDuckGo AI — embedded browser, không key. Lần đầu có thể hiện cửa sổ để dismiss cookie/popup, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
-      copilot: { label: '', placeholder: '', hint: 'Microsoft Copilot — embedded browser, không key. Lần đầu có thể hiện cửa sổ để dismiss cookie banner/welcome modal, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
-      chatgpt: { label: '', placeholder: '', hint: 'ChatGPT — embedded browser, không key (dùng chế độ logged-out). Lần đầu có thể hiện cửa sổ để dismiss "Stay logged out"/cookie banner, sau đó chạy ẩn.', link: '', showModel: false, noKey: true },
-    };
+    // ── Settings (đã gộp hết vào dropdown ⋮ — apply + lưu NGAY khi đổi) ──
+    const sCapture      = document.getElementById('s-capture');
+    const sMicRow       = document.getElementById('s-mic-row');
+    const sMicDevice    = document.getElementById('s-mic-device');
+    const providerRadio = document.getElementById('provider-radio');
 
-    // Per-provider key cache (lưu key riêng cho từng provider)
-    const _providerKeys = {};
-
-    const sProvider    = document.getElementById('s-provider');
-    const sKeyLabel    = document.getElementById('s-key-label');
-    const sApiKey      = document.getElementById('s-apikey');
-    const sKeyHint     = document.getElementById('s-key-hint');
-    const sToggleVis   = document.getElementById('s-toggle-vis');
-    const sCapture     = document.getElementById('s-capture');
-    const sMicRow      = document.getElementById('s-mic-row');
-    const sMicDevice   = document.getElementById('s-mic-device');
-
-    function applyProviderUI(provider) {
-      const info = PROVIDER_INFO[provider] || PROVIDER_INFO.online;
-      const isNoKey = !!info.noKey;
-      document.getElementById('s-key-row').style.display = isNoKey ? 'none' : '';
-      sKeyLabel.textContent    = info.label;
-      sApiKey.placeholder      = info.placeholder;
-      const noteEl = document.getElementById('s-provider-note');
-      if (info.link) {
-        noteEl.innerHTML = `🔗 Lấy key: <a href="#" class="ext-link" data-url="${info.link}" style="color:#4ec9b0">${info.link.replace(/https?:\/\//, '').slice(0, 50)}...</a>`;
-      } else if (info.noKey) {
-        noteEl.innerHTML = '✅ ' + info.hint;
-      } else {
-        noteEl.innerHTML = '';
-      }
-      sKeyHint.textContent = info.hint || '';
-      sApiKey.value = _providerKeys[provider] || '';
-    }
-
+    // Nguồn = mic → hiện ô chọn microphone. Ngôn ngữ nguồn (lq-src cạnh ▶):
+    //  - Teams: KHÔNG chọn được → icon 🌐 auto + disable (spoken language là cài đặt CHUNG của meeting,
+    //    đổi sẽ đổi cho MỌI người → để Teams tự dò theo người nói).
+    //  - system/mic: chọn tay → hiện cờ _srcLang, bấm mở picker.
     function applyCaptureUI(source) {
-      document.getElementById('s-teams-note').style.display = source === 'teams' ? '' : 'none';
       sMicRow.style.display = source === 'mic' ? '' : 'none';
-      document.getElementById('s-stt-info').style.display = (source === 'system' || source === 'mic') ? '' : 'none';
+      const sttRow = document.getElementById('s-stt-dl-row');
+      if (sttRow) {
+        const isAudio = source === 'system' || source === 'mic';
+        sttRow.style.display = isAudio ? '' : 'none';
+        if (isAudio && typeof refreshSttModels === 'function') refreshSttModels();
+      }
+      const lqSrcEl = document.getElementById('lq-src');
+      if (lqSrcEl) {
+        const teams = source === 'teams';
+        lqSrcEl.classList.toggle('lq-disabled', teams);
+        lqSrcEl.innerHTML = teams ? '<span class="fl auto">🌐</span>' : flagInner(_srcLang);
+        lqSrcEl.title = teams ? t('srcLang.auto') : t('settings.srcLang');
+        if (teams) { const p = document.getElementById('lq-src-pop'); if (p) p.classList.remove('open'); }
+      }
     }
+
+    // provider radio (Online / Offline) → lưu ngay. Đồng bộ class .active (fallback nếu :has() không hỗ trợ).
+    function syncProviderActive() {
+      if (!providerRadio) return;
+      providerRadio.querySelectorAll('.radio-opt').forEach(opt => {
+        const inp = opt.querySelector('input');
+        opt.classList.toggle('active', !!(inp && inp.checked));
+      });
+    }
+    function setProviderRadio(prov) {
+      const r = providerRadio && providerRadio.querySelector('input[value="' + prov + '"]');
+      if (r) r.checked = true;
+      syncProviderActive();
+    }
+    providerRadio.addEventListener('change', (e) => {
+      syncProviderActive();
+      if (e.target && e.target.value) api.saveSettings({ provider: e.target.value });
+    });
 
     async function loadMicDevices(currentId) {
       try {
@@ -743,90 +1485,169 @@
       }
     }
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-        if (btn.dataset.tab === 'source' && sCapture.value === 'mic') loadMicDevices(sMicDevice.value);
-      });
-    });
-
-    // Khi đổi provider: lưu key cũ, load key mới
-    sProvider.addEventListener('change', (e) => {
-      // Lưu key+model của provider trước đó
-      const prev = e.target._prevProvider;
-      if (prev) {
-        const prevInfo = PROVIDER_INFO[prev];
-        if (prevInfo && !prevInfo.noKey) {
-          _providerKeys[prev] = sApiKey.value.trim();
-        }
-      }
-      e.target._prevProvider = sProvider.value;
-      applyProviderUI(sProvider.value);
-    });
-
     sCapture.addEventListener('change', () => {
       applyCaptureUI(sCapture.value);
       if (sCapture.value === 'mic') loadMicDevices(sMicDevice.value);
+      api.saveSettings({ captureSource: sCapture.value, micDeviceId: sMicDevice.value });
     });
 
-    function openSettings() {
-      // Reset to first tab
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === 'translate'));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-translate'));
-      api.getSettings().then(s => {
-        // Load per-provider keys từ backend
-        const provKeys = s.providerKeys || {};
-        Object.assign(_providerKeys, provKeys);
+    sMicDevice.addEventListener('change', () => {
+      api.saveSettings({ micDeviceId: sMicDevice.value });
+    });
 
-        sProvider.value = s.provider || 'online';
-        sProvider._prevProvider = sProvider.value;
-        applyProviderUI(sProvider.value);
-        // Source tab
-        sCapture.value  = s.captureSource || 'teams';
-        applyCaptureUI(sCapture.value);
-        if (s.captureSource === 'mic') loadMicDevices(s.micDeviceId || '');
-      });
-      settingsModal.classList.add('open');
+    // ── Tải model STT của Windows Live Captions (source = system/mic; en/ja/ko/zh — tiếng Việt dùng STT nội bộ) ──
+    const sSttDlRow     = document.getElementById('s-stt-dl-row');
+    const sSttDlBtn     = document.getElementById('s-stt-dl-btn');
+    const sSttDlStatus  = document.getElementById('s-stt-dl-status');
+    const sSttDlBarWrap = document.getElementById('s-stt-dl-bar-wrap');
+    const sSttDlBar     = document.getElementById('s-stt-dl-bar');
+    let _sttDling = false;
+
+    async function refreshSttModels() {
+      if (!sSttDlRow || _sttDling) return;
+      try {
+        const avail = await api.lcAvailable();
+        if (!avail) {
+          sSttDlStatus.textContent = 'Windows Live Captions không khả dụng (cần Windows 11). Tiếng Việt dùng STT nội bộ.';
+          if (sSttDlBtn) sSttDlBtn.style.display = 'none';
+          return;
+        }
+        const { installed = [], missing = [] } = (await api.checkSttModels()) || {};
+        const total = installed.length + missing.length;
+        if (missing.length === 0) {
+          sSttDlStatus.textContent = `Đã tải đủ model (${installed.length}/${total})`;
+          if (sSttDlBtn) sSttDlBtn.style.display = 'none';
+        } else {
+          sSttDlStatus.textContent = `Chưa đủ model (${installed.length}/${total}) — thiếu: ${missing.join(', ')}`;
+          if (sSttDlBtn) { sSttDlBtn.style.display = ''; sSttDlBtn.disabled = false; }
+        }
+      } catch (e) {}
     }
-    settingsBtn.addEventListener('click', openSettings);
-    document.getElementById('settings-cancel').addEventListener('click', () => settingsModal.classList.remove('open'));
-    // (Bỏ đóng khi click nền: popup chỉ đóng bằng Hủy / Lưu / nút ✕)
 
-    sToggleVis.addEventListener('click', function() {
-      const isPass = sApiKey.type === 'password';
-      sApiKey.type = isPass ? 'text' : 'password';
-      this.textContent = isPass ? 'Hide' : 'Show';
+    if (sSttDlBtn) sSttDlBtn.addEventListener('click', async () => {
+      if (_sttDling) return;
+      _sttDling = true; sSttDlBtn.disabled = true;
+      sSttDlBarWrap.style.display = ''; sSttDlBar.style.width = '0%';
+      sSttDlStatus.textContent = 'Đang tải model...';
+      try { await api.downloadSttModels(); } catch (e) {}
+      _sttDling = false;
+      sSttDlBarWrap.style.display = 'none';
+      refreshSttModels();
     });
 
-    document.getElementById('settings-save').addEventListener('click', () => {
-      // Lưu key hiện tại vào cache trước khi save
-      const curProv = sProvider.value;
-      const curInfo = PROVIDER_INFO[curProv];
-      if (curInfo && !curInfo.noKey) {
-        _providerKeys[curProv] = sApiKey.value.trim();
+    api.onSttDownloadProgress((p) => {
+      if (!sSttDlBar || !p) return;
+      if (typeof p.overall === 'number') {
+        sSttDlBar.style.width = p.overall + '%';
+        let label = p.overall + '%';
+        if (p.lang) label += ` — ${p.lang} (${p.done || 0}/${p.total || 4})`;
+        sSttDlStatus.textContent = 'Đang tải model... ' + label;
       }
-
-      api.saveSettings({
-        provider:        curProv,
-        apiKey:          sApiKey.value.trim(),
-        providerKeys:    { ..._providerKeys },
-        captureSource:   sCapture.value,
-        micDeviceId:     sMicDevice.value,
-      });
+      if (p.t === 'err') sSttDlStatus.textContent = 'Lỗi tải model: ' + (p.m || '');
     });
+
+
+    // ── Header: đổi ngôn ngữ giao diện (🌐) + chế độ sáng/tối (🌙/☀️) — áp dụng + lưu NGAY (toggle trực tiếp) ──
+    // ── Header menu (⋮): gộp ngôn ngữ dịch / ngôn ngữ app / theme / export / settings ──
+    const themeBtn  = document.getElementById('theme-btn');
+    const menuBtn   = document.getElementById('menu-btn');
+    const appMenu   = document.getElementById('app-menu');
+
+    // ── Flag picker: thay select ngôn ngữ (emoji cờ không render trên Windows → hiện cờ SVG) ──
+    const FLAGS = {
+      vi: '<svg viewBox="0 0 24 16" preserveAspectRatio="none"><rect width="24" height="16" fill="#da251d"/><path d="M12 3.2l1.27 3.9h4.1l-3.32 2.41 1.27 3.9L12 11l-3.32 2.41 1.27-3.9L6.63 7.1h4.1z" fill="#ff0"/></svg>',
+      en: '<svg viewBox="0 0 24 16" preserveAspectRatio="none"><rect width="24" height="16" fill="#fff"/><g fill="#b22234"><rect width="24" height="1.23"/><rect width="24" height="1.23" y="2.46"/><rect width="24" height="1.23" y="4.92"/><rect width="24" height="1.23" y="7.38"/><rect width="24" height="1.23" y="9.85"/><rect width="24" height="1.23" y="12.31"/><rect width="24" height="1.23" y="14.77"/></g><rect width="10" height="8.6" fill="#3c3b6e"/></svg>',
+      ja: '<svg viewBox="0 0 24 16" preserveAspectRatio="none"><rect width="24" height="16" fill="#fff"/><circle cx="12" cy="8" r="4.6" fill="#bc002d"/></svg>',
+      ko: '<svg viewBox="0 0 24 16" preserveAspectRatio="none"><rect width="24" height="16" fill="#fff"/><circle cx="12" cy="8" r="4" fill="#0047a0"/><path d="M12 4a4 4 0 0 1 0 8 2 2 0 0 0 0-4 2 2 0 0 1 0-4z" fill="#cd2e3a"/></svg>',
+      'zh-CN': '<svg viewBox="0 0 24 16" preserveAspectRatio="none"><rect width="24" height="16" fill="#de2910"/><path d="M5 3l.93 2.86h3.01L6.51 7.63l.93 2.86L5 8.72 2.56 10.49l.93-2.86L1.06 5.86h3.01z" fill="#ffde00"/><g fill="#ffde00"><circle cx="9.6" cy="2.1" r=".7"/><circle cx="11.1" cy="3.7" r=".7"/><circle cx="11.1" cy="5.9" r=".7"/><circle cx="9.6" cy="7.4" r=".7"/></g></svg>',
+    };
+    const LANG_FLAG_ORDER = ['vi', 'en', 'ja', 'ko', 'zh-CN'];
+    const LANG_NAME = { vi: 'Tiếng Việt', en: 'English', ja: '日本語', ko: '한국어', 'zh-CN': '中文' };
+    function flagInner(code) {
+      if (code === 'auto') return '<span class="fl auto">🌐</span>';
+      return '<span class="fl">' + (FLAGS[code] || '') + '</span>';
+    }
+    function setFlagActive(el, code) {
+      if (!el) return;
+      el.querySelectorAll('.flag-btn').forEach(b => b.classList.toggle('active', b.dataset.code === code));
+    }
+    function buildFlagRow(el, order, onPick) {
+      if (!el) return;
+      el.innerHTML = order.map(code => {
+        const name = code === 'auto' ? 'Auto' : (LANG_NAME[code] || code);
+        return `<button type="button" class="flag-btn" data-code="${code}" title="${name}">${flagInner(code)}<span class="fl-name">${name}</span></button>`;
+      }).join('');
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('.flag-btn');
+        if (!b || !el.contains(b)) return;
+        setFlagActive(el, b.dataset.code);
+        onPick(b.dataset.code);
+      });
+    }
+    const uilangRow = document.getElementById('uilang-row');
+    buildFlagRow(uilangRow, LANG_FLAG_ORDER, (code) => { applyI18n(code); api.saveSettings({ uiLang: code }); });
+
+    // ── Quick language selector cạnh nút ▶: NGUỒN → ĐÍCH (cờ; bấm cờ mở popup chọn nước). Ép chọn thủ công. ──
+    const lqSrc    = document.getElementById('lq-src');
+    const lqTgt    = document.getElementById('lq-tgt');
+    const lqSrcPop = document.getElementById('lq-src-pop');
+    const lqTgtPop = document.getElementById('lq-tgt-pop');
+    function setQuickFlag(btn, code) { if (btn) btn.innerHTML = flagInner(code); }
+    // Source: ép chọn tay (system/mic) → lưu srcLang (main feed thẳng vào Whisper). Teams thì auto (disable).
+    buildFlagRow(lqSrcPop, LANG_FLAG_ORDER, (code) => {
+      _srcLang = code; setQuickFlag(lqSrc, code); lqSrcPop.classList.remove('open'); api.saveSettings({ srcLang: code });
+    });
+    buildFlagRow(lqTgtPop, LANG_FLAG_ORDER, (code) => {
+      setQuickFlag(lqTgt, code); lqTgtPop.classList.remove('open'); api.setLang(code);
+    });
+    lqSrc.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (lqSrc.classList.contains('lq-disabled')) return;   // Teams: nguồn auto → không mở picker
+      lqTgtPop.classList.remove('open'); lqSrcPop.classList.toggle('open');
+    });
+    lqTgt.addEventListener('click', (e) => { e.stopPropagation(); lqSrcPop.classList.remove('open'); lqTgtPop.classList.toggle('open'); });
+    lqSrcPop.addEventListener('click', (e) => e.stopPropagation());
+    lqTgtPop.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => { lqSrcPop.classList.remove('open'); lqTgtPop.classList.remove('open'); });
+
+    function updateThemeIcon() {
+      const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+      if (themeBtn) themeBtn.title = t(dark ? 'theme.light' : 'theme.dark');
+    }
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setFlagActive(uilangRow, _uiLang);
+      appMenu.classList.toggle('open');
+    });
+    appMenu.addEventListener('click', (e) => e.stopPropagation());   // click trong menu không tự đóng
+    document.addEventListener('click', () => appMenu.classList.remove('open'));
+    themeBtn.addEventListener('click', () => {
+      const darkNow = document.documentElement.getAttribute('data-theme') !== 'light';
+      const pref = darkNow ? 'light' : 'dark';
+      applyTheme(pref); api.saveSettings({ theme: pref }); updateThemeIcon();
+    });
+
+    // Window controls (frameless)
+    document.getElementById('win-min').addEventListener('click', () => api.windowMinimize());
+    document.getElementById('win-max').addEventListener('click', () => api.windowMaximize());
+    document.getElementById('win-close').addEventListener('click', () => api.windowClose());
+    const ICON_MAX = '<svg viewBox="0 0 11 11" width="11" height="11" aria-hidden="true"><rect x="2.4" y="2.4" width="6.2" height="6.2" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>';
+    const ICON_RESTORE = '<svg viewBox="0 0 11 11" width="11" height="11" aria-hidden="true"><rect x="2" y="3.4" width="5.4" height="5.4" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M3.9 3.4V2.1h5v5H7.6" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>';
+    api.onMaxState(({ max }) => {
+      const b = document.getElementById('win-max');
+      if (!b) return;
+      b.innerHTML = max ? ICON_RESTORE : ICON_MAX;
+      b.setAttribute('data-i18n-title', max ? 'header.restore' : 'header.maximize');
+      b.title = t(max ? 'header.restore' : 'header.maximize');
+    });
+    document.getElementById('sum-cancel-btn').addEventListener('click', () => summaryModal.classList.remove('open'));
 
     api.onSettingsSaved(({ ok }) => {
-      if (ok) {
-        _currentSource = sCapture.value;
-        _currentProvider = sProvider.value;
-        const provInfo = PROVIDER_INFO[sProvider.value];
-        const isNoKey = provInfo && provInfo.noKey;
-        settingsBtn.textContent = (isNoKey || sApiKey.value.trim()) ? '⚙️' : '⚠️';
-        setTimeout(() => { settingsModal.classList.remove('open'); }, 900);
-      }
+      if (!ok) return;
+      _currentSource = sCapture.value;
+      const _pr = providerRadio.querySelector('input:checked');
+      if (_pr) _currentProvider = _pr.value;
+      try { renderEmpty(); } catch (e) {}
     });
 
     // Ext links trong hint
@@ -853,19 +1674,11 @@
       }, 2500);
     });
 
-    // ── Audio capture (System Audio / Microphone) ──
-    function detectMimeType() {
-      const types = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/ogg;codecs=opus',
-        'audio/ogg',
-        'audio/mp4',
-      ];
-      return types.find(t => MediaRecorder.isTypeSupported(t)) || '';
-    }
-
+    // ── Audio capture (System Audio / Microphone) → PCM float32 @16k cho STT ──
+    // Dùng Web Audio (AudioContext 16k + ScriptProcessor) lấy PCM mono trực tiếp → KHÔNG MediaRecorder/WebM,
+    // nên phía main (sherpa-onnx-node) KHÔNG cần Python/PyAV/ffmpeg để decode.
     let _recordingActive = false;
+    let _audioCtx = null, _srcNode = null, _procNode = null, _zeroGain = null;
 
     async function startAudioCapture(source) {
       try {
@@ -873,69 +1686,39 @@
         if (source === 'mic') {
           stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         } else {
-          // System audio qua setDisplayMediaRequestHandler (loopback Windows)
-          stream = await navigator.mediaDevices.getDisplayMedia({
-            audio: true,
-            video: { width: 320, height: 240, frameRate: 1 },
-          });
+          stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: { width: 320, height: 240, frameRate: 1 } });
         }
-        // Dừng video track và tạo audio-only stream để MediaRecorder
-        // không encode vp8, tránh webm;codecs=vp8,opus làm hỏng decode phía STT
         _rawStream = stream;
         stream.getVideoTracks().forEach(t => t.stop());
         const audioTracks = stream.getAudioTracks();
         _audioStream = new MediaStream(audioTracks);
-
-        if (!audioTracks.length) {
-          statusMsg.textContent = '⚠ Không có audio track — thử lại';
-          return;
-        }
-
-        const mimeType = detectMimeType();
-        if (!mimeType) {
-          statusMsg.textContent = '❌ Electron không hỗ trợ MediaRecorder audio';
-          return;
-        }
+        if (!audioTracks.length) { statusMsg.textContent = '⚠ Không có audio track — thử lại'; return; }
 
         _recordingActive = true;
 
-        // Dùng stop/restart cycle thay vì timeslice để mỗi chunk là WebM hoàn chỉnh
-        // (timeslice chỉ để lại header ở chunk đầu tiên, các chunk sau thiếu EBML header)
-        const CYCLE_MS = 4000;
-        const runCycle = () => {
-          if (!_recordingActive || !_audioStream || !_audioStream.active) return;
-
-          const rec = new MediaRecorder(_audioStream, { mimeType });
-          _mediaRecorder = rec;
-          console.log('[audio] MediaRecorder mimeType:', rec.mimeType, '| audioTracks:', _audioStream.getAudioTracks().length);
-
-          rec.addEventListener('dataavailable', async (e) => {
-            if (e.data && e.data.size > 2000) {
-              console.log(`[audio] chunk ${e.data.size} bytes, type=${e.data.type}`);
-              const buf = await e.data.arrayBuffer();
-              api.sendAudioChunk({ buffer: buf, mimeType: e.data.type || mimeType });
-            }
-            // Khởi động cycle tiếp theo ngay sau khi nhận xong dữ liệu
-            if (_recordingActive && _audioStream?.active) {
-              setTimeout(runCycle, 50);
-            }
-          });
-
-          rec.start();
-          // Dừng sau CYCLE_MS để trigger dataavailable với file WebM hoàn chỉnh
-          setTimeout(() => {
-            if (rec.state === 'recording') rec.stop();
-          }, CYCLE_MS);
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        _audioCtx = new Ctx({ sampleRate: 16000 });               // tự resample stream về 16k
+        if (_audioCtx.state === 'suspended') { try { await _audioCtx.resume(); } catch (e) {} }
+        _srcNode = _audioCtx.createMediaStreamSource(_audioStream);
+        _procNode = _audioCtx.createScriptProcessor(4096, 1, 1);
+        _zeroGain = _audioCtx.createGain(); _zeroGain.gain.value = 0;   // gain 0: không vọng ra loa
+        _procNode.onaudioprocess = (e) => {
+          if (!_recordingActive) return;
+          // Gửi KHUNG NHỎ (~256ms, 4096 mẫu) thay vì gom 2.5s → VAD ở main tự ghép thành câu trọn,
+          // cắt theo khoảng lặng (không cắt mù giữa câu). Độ trễ thấp + endpoint chính xác.
+          const ch = e.inputBuffer.getChannelData(0);   // mono float32 @ 16k
+          api.sendAudioPcm(new Float32Array(ch).buffer);
         };
-
-        runCycle();
-
+        _srcNode.connect(_procNode);
+        _procNode.connect(_zeroGain);
+        _zeroGain.connect(_audioCtx.destination);   // ScriptProcessor cần ở trong graph tới destination
+        console.log('[audio] Web Audio PCM @16k | ctx rate =', _audioCtx.sampleRate);
       } catch (err) {
         _recordingActive = false;
         console.error('[audio]', err);
-        const msg = err.name === 'NotAllowedError'  ? 'Quyền bị từ chối' :
-                    err.name === 'NotFoundError'     ? 'Không tìm thấy thiết bị âm thanh' :
-                    err.name === 'AbortError'        ? 'Đã hủy' :
+        const msg = err.name === 'NotAllowedError' ? 'Quyền bị từ chối' :
+                    err.name === 'NotFoundError'    ? 'Không tìm thấy thiết bị âm thanh' :
+                    err.name === 'AbortError'       ? 'Đã hủy' :
                     (err.message || err.name || 'Lỗi không xác định');
         statusMsg.textContent = '❌ Thu âm thất bại: ' + msg;
       }
@@ -943,26 +1726,27 @@
 
     function stopAudioCapture() {
       _recordingActive = false;
-      if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
-        _mediaRecorder.stop();
-      }
+      try { if (_procNode) { _procNode.onaudioprocess = null; _procNode.disconnect(); } } catch (e) {}
+      try { if (_srcNode) _srcNode.disconnect(); } catch (e) {}
+      try { if (_zeroGain) _zeroGain.disconnect(); } catch (e) {}
+      try { if (_audioCtx) _audioCtx.close(); } catch (e) {}
+      _procNode = _srcNode = _zeroGain = _audioCtx = null;
       _audioStream?.getTracks().forEach(t => t.stop());
       _rawStream?.getTracks().forEach(t => t.stop());
       _audioStream = null;
       _rawStream = null;
-      _mediaRecorder = null;
     }
 
     api.onStartAudioCapture(({ source }) => startAudioCapture(source));
     api.onStopAudioCapture(() => stopAudioCapture());
 
     // ── Controls ──
-    document.getElementById('lang').addEventListener('change', e => api.setLang(e.target.value));
+    // (Ngôn ngữ nguồn/đích đổi qua quick selector cạnh nút ▶ — xem lang-quick phía trên)
 
     pinBtn.addEventListener('click', function () {
       pinned = !pinned;
       this.classList.toggle('active', pinned);
-      this.title = pinned ? 'Luôn trên đầu (đang bật)' : 'Luôn trên đầu (đang tắt)';
+      this.title = t(pinned ? 'header.pinOn' : 'header.pinOff');
       api.setAlwaysOnTop(pinned);
       // Khi bật pin: bring to front để tránh bị ẩn
       if (pinned) api.focusWindow();
@@ -974,33 +1758,61 @@
       if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
     });
 
-    // Xuất bản gốc — time + người nói + nội dung (.txt)
-    document.getElementById('export-orig-btn').addEventListener('click', async () => {
-      if (!captionData.size) {
-        statusMsg.textContent = '⚠ Chưa có nội dung để xuất';
-        return;
+    // Tự bật/tắt Auto theo vị trí cuộn: cuộn TỚI ĐÁY → tự bật Auto (không cần bấm tay);
+    // cuộn LÊN đọc lịch sử → tự tắt Auto (để caption mới không kéo về đáy). Ngưỡng 40px.
+    listEl.addEventListener('scroll', () => {
+      const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
+      if (nearBottom !== autoScroll) {
+        autoScroll = nearBottom;
+        scrollBtn.classList.toggle('active', autoScroll);
       }
-      const sorted = [...captionData.values()].sort((a, b) => (a.tsMs || 0) - (b.tsMs || 0));
-      const header = `=== Bản gốc cuộc họp — ${new Date().toLocaleString('vi-VN')} ===\n` +
-                     `Tổng số dòng: ${sorted.length}\n` +
-                     `${'='.repeat(60)}\n\n`;
-      const lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.original || ''}`).join('\n');
-      const content = header + lines + '\n';
-      const date = new Date().toISOString().slice(0, 10);
-      const r = await api.exportSummary({ markdown: content, defaultName: `transcript-${date}.txt` });
-      if (r.ok) {
-        statusMsg.textContent = `✅ Đã xuất ${sorted.length} dòng → ${r.filePath}`;
-        setTimeout(() => { statusMsg.textContent = ''; }, 4000);
-      }
+    }, { passive: true });
+
+    // Xuất — bấm nút mở popup chọn kiểu: bản gốc / cả hai / bản dịch (.txt)
+    const exportMenu = document.getElementById('export-menu');
+    document.getElementById('export-orig-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!captionData.size) { statusMsg.textContent = t('status.exportEmpty'); return; }
+      exportMenu.classList.toggle('open');
+    });
+    document.addEventListener('click', () => exportMenu.classList.remove('open'));
+    exportMenu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const opt = e.target.closest('.export-opt');
+      if (!opt) return;
+      exportMenu.classList.remove('open');
+      doExport(opt.dataset.mode);
     });
 
+    async function doExport(mode) {
+      if (!captionData.size) { statusMsg.textContent = t('status.exportEmpty'); return; }
+      const sorted = [...captionData.values()].sort((a, b) => (a.tsMs || 0) - (b.tsMs || 0));
+      const TITLE = { orig: 'Bản gốc', both: 'Bản gốc + bản dịch', trans: 'Bản dịch' };
+      const NAME  = { orig: 'transcript', both: 'song-ngu', trans: 'ban-dich' };
+      const header = `=== ${TITLE[mode] || TITLE.orig} cuộc họp — ${new Date().toLocaleString('vi-VN')} ===\n` +
+                     `Tổng số dòng: ${sorted.length}\n` +
+                     `${'='.repeat(60)}\n\n`;
+      let lines;
+      if (mode === 'trans')     lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.translated || ''}`).join('\n');
+      else if (mode === 'both') lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}:\n  • ${c.original || ''}\n  → ${c.translated || ''}`).join('\n\n');
+      else                      lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.original || ''}`).join('\n');
+      const content = header + lines + '\n';
+      const date = new Date().toISOString().slice(0, 10);
+      const r = await api.exportSummary({ markdown: content, defaultName: `${NAME[mode] || NAME.orig}-${date}.txt` });
+      if (r.ok) {
+        statusMsg.textContent = t('status.exported', { n: sorted.length, path: r.filePath });
+        setTimeout(() => { statusMsg.textContent = ''; }, 4000);
+      }
+    }
+
     document.getElementById('clear-btn').addEventListener('click', () => {
-      listEl.innerHTML = '<div class="empty">Đã xóa. Chờ captions mới...</div>';
+      renderEmpty(true);
       entryEls.clear();
       captionData.clear();
       _retired.clear();
       count = 0;
-      countEl.textContent = '0 câu';
+      countEl.textContent = t('footer.count', { n: 0 });
+      exportOrigBtn.disabled = true;   // đã xóa → không còn nội dung để export
     });
 
     // ── Summary modal ──
@@ -1043,7 +1855,8 @@
           out.push(html + '</tbody></table>'); continue;
         }
         let m;
-        if ((m = t.match(/^(#{1,6})\s+(.+)$/))) { flushPara(); closeList(); const l = Math.min(m[1].length, 4); out.push(`<h${l}>${inline(m[2])}</h${l}>`); i++; continue; }
+        const _h = t.replace(/^\*\*(.+?)\*\*$/, '$1');   // gỡ bold bọc cả dòng (ChatGPT hay in đậm dòng tiêu đề → **## ...**)
+        if ((m = _h.match(/^(#{1,6})\s*(.+)$/))) { flushPara(); closeList(); const l = Math.min(m[1].length, 4); out.push(`<h${l}>${inline(m[2])}</h${l}>`); i++; continue; }
         if (/^---+$/.test(t)) { flushPara(); closeList(); out.push('<hr>'); i++; continue; }
         if ((m = t.match(/^[*\-]\s+(.+)$/))) { flushPara(); if (listType !== 'ul') { closeList(); out.push('<ul>'); listType = 'ul'; } out.push(`<li>${inline(m[1])}</li>`); i++; continue; }
         if ((m = t.match(/^\d+\.\s+(.+)$/))) { flushPara(); if (listType !== 'ol') { closeList(); out.push('<ol>'); listType = 'ol'; } out.push(`<li>${inline(m[1])}</li>`); i++; continue; }
@@ -1063,21 +1876,21 @@
 
     sumGenerateBtn.addEventListener('click', async () => {
       if (!captionData.size) {
-        sumStatus.textContent = '⚠ Chưa có nội dung — bật Live Captions rồi thử lại';
+        sumStatus.textContent = t('summary.noContent');
         return;
       }
       sumGenerateBtn.disabled = true;
-      sumGenerateBtn.textContent = '⏳ Đang tổng hợp...';
-      sumStatus.textContent = `Đang xử lý ${captionData.size} câu...`;
+      sumGenerateBtn.innerHTML = '<span class="m3-spinner-sm"></span> ' + t('summary.generate');
+      sumStatus.textContent = t('summary.processing', { n: captionData.size });
       sumExportBtn.disabled = true;
       sumCopyBtn.disabled = true;
-      sumBody.innerHTML = '<div class="summary-placeholder">AI đang tổng hợp… vui lòng chờ</div>';
+      sumBody.innerHTML = '<div class="summary-loading"><div class="m3-spinner-lg"></div>' + t('summary.generating') + '</div>';
 
       const captions = [...captionData.values()];
       const result = await api.summarizeMeeting(captions);
 
       sumGenerateBtn.disabled = false;
-      sumGenerateBtn.textContent = '✨ Tóm tắt';
+      sumGenerateBtn.innerHTML = '✨ <span data-i18n="summary.generate">' + t('summary.generate') + '</span>';
 
       if (!result.ok) {
         sumStatus.textContent = '❌ ' + result.error;
@@ -1101,7 +1914,7 @@
         ].filter(Boolean);
         sumStatus.innerHTML = '✅ ' + parts.join(' · ');
       } else {
-        sumStatus.textContent = '✅ Hoàn thành — xuất file hoặc copy';
+        sumStatus.textContent = '✅ ' + t('summary.done');
       }
       sumExportBtn.disabled = false;
       sumCopyBtn.disabled = false;
