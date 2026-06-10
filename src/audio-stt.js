@@ -103,11 +103,24 @@ function _handlePcmStreaming(samples) {
 // Chốt nốt câu ĐANG stream khi DỪNG ghi (user bấm ⏹ giữa câu) → câu cuối được dịch thay vì treo.
 function flushStreaming() {
   if (_online && _liveText) { _finalizeOnline(_liveText); try { _online.reset(); } catch {} }
+  if (_offLiveId || _offLen) _finalizeOffline(_offPartialText);   // offline: chốt nốt câu đang nói dở
 }
 
 // Dedup câu STT trùng trong cửa sổ ngắn (nhánh OFFLINE)
 const _sttRecentTexts = new Map();
 const STT_DEDUP_MS = 8000;
+function _isDupRecent(norm, now) {
+  for (const [k, ts_] of _sttRecentTexts) {
+    if (now - ts_ >= STT_DEDUP_MS) continue;
+    // trùng khít HOẶC gần-trùng (1 chuỗi chứa chuỗi kia, ≥6 ký tự) → bắt cả biến thể lặp của cùng 1 câu nói
+    if (k === norm || (norm.length >= 6 && k.length >= 6 && (k.includes(norm) || norm.includes(k)))) return true;
+  }
+  return false;
+}
+function _rememberRecent(norm, now) {
+  _sttRecentTexts.set(norm, now);
+  for (const [k, ts_] of _sttRecentTexts) if (now - ts_ > STT_DEDUP_MS * 2) _sttRecentTexts.delete(k);
+}
 
 // ── VAD: cắt câu theo khoảng lặng (Silero) → chỉ transcribe khi MỘT lượt nói KẾT THÚC → câu đủ nghĩa,
 //    ít nghe sai (Whisper nghe trọn đoạn thay vì mảnh 2.5s rời). Thiếu model VAD → fallback chunk như cũ. ──
@@ -121,32 +134,22 @@ function _ensureVad() {
   if (_vad && _vadLang === lang) return _vad;
   _vad = stt.createVad();          // ngôn ngữ đổi (hoặc lần đầu) → VAD mới theo config ngôn ngữ đó
   _vadLang = lang;
-  _carry = '';                     // đổi ngôn ngữ → bỏ mảnh dở cũ
+  _offUtt++; _resetOfflineLive();  // đổi ngôn ngữ → bỏ buffer câu dở cũ
   if (_vad) console.log('[audio-stt] VAD theo ngôn ngữ nguồn:', lang || 'auto');
   return _vad;
 }
 
-// Phát caption + dịch cho 1 mảng câu (đã lọc) — dedup trong cửa sổ ngắn.
+// Phát caption + dịch cho 1 mảng câu (đã lọc) — dùng cho nhánh FALLBACK (thiếu model VAD). Dedup cửa sổ ngắn.
 function _emitLines(lines) {
   if (!lines || !lines.length) return;
-  const now = Date.now();
   for (const line of lines) {
+    const now = Date.now();
     const normLine = line.toLowerCase().replace(/\s+/g, ' ').trim();
-    // Dedup: trùng khít HOẶC gần-trùng (1 chuỗi chứa chuỗi kia, ≥6 ký tự) trong cửa sổ — bắt cả biến thể
-    // lặp như "そろしくお願いします" ⊂ "どうぞそろしくお願いします" (cùng 1 câu nói bị nghe/chia khác nhau).
-    let dup = false;
-    for (const [k, ts_] of _sttRecentTexts) {
-      if (now - ts_ >= STT_DEDUP_MS) continue;
-      if (k === normLine || (normLine.length >= 6 && k.length >= 6 && (k.includes(normLine) || normLine.includes(k)))) { dup = true; break; }
-    }
-    if (dup) continue;
-    _sttRecentTexts.set(normLine, now);
-    for (const [k, ts_] of _sttRecentTexts) {
-      if (now - ts_ > STT_DEDUP_MS * 2) _sttRecentTexts.delete(k);
-    }
+    if (_isDupRecent(normLine, now)) continue;
+    _rememberRecent(normLine, now);
     const id = ++state.audioEntryId;
     const ts = timestamp();
-    const tsMs = Date.now();
+    const tsMs = now;
     const cleaned = preprocessText(line);
     send('caption-live', { id, author: 'STT', original: line, translated: '…', ts, tsMs });
     enqueueTranslate(cleaned).then(translated => {
@@ -157,45 +160,59 @@ function _emitLines(lines) {
   }
 }
 
-// ── Gom câu theo DẤU KẾT THÚC (。．.!?！？…) ──
-// VAD cắt theo khoảng lặng/trần thời gian → đoạn có thể đứt GIỮA câu. Ta giữ mảnh chưa-kết-câu trong
-// _carry, nối với đoạn kế → chỉ phát khi câu trọn (kết bằng dấu câu). Đoạn ngắn hơn trần ⇒ kết do khoảng
-// lặng ⇒ coi như hết câu (chốt luôn). Giữ quá dài (>80 ký tự) cũng chốt để tránh kẹt.
-let _carry = '';
-const _SENT_END = /[。．.!?！？…]["'）」』)\]]*$/u;
-const _INCOMPLETE_END = /(--|[-‐–—,、:：;；])\s*$/u;   // đuôi rõ ràng còn dở (Whisper báo đứt bằng "--", hoặc phẩy)
-function _join(a, b) {
-  if (!a) return b;
-  return (/[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(b)) ? a + ' ' + b : a + b;   // EN cần space; JP/ZH thì không
-}
-function _sentenceParts(text) {
-  const raw = text.split(/(?<=[。．.!?！？…])/u).map(s => s.trim()).filter(Boolean);
-  const out = [];
-  for (const p of raw) {
-    if (out.length && /^[”"'』」）)\]\s]+$/u.test(p)) out[out.length - 1] += p;   // mảnh chỉ gồm dấu đóng → ghép vào câu trước
-    else out.push(p);
-  }
-  return out;
-}
-function _assembleAndEmit(text, durSec) {
-  const endedBySilence = durSec < (stt.maxSpeechSec ? stt.maxSpeechSec() : 8) - 1;
-  if (!text) {
-    if (endedBySilence && _carry) { _emitLines([_carry]); _carry = ''; }
-    return;
-  }
-  const parts = _sentenceParts(_join(_carry, text));
-  _carry = '';
-  if (!parts.length) return;
-  const last = parts[parts.length - 1];
-  let toEmit;
-  if (_SENT_END.test(last)) toEmit = parts;                                  // kết bằng dấu câu → câu trọn
-  else if (endedBySilence && !_INCOMPLETE_END.test(last)) toEmit = parts;    // có khoảng lặng + đuôi không dở → chốt
-  else { toEmit = parts.slice(0, -1); _carry = last; }                       // mảnh dở → giữ lại nối đoạn sau
-  if (_carry.length > 80) { toEmit.push(_carry); _carry = ''; }
-  _emitLines(toEmit);
+// ── PSEUDO-STREAM offline (ja/vi): partial MỌC DẦN bằng re-decode buffer câu đang nói mỗi ~0.6s, rồi COMMIT
+//    khi VAD chốt đoạn (dùng ĐÚNG entry partial → câu "mọc rồi đông cứng" như Live Captions). Re-decode chỉ
+//    ~0.1-0.2s/lần trên CPU (đã đo), tải nhẹ; GIỮ độ chính xác model offline (không artifact như streaming đa ngữ). ──
+let _offBuf = [], _offLen = 0, _offDecLen = 0;     // buffer PCM câu đang nói + mốc samples lần partial trước
+let _offLiveId = null, _offPartialText = '', _offPartialBusy = false, _offUtt = 0;
+const _PARTIAL_STEP = Math.floor(16000 * 0.6);     // re-decode mỗi ~0.6s audio mới
+
+function _resetOfflineLive() { _offBuf = []; _offLen = 0; _offDecLen = 0; _offLiveId = null; _offPartialText = ''; }
+
+// Re-decode buffer câu hiện tại → phát partial (translated:'' = đang stream, chưa dịch). Fire-and-forget, có
+// khoá chống chạy chồng (_offPartialBusy) + bỏ qua khi đang drain. _offUtt = "thế hệ câu": partial tới muộn
+// sau khi câu đã chốt sẽ bị loại (tránh ghi đè / tạo entry rác cho câu đã xong).
+function _emitOfflinePartial() {
+  if (_offPartialBusy || _draining || !_offLen) return;
+  _offPartialBusy = true;
+  const gen = _offUtt;
+  const merged = new Float32Array(_offLen);
+  let o = 0; for (const p of _offBuf) { merged.set(p, o); o += p.length; }
+  stt.transcribe(merged).then(text => {
+    text = (text || '').trim();
+    if (state.audioPaused || gen !== _offUtt) return;   // đã ⏹ hoặc câu đã chốt → bỏ partial tới muộn
+    if (text && text !== _offPartialText && !stt.isHallucination(text)) {
+      _offPartialText = text;
+      if (!_offLiveId) _offLiveId = ++state.audioEntryId;   // mở entry mới cho câu đang nói
+      send('caption-live', { id: _offLiveId, author: 'STT', original: text, translated: '', ts: timestamp(), tsMs: Date.now() });
+    }
+  }).catch(() => {}).finally(() => { _offPartialBusy = false; });
 }
 
-// Rút các đoạn VAD đã cắt → transcribe → gom câu. Serialize bằng _draining tránh đua.
+// Chốt 1 câu: commit dưới CÙNG entry partial (id) → hiện "…" rồi dịch. Dedup CHỈ khi chưa hiện partial nào
+// (nếu đã hiện partial thì luôn commit để khỏi kẹt entry chưa dịch). Dùng text "sạch" của đoạn VAD; rỗng thì
+// rơi về partial cuối đã hiện.
+function _finalizeOffline(rawText) {
+  const liveId = _offLiveId;
+  const sRaw = (rawText || _offPartialText || '').trim();
+  _offUtt++;                       // sang câu mới → vô hiệu partial đang bay
+  _resetOfflineLive();
+  if (!sRaw || stt.isHallucination(sRaw)) return;
+  const now = Date.now();
+  const norm = sRaw.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!liveId && _isDupRecent(norm, now)) return;   // chưa hiện gì + trùng gần đây → bỏ hẳn
+  _rememberRecent(norm, now);
+  const id = liveId || (++state.audioEntryId);
+  const cleaned = preprocessText(sRaw);
+  send('caption-live', { id, author: 'STT', original: sRaw, translated: '…', ts: timestamp(), tsMs: now });
+  enqueueTranslate(cleaned).then(tr => {
+    if (state.audioPaused) return;   // user đã ⏹ giữa lúc dịch → bỏ kết quả tới muộn
+    const ok = tr && tr !== cleaned && tr !== sRaw;
+    send('caption-live', { id, author: 'STT', original: sRaw, translated: ok ? tr : null, ts: timestamp(), tsMs: now });
+  }).catch(() => {});
+}
+
+// Rút các đoạn VAD đã CHỐT (silence/endpoint) → transcribe đoạn "sạch" → COMMIT câu. Serialize bằng _draining.
 async function _drainVad() {
   if (_draining) return;
   _draining = true;
@@ -204,10 +221,9 @@ async function _drainVad() {
       let seg;
       try { seg = _vad.front(false); _vad.pop(); }   // false = KHÔNG external buffer (Electron cấm → copy thường)
       catch (e) { console.warn('[audio-stt] VAD front lỗi:', e.message); break; }
-      const durSec = seg.samples.length / 16000;
       let text;
       try { text = await stt.transcribe(seg.samples); } catch { text = ''; }
-      _assembleAndEmit(text, durSec);
+      _finalizeOffline(text);   // commit dưới entry partial đang hiện → câu "đông cứng" + dịch
     }
   } finally { _draining = false; }
 }
@@ -223,7 +239,12 @@ async function handlePcm(samples) {
   const vad = _ensureVad();
   if (vad) {
     try { vad.acceptWaveform(samples); } catch { return; }
-    await _drainVad();
+    // Đang nói → gom PCM câu hiện tại + phát partial mọc dần định kỳ (pseudo-stream). Im lặng → không gom.
+    if (vad.isDetected()) {
+      _offBuf.push(samples); _offLen += samples.length;
+      if (_offLen - _offDecLen >= _PARTIAL_STEP) { _offDecLen = _offLen; _emitOfflinePartial(); }
+    }
+    await _drainVad();   // đoạn nào VAD đã chốt → commit (kèm clear buffer câu)
   } else {
     // Fallback (thiếu model VAD): gom khung nhỏ thành ~2.5s rồi transcribe (Whisper cần đoạn đủ dài).
     _fbParts.push(samples); _fbLen += samples.length;
@@ -241,7 +262,7 @@ async function handlePcm(samples) {
 function resetSegmentation() {
   if (_vad) { try { _vad.reset(); } catch {} try { _vad.clear(); } catch {} }
   _fbParts = []; _fbLen = 0;
-  _carry = '';
+  _offUtt++; _resetOfflineLive();   // bỏ buffer/partial câu dở của phiên trước
   _sttRecentTexts.clear();
   // Online: bỏ stream cũ → phiên mới tạo session sạch (đổi ngôn ngữ cũng được tái tạo qua _ensureOnline).
   if (_online) { try { _online.reset(); } catch {} }
