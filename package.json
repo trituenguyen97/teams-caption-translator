@@ -33,7 +33,7 @@
       "app.html",
       "overlay.html",
       "overlay-preload.js",
-      "scripts/uia-captions-helper.ps1",
+      "scripts/*.ps1",
       "node_modules/**/*",
       "!node_modules/puppeteer-core/lib/{esm,es5-iife}/**",
       "!node_modules/chromium-bidi/**",

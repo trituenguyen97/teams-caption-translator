@@ -291,6 +291,29 @@
     .modal-overlay.open { display: flex; }
     @keyframes scrimIn { from { opacity: 0; } to { opacity: 1; } }
 
+    /* Busy overlay — phủ TOÀN trang (trên cả modal, z-index cao nhất), bắt mọi click để chặn thao tác khi tải model */
+    .busy-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(8,9,11,.74);
+      backdrop-filter: blur(2px);
+      z-index: 9999;
+      align-items: center; justify-content: center;
+      cursor: progress;
+      -webkit-app-region: no-drag;        /* không cho kéo cửa sổ qua overlay */
+      animation: scrimIn var(--m3-dur) var(--m3-ease);
+    }
+    .busy-overlay.open { display: flex; }
+    .busy-box { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 28px 36px; }
+    .busy-spinner {
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 4px solid var(--m3-surf-4, #3a3b3c);
+      border-top-color: var(--m3-accent, #7ca8ff);
+      animation: busySpin .8s linear infinite;
+    }
+    @keyframes busySpin { to { transform: rotate(360deg); } }
+    .busy-text { font-size: 13px; color: var(--m3-on-1, #e3e3e3); font-weight: 600; letter-spacing: .3px; text-align: center; }
+
     .modal {
       background: var(--m3-sheen), var(--m3-surf-2);
       border: 1px solid var(--m3-line);
@@ -1055,6 +1078,14 @@
 </head>
 <body>
 
+  <!-- Busy overlay: chặn toàn bộ tương tác khi đang tải model/tài nguyên (đổi nguồn / đổi ngôn ngữ) -->
+  <div class="busy-overlay" id="busy-overlay" aria-hidden="true">
+    <div class="busy-box">
+      <div class="busy-spinner"></div>
+      <div class="busy-text" id="busy-text" data-i18n="busy.loadingModel">Đang tải mô hình nhận dạng…</div>
+    </div>
+  </div>
+
   <!-- Summary Modal -->
   <div class="modal-overlay" id="summary-modal">
     <div class="modal" style="width:72vw;max-width:1000px;min-width:480px;height:80vh;max-height:calc(100vh - 24px);display:flex;flex-direction:column">
@@ -1126,7 +1157,10 @@
       <div class="menu-row" id="s-stt-dl-row" style="display:none; flex-direction:column; align-items:stretch; gap:6px">
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px">
           <span>Model STT (Live Captions)</span>
-          <button id="s-stt-dl-btn" style="display:none; padding:3px 10px; border-radius:6px; cursor:pointer; border:1px solid rgba(127,127,127,.4); background:transparent; color:inherit; font-size:12px">Tải model</button>
+          <div style="display:flex; gap:6px">
+            <button id="s-stt-dl-btn" style="display:none; padding:3px 10px; border-radius:6px; cursor:pointer; border:1px solid rgba(127,127,127,.4); background:transparent; color:inherit; font-size:12px">Tải model</button>
+            <button id="s-stt-dl-all-btn" title="Tải model Live Captions cho cả 4 ngôn ngữ (en/ja/ko/zh) trong một lần" style="display:none; padding:3px 10px; border-radius:6px; cursor:pointer; border:1px solid rgba(127,127,127,.4); background:transparent; color:inherit; font-size:12px">Tải tất cả (4)</button>
+          </div>
         </div>
         <div id="s-stt-dl-status" style="font-size:11px; opacity:.7"></div>
         <div id="s-stt-dl-bar-wrap" style="display:none; height:6px; background:rgba(127,127,127,.25); border-radius:3px; overflow:hidden">
@@ -1309,6 +1343,24 @@
       if (v.lang) { const L = LOCALES.find(l => l.code === v.lang); return Object.assign({}, v, { lang: L ? L.name : v.lang }); }
       return v;
     }
+    // Busy overlay: chặn toàn trang khi main đang tải model/tài nguyên (đổi nguồn / đổi ngôn ngữ).
+    // Safety timeout: tự ẩn sau 20s phòng khi thiếu sự kiện 'busy off' (không kẹt overlay vĩnh viễn).
+    const busyOverlay = document.getElementById('busy-overlay');
+    const busyText    = document.getElementById('busy-text');
+    let _busyTimer = null;
+    api.onBusy(({ on, key, msg } = {}) => {
+      if (_busyTimer) { clearTimeout(_busyTimer); _busyTimer = null; }
+      if (on) {
+        if (busyText) busyText.textContent = key ? t(key) : (msg || t('busy.loadingModel'));
+        busyOverlay.classList.add('open');
+        busyOverlay.setAttribute('aria-hidden', 'false');
+        _busyTimer = setTimeout(() => { busyOverlay.classList.remove('open'); busyOverlay.setAttribute('aria-hidden', 'true'); }, 20000);
+      } else {
+        busyOverlay.classList.remove('open');
+        busyOverlay.setAttribute('aria-hidden', 'true');
+      }
+    });
+
     api.onStatus(({ type, msg, key, vars }) => {
       _lastStatus = { type, msg, key, vars };
       statusEl.className = 'status ' + type;            // dot → spinner khi loading/connecting/waiting
@@ -1498,52 +1550,88 @@
     // ── Tải model STT của Windows Live Captions (source = system/mic; en/ja/ko/zh — tiếng Việt dùng STT nội bộ) ──
     const sSttDlRow     = document.getElementById('s-stt-dl-row');
     const sSttDlBtn     = document.getElementById('s-stt-dl-btn');
+    const sSttDlAllBtn  = document.getElementById('s-stt-dl-all-btn');
     const sSttDlStatus  = document.getElementById('s-stt-dl-status');
     const sSttDlBarWrap = document.getElementById('s-stt-dl-bar-wrap');
     const sSttDlBar     = document.getElementById('s-stt-dl-bar');
     let _sttDling = false;
 
+    // app source lang → LC locale (vi KHÔNG có trong Live Captions → dùng STT cục bộ).
+    const LC_LOCALE = { en: 'en-US', ja: 'ja-JP', ko: 'ko-KR', 'zh-CN': 'zh-CN' };
+    // CHỈ quan tâm model của NGÔN NGỮ NGUỒN hiện tại (không phải cả 4) — tải model LC là TUỲ CHỌN: không tải thì
+    // vẫn chạy STT cục bộ (sherpa-onnx). Có model → play dùng Live Captions gốc của Windows.
     async function refreshSttModels() {
       if (!sSttDlRow || _sttDling) return;
       try {
         const avail = await api.lcAvailable();
-        if (!avail) {
-          sSttDlStatus.textContent = 'Windows Live Captions không khả dụng (cần Windows 11). Tiếng Việt dùng STT nội bộ.';
+        const loc = LC_LOCALE[_srcLang];
+        // Nút "Tải tất cả (4)" chỉ hiện khi LC khả dụng (tải cả 4 trong 1 lần; bỏ qua locale đã có).
+        if (sSttDlAllBtn) { sSttDlAllBtn.style.display = avail ? '' : 'none'; sSttDlAllBtn.disabled = false; }
+        if (!avail || !loc) {
+          sSttDlStatus.textContent = !avail
+            ? 'Windows Live Captions không khả dụng (cần Windows 11) — đang dùng STT cục bộ (sherpa-onnx).'
+            : 'Ngôn ngữ nguồn này dùng STT cục bộ (sherpa-onnx) — không cần model Live Captions.';
           if (sSttDlBtn) sSttDlBtn.style.display = 'none';
           return;
         }
-        const { installed = [], missing = [] } = (await api.checkSttModels()) || {};
-        const total = installed.length + missing.length;
-        if (missing.length === 0) {
-          sSttDlStatus.textContent = `Đã tải đủ model (${installed.length}/${total})`;
+        const { installed = [] } = (await api.checkSttModels({ locales: [loc] })) || {};
+        if (installed.includes(loc)) {
+          sSttDlStatus.textContent = `Đã có model Live Captions cho ${loc}. (Có thể "Tải tất cả" để dùng nhiều ngôn ngữ.)`;
           if (sSttDlBtn) sSttDlBtn.style.display = 'none';
         } else {
-          sSttDlStatus.textContent = `Chưa đủ model (${installed.length}/${total}) — thiếu: ${missing.join(', ')}`;
+          sSttDlStatus.textContent = `Chưa có model Live Captions cho ${loc} — tải để dùng caption gốc của Windows (tuỳ chọn; không tải vẫn chạy STT cục bộ).`;
           if (sSttDlBtn) { sSttDlBtn.style.display = ''; sSttDlBtn.disabled = false; }
         }
       } catch (e) {}
     }
 
-    if (sSttDlBtn) sSttDlBtn.addEventListener('click', async () => {
-      if (_sttDling) return;
-      _sttDling = true; sSttDlBtn.disabled = true;
+    // Tải model cho danh sách locale (1 hoặc cả 4) — chung cho nút "Tải model" và "Tải tất cả".
+    // Tải TẤT CẢ trong MỘT lần chạy (script lặp tuần tự, ~12-15s/locale sau lần khởi tạo LC đầu). KHÔNG chạy
+    // song song được: LC là single-instance + dùng chung registry CaptionLanguage → 4 tiến trình sẽ xung đột.
+    async function runDownload(locales, labelText) {
+      if (_sttDling || !locales || !locales.length) return;
+      _sttDling = true;
+      if (sSttDlBtn) sSttDlBtn.disabled = true;
+      if (sSttDlAllBtn) sSttDlAllBtn.disabled = true;
       sSttDlBarWrap.style.display = ''; sSttDlBar.style.width = '0%';
-      sSttDlStatus.textContent = 'Đang tải model...';
-      try { await api.downloadSttModels(); } catch (e) {}
+      sSttDlStatus.textContent = `Đang tải model ${labelText}…`;
+      let r = null;
+      try { r = await api.downloadSttModels({ locales }); } catch (e) { r = { ok: false, error: e.message }; }
       _sttDling = false;
+      if (sSttDlAllBtn) sSttDlAllBtn.disabled = false;
       sSttDlBarWrap.style.display = 'none';
-      refreshSttModels();
+      await refreshSttModels();
+      if (r && !r.ok && r.error) {
+        sSttDlStatus.textContent = (r.error === 'already-running')
+          ? 'Đang có tiến trình tải model chạy — chờ xong rồi thử lại.'
+          : 'Lỗi tải model: ' + r.error;
+      }
+    }
+
+    if (sSttDlBtn) sSttDlBtn.addEventListener('click', () => {
+      const loc = LC_LOCALE[_srcLang];
+      if (!loc) { refreshSttModels(); return; }
+      runDownload([loc], loc);
+    });
+    if (sSttDlAllBtn) sSttDlAllBtn.addEventListener('click', () => {
+      runDownload(['en-US', 'ja-JP', 'ko-KR', 'zh-CN'], 'cả 4 ngôn ngữ');
     });
 
     api.onSttDownloadProgress((p) => {
       if (!sSttDlBar || !p) return;
       if (typeof p.overall === 'number') {
+        if (sSttDlBarWrap) sSttDlBarWrap.style.display = '';
         sSttDlBar.style.width = p.overall + '%';
-        let label = p.overall + '%';
-        if (p.lang) label += ` — ${p.lang} (${p.done || 0}/${p.total || 4})`;
-        sSttDlStatus.textContent = 'Đang tải model... ' + label;
+        // Lần đầu LC phải tự khởi tạo (consent + setup) ~30-60s TRƯỚC khi % tải nhảy → hiện rõ "đang chuẩn bị"
+        // để 0% lâu KHÔNG bị tưởng treo. Khi đã 'downloading' mới hiện %.
+        if (p.status === 'downloading' || p.overall > 0) {
+          sSttDlStatus.textContent = `Đang tải model... ${p.overall}%` + (p.lang ? ` — ${p.lang}` : '');
+        } else {
+          sSttDlStatus.textContent = 'Đang chuẩn bị Live Captions… (lần đầu có thể mất ~1 phút)';
+        }
       }
       if (p.t === 'err') sSttDlStatus.textContent = 'Lỗi tải model: ' + (p.m || '');
+      if (p.t === 'done' && !_sttDling) { sSttDlBarWrap.style.display = 'none'; refreshSttModels(); }
     });
 
 
@@ -1596,6 +1684,7 @@
     // Source: ép chọn tay (system/mic) → lưu srcLang (main feed thẳng vào Whisper). Teams thì auto (disable).
     buildFlagRow(lqSrcPop, LANG_FLAG_ORDER, (code) => {
       _srcLang = code; setQuickFlag(lqSrc, code); lqSrcPop.classList.remove('open'); api.saveSettings({ srcLang: code });
+      try { refreshSttModels(); } catch {}   // đổi ngôn ngữ nguồn → cập nhật trạng thái model LC của lang đó
     });
     buildFlagRow(lqTgtPop, LANG_FLAG_ORDER, (code) => {
       setQuickFlag(lqTgt, code); lqTgtPop.classList.remove('open'); api.setLang(code);

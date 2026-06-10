@@ -14,7 +14,7 @@ const {
   checkCaptionsActive, tryPowerShellSendKeys,
   getSttLanguage, setSttLanguage,
 } = require('./cdp-browser');
-const { handlePcm, resetSegmentation } = require('./audio-stt');
+const { handlePcm, resetSegmentation, flushStreaming, warmModel } = require('./audio-stt');
 const stt = require('./stt');
 const uia = require('./uia-captions');
 const winLc = require('./win-livecaptions');
@@ -55,26 +55,27 @@ function ensureLocalServerStarted(notifyIfMissing = false) {
   } catch (e) { console.warn('[auto-start] exception:', e.message); }
 }
 
-// Tải SẴN model Windows Live Captions 1 LẦN (gọi lúc boot). Chỉ Win11 có LC + còn thiếu + chưa thử phiên này.
-// Chạy nền, có % qua 'stt-lc-progress'. Tắt bằng Store 'autoFetchSttModels'=false. (Offline → helper tự early-abort.)
-let _sttAutoFetchTried = false;
-async function ensureSttModelsDownloaded() {
-  if (_sttAutoFetchTried) return;
-  _sttAutoFetchTried = true;
-  if (Store.get('autoFetchSttModels', true) === false) return;
-  if (!winLc.isAvailable()) return;
-  try {
-    const { missing } = await winLc.checkInstalled();   // 4 locale LC: en-US/ja-JP/ko-KR/zh-CN
-    if (!missing.length) { console.log('[stt-autofetch] đủ model, bỏ qua'); return; }
-    console.log('[stt-autofetch] tải model LC còn thiếu:', missing.join(','));
-    const r = await winLc.downloadModels({ locales: missing, onProgress: (p) => send('stt-lc-progress', p) });
-    console.log('[stt-autofetch] xong, overall=', r && r.overall);
-  } catch (e) { console.warn('[stt-autofetch]', e.message); }
+// ── Cache trạng thái model LC đã cài (locale → có/không) — để PLAY quyết NHANH (không spawn PowerShell mỗi lần
+// bấm, không start LC lạc quan rồi chờ timeout). Nạp lúc boot + refresh sau khi tải / mở Cài đặt. ──
+let _lcInstalled = new Set();
+let _lcChecking = null;
+async function refreshLcInstalled() {
+  if (_lcChecking) return _lcChecking;
+  if (!winLc.isAvailable()) { _lcInstalled = new Set(); return _lcInstalled; }
+  _lcChecking = (async () => {
+    try { const { installed = [] } = await winLc.checkInstalled(); _lcInstalled = new Set(installed); }
+    catch { /* giữ cache cũ */ }
+    finally { _lcChecking = null; }
+    return _lcInstalled;
+  })();
+  return _lcChecking;
 }
 
 function registerAll(app) {
   // Áp dụng ngôn ngữ nguồn STT đã lưu (system/mic) lúc boot — Teams không dùng STT cục bộ.
   try { stt.setLanguage(Store.get('srcLang', '')); } catch {}
+  // Nạp cache model LC đã cài (nền) → PLAY quyết ngay: model có → LC, model thiếu → STT sherpa-onnx tức thì.
+  try { refreshLcInstalled(); } catch {}
 
   // ── Language ──────────────────────────
   ipcMain.on('set-lang', (_, lang) => {
@@ -114,6 +115,7 @@ function registerAll(app) {
       state.userActive  = !state.audioPaused;   // đồng bộ cờ play với audio (nhất quán teams/audio)
       const label = state.captureSource === 'mic' ? 'Microphone' : 'System Audio';
       if (state.audioPaused) {
+        try { flushStreaming(); } catch {}        // chốt nốt câu streaming đang dở → dịch trước khi dừng
         try { winLc.stopCaptions(); } catch {}   // dừng cả 2 nhánh cho an toàn
         send('stop-audio-capture', {});
         send('cc-state', { active: false });
@@ -131,15 +133,16 @@ function registerAll(app) {
       //    'mic' → STT nội bộ (LC mic là opt-in cộng dồn, không tách riêng mic). vi / không LC → STT nội bộ. ──
       const srcLang  = Store.get('srcLang', '') || 'ja';
       const lcLocale = winLc.LC_LANGS[srcLang];
-      if (state.captureSource === 'system' && lcLocale && winLc.isAvailable()) {
-        // KHÔNG check model đồng bộ ở đây: checkInstalled spawn PowerShell ~1-2s → trễ phản hồi → user bấm lại
-        // 2-3 lần làm LẬT audioPaused (start/stop/start) → race. Start LC NGAY (đồng bộ, không await) → nút ăn
-        // ngay lần đầu. Model thiếu / LC lỗi → helper báo onFail → tự fallback STT nội bộ.
+      // Dùng LC CHỈ khi model locale đó ĐÃ CÀI (cache _lcInstalled, tra tức thì). Model thiếu → KHÔNG start LC lạc
+      // quan rồi chờ timeout (nguồn cơn "play lúc được lúc không") → xuống thẳng STT sherpa-onnx (tức thì, streaming).
+      if (state.captureSource === 'system' && lcLocale && winLc.isAvailable() && _lcInstalled.has(lcLocale)) {
+        // Model đã có → start LC NGAY (đồng bộ). Lỡ LC lỗi (UIA đổi, AppX hỏng) → helper onFail → fallback sherpa.
         const onFail = (reason) => {
           console.warn('[toggle] Live Captions lỗi (' + reason + ') → fallback STT nội bộ');
           try { winLc.stopCaptions(); } catch {}
           if (!state.userActive || state.audioPaused || state.captureSource === 'teams') return;
           if (String(reason).includes('need-download')) {
+            try { _lcInstalled.delete(lcLocale); } catch {}   // cache sai (model đã bị gỡ) → lần sau đi thẳng sherpa
             send('status', { type: 'error', msg: `Chưa có model Live Captions cho "${srcLang}" (menu Nguồn → Tải model). Tạm dùng STT nội bộ.` });
           }
           startLocalStt(' (STT nội bộ)');
@@ -304,6 +307,10 @@ function registerAll(app) {
         state.userActive = false; state.audioPaused = true;
         send('cc-state', { active: false });
       }
+      // Đổi ngôn ngữ nguồn khi đang ở chế độ audio → tải SẴN model mới (phủ overlay) để ▶ lần sau không khựng.
+      if (lcChanged && (state.captureSource === 'system' || state.captureSource === 'mic')) {
+        warmModel().catch(() => {});
+      }
     }
     if (s.overlayEnabled  !== undefined) { Store.set('overlayEnabled',  !!s.overlayEnabled); state.overlayEnabled = !!s.overlayEnabled; try { overlay.setEnabled(!!s.overlayEnabled); } catch {} }
     if (s.localBaseUrl    !== undefined) { Store.set('localBaseUrl',    s.localBaseUrl);    state.localBaseUrl    = s.localBaseUrl; }
@@ -349,9 +356,23 @@ function registerAll(app) {
 
   // ── Windows Live Captions STT (source = system/mic, ngôn ngữ en/ja/ko/zh) ──
   ipcMain.handle('stt-lc-available',       () => winLc.isAvailable());
-  ipcMain.handle('stt-lc-check-models',    async (_, opts = {}) => winLc.checkInstalled(opts.locales));
-  ipcMain.handle('stt-lc-download-models', async (_, opts = {}) =>
-    winLc.downloadModels({ locales: opts.locales, onProgress: (p) => send('stt-lc-progress', p) }));
+  // check-models: tra trạng thái + ĐỒNG BỘ vào cache _lcInstalled (mở Cài đặt cũng refresh cache cho PLAY).
+  ipcMain.handle('stt-lc-check-models',    async (_, opts = {}) => {
+    const r = await winLc.checkInstalled(opts.locales);
+    try { for (const l of (r.installed || [])) _lcInstalled.add(l); for (const l of (r.missing || [])) _lcInstalled.delete(l); } catch {}
+    return r;
+  });
+  // download: mặc định CHỈ tải model của NGÔN NGỮ NGUỒN hiện tại (1 model, nhanh) thay vì cả 4. Xong → refresh cache.
+  ipcMain.handle('stt-lc-download-models', async (_, opts = {}) => {
+    let locales = opts.locales;
+    if (!locales || !locales.length) {
+      const loc = winLc.LC_LANGS[Store.get('srcLang', '') || 'ja'];
+      locales = loc ? [loc] : undefined;   // undefined → win-livecaptions tự dùng cả 4 (vd source = vi/không map)
+    }
+    const r = await winLc.downloadModels({ locales, onProgress: (p) => send('stt-lc-progress', p) });
+    try { await refreshLcInstalled(); } catch {}   // cập nhật cache → PLAY dùng LC ngay không cần restart
+    return r;
+  });
   ipcMain.handle('stt-lc-cancel-download', () => ({ ok: winLc.cancelDownload() }));
 
   // ── External links ────────────────────
@@ -372,4 +393,4 @@ function registerAll(app) {
   ipcMain.handle('export-summary', async (_, opts) => exportSummary(opts));
 }
 
-module.exports = { registerAll, ensureLocalServerStarted, ensureSttModelsDownloaded };
+module.exports = { registerAll, ensureLocalServerStarted };

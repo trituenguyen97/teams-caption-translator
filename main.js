@@ -7,7 +7,7 @@ const { app, BrowserWindow, desktopCapturer, Menu, nativeTheme } = require('elec
 const path = require('path');
 const state = require('./src/state');
 const Store = require('./src/store');
-const { registerAll, ensureLocalServerStarted, ensureSttModelsDownloaded } = require('./src/ipc-handlers');
+const { registerAll, ensureLocalServerStarted } = require('./src/ipc-handlers');
 const { LANG_NAMES, LANG_LABELS } = require('./src/translation');
 const { runUiaService, stopHelper: stopUiaHelper } = require('./src/uia-captions');
 const { runAudioService, stopSTTServer } = require('./src/audio-stt');
@@ -168,9 +168,9 @@ app.whenReady().then(() => {
     setTimeout(() => { try { ensureLocalServerStarted(); } catch (e) { console.warn('[boot] auto-start local:', e.message); } }, 2000);
   }
 
-  // Tải SẴN model STT Windows Live Captions 1 lần (lần chạy đầu, nếu thiếu) — chạy nền, % hiện ở menu Nguồn.
-  // Chỉ chạy khi Win11 có LC + chưa đủ model; tắt qua Store 'autoFetchSttModels'. Offline → helper tự bỏ.
-  setTimeout(() => { try { ensureSttModelsDownloaded(); } catch (e) { console.warn('[boot] auto-fetch STT models:', e.message); } }, 8000);
+  // (BỎ auto-fetch model LC lúc boot) — trước đây tải nền cả 4 locale 8s sau boot, GIỮ khoá _dlProc nhiều phút
+  // → bấm "Tải model" thủ công trả 'already-running' (tưởng treo). Nay STT sherpa-onnx bundle sẵn lo mọi ngôn ngữ,
+  // nên model LC là TUỲ CHỌN: chỉ tải khi user bấm nút (menu Nguồn → Tải model). Không còn tiến trình nền cạnh tranh.
 
   // (KHÔNG prewarm ChatGPT nữa) — mỗi lần bấm Tóm tắt mới mở cửa sổ webchat, xong thì destroy. Giữ
   // session sống lâu khiến ChatGPT bắt đăng nhập ở lần hỏi thứ 2 nên không pre-warm/giữ cửa sổ nền.

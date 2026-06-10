@@ -1,6 +1,11 @@
 /**
  * audio-stt.js — Dịch vụ audio (system/mic) qua STT cục bộ sherpa-onnx-node (xem src/stt.js).
- * KHÔNG còn Python: renderer gửi PCM float32 @16k (Web Audio) → handlePcm → stt.recognize → dịch.
+ * KHÔNG còn Python: renderer gửi PCM float32 @16k (Web Audio) → handlePcm → dịch.
+ *
+ * HAI NHÁNH theo ngôn ngữ (stt.isStreaming):
+ *   - ONLINE (zh/en/ko): đẩy PCM trực tiếp vào OnlineRecognizer → partial mọc dần (như Live Captions),
+ *     chốt câu khi isEndpoint → dịch. KHÔNG cần VAD.
+ *   - OFFLINE (ja/vi): cắt câu bằng Silero VAD → transcribe trọn đoạn → gom câu (như Whisper cũ).
  */
 const state = require('./state');
 const { enqueueTranslate, preprocessText } = require('./translation');
@@ -22,7 +27,8 @@ async function runAudioService() {
     return;
   }
   send('status', { type: 'loading', key: 'status.sttLoading' });
-  const ok = await stt.ensureReady();   // load model off-thread sẵn (lần đầu ~1s) để bấm ▶ là ghi ngay
+  // Warm model sẵn (lần đầu ~1s) để bấm ▶ là ghi ngay — phủ overlay chặn thao tác trong lúc tải.
+  const ok = await warmModel();
   if (!ok) {
     send('status', { type: 'error', key: 'status.sttFailed' });
     while (!state.captureSourceChanged) { await sleep(300); }
@@ -39,7 +45,67 @@ async function runAudioService() {
   send('cc-state', { active: false });
 }
 
-// Dedup câu STT trùng trong cửa sổ ngắn
+// Tải SẴN model cho ngôn ngữ nguồn hiện tại + PHỦ OVERLAY chặn thao tác (đổi nguồn/đổi ngôn ngữ → tải model).
+// Online build OnlineRecognizer đồng bộ (~1-2s, block main): yield 1 nhịp sau 'busy on' để renderer kịp vẽ overlay
+// TRƯỚC khi main bị block. Luôn gửi 'busy off' (finally) → không kẹt overlay. Trả Promise<bool> (model sẵn sàng?).
+async function warmModel() {
+  send('busy', { on: true, key: 'busy.loadingModel' });
+  await new Promise(r => setImmediate(r));
+  let ok = false;
+  try { ok = await stt.warm(); }
+  catch (e) { console.warn('[audio-stt] warm lỗi:', e.message); }
+  finally { send('busy', { on: false }); }
+  return ok;
+}
+
+// ── NHÁNH ONLINE (streaming, zh/en/ko): partial mọc dần → chốt câu khi isEndpoint → dịch ────────────
+// _liveId = entry câu ĐANG nói (stream realtime, dịch để trống); chốt CHÍNH entry đó khi hết câu.
+let _online = null, _onlineLang = null, _liveId = null, _liveText = '';
+function _ensureOnline() {
+  const lang = stt.currentLang();
+  if (_online && _onlineLang === lang) return _online;
+  _online = stt.createOnlineSession();   // null nếu thiếu model / không tạo được
+  _onlineLang = lang;
+  _liveId = null; _liveText = '';
+  return _online;
+}
+// Chốt câu đang stream: chuyển entry _liveId từ live(chưa dịch) → final(dịch). Lọc ảo giác như offline.
+function _finalizeOnline(text) {
+  const sRaw = (text || '').trim();
+  _liveText = '';
+  if (!sRaw || stt.isHallucination(sRaw)) { _liveId = null; return; }
+  const id = _liveId || (++state.audioEntryId);
+  _liveId = null;
+  const now = Date.now();
+  const cleaned = preprocessText(sRaw);
+  send('caption-live', { id, author: 'STT', original: sRaw, translated: '…', ts: timestamp(), tsMs: now });
+  enqueueTranslate(cleaned).then(tr => {
+    if (state.audioPaused) return;   // user đã ⏹ giữa lúc dịch → bỏ kết quả tới muộn
+    const ok = tr && tr !== cleaned && tr !== sRaw;
+    send('caption-live', { id, author: 'STT', original: sRaw, translated: ok ? tr : null, ts: timestamp(), tsMs: now });
+  }).catch(() => {});
+}
+// Đẩy 1 khung PCM vào streaming recognizer. Trả false nếu KHÔNG phải nhánh online (caller fallback offline).
+function _handlePcmStreaming(samples) {
+  const sess = _ensureOnline();
+  if (!sess) return false;
+  try { sess.accept(samples); } catch { return true; }
+  const r = sess.result();
+  const text = (r.text || '').trim();
+  if (text && text !== _liveText) {
+    _liveText = text;
+    if (!_liveId) _liveId = ++state.audioEntryId;   // mở entry mới cho câu đang nói
+    send('caption-live', { id: _liveId, author: 'STT', original: text, translated: '', ts: timestamp(), tsMs: Date.now() });
+  }
+  if (sess.isEndpoint()) { _finalizeOnline(_liveText || text); sess.reset(); }
+  return true;
+}
+// Chốt nốt câu ĐANG stream khi DỪNG ghi (user bấm ⏹ giữa câu) → câu cuối được dịch thay vì treo.
+function flushStreaming() {
+  if (_online && _liveText) { _finalizeOnline(_liveText); try { _online.reset(); } catch {} }
+}
+
+// Dedup câu STT trùng trong cửa sổ ngắn (nhánh OFFLINE)
 const _sttRecentTexts = new Map();
 const STT_DEDUP_MS = 8000;
 
@@ -146,10 +212,14 @@ async function _drainVad() {
   } finally { _draining = false; }
 }
 
-// Nhận PCM float32 @16k từ renderer (khung nhỏ ~0.25s) → đẩy vào VAD → transcribe đoạn trọn.
+// Nhận PCM float32 @16k từ renderer (khung nhỏ ~0.25s). Online → streaming; offline → VAD → transcribe.
 async function handlePcm(samples) {
   if (state.captureSource === 'teams' || state.audioPaused) return;
   if (!samples || !samples.length) return;
+  if (stt.isStreaming()) {
+    if (_handlePcmStreaming(samples)) return;   // online (zh/en/ko) — chốt câu trong vòng streaming
+    // tạo session lỗi → rơi xuống offline phía dưới
+  }
   const vad = _ensureVad();
   if (vad) {
     try { vad.acceptWaveform(samples); } catch { return; }
@@ -173,9 +243,12 @@ function resetSegmentation() {
   _fbParts = []; _fbLen = 0;
   _carry = '';
   _sttRecentTexts.clear();
+  // Online: bỏ stream cũ → phiên mới tạo session sạch (đổi ngôn ngữ cũng được tái tạo qua _ensureOnline).
+  if (_online) { try { _online.reset(); } catch {} }
+  _online = null; _onlineLang = null; _liveId = null; _liveText = '';
 }
 
 // Không còn server Python — giữ tên export cho main.js (no-op).
 function stopSTTServer() {}
 
-module.exports = { runAudioService, handlePcm, stopSTTServer, resetSegmentation };
+module.exports = { runAudioService, handlePcm, stopSTTServer, resetSegmentation, flushStreaming, warmModel };

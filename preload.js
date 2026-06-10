@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('__caption', {
   onStatus:        cb => ipcRenderer.on('status',                (_, d) => cb(d)),
+  onBusy:          cb => ipcRenderer.on('busy',                  (_, d) => cb(d)),
   onCaptionLive:   cb => ipcRenderer.on('caption-live',          (_, d) => cb(d)),
   onCaptionCommit: cb => ipcRenderer.on('caption-commit',        (_, d) => cb(d)),
   onCcState:       cb => ipcRenderer.on('cc-state',              (_, d) => cb(d)),

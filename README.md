@@ -13,10 +13,10 @@
 | Chế độ | Mô tả |
 |--------|-------|
 | 📹 **Teams Live Captions** | Đọc subtitle trực tiếp từ Teams desktop (WebView2) qua CDP (Chrome DevTools Protocol) — không cần mic, không tốn tài nguyên nhận dạng. App còn **chèn bản dịch ngay dưới mỗi caption gốc** trong cửa sổ Teams. |
-| 🔊 **System Audio** | Ghi âm âm thanh hệ thống (loopback) → nhận dạng giọng nói **cục bộ** bằng SenseVoice-Small (sherpa-onnx). |
-| 🎤 **Microphone** | Ghi âm từ mic bất kỳ → nhận dạng giọng nói cục bộ bằng SenseVoice-Small. |
+| 🔊 **System Audio** | Ghi âm âm thanh hệ thống (loopback). en/ja/ko/zh ưu tiên **Windows Live Captions**; khi LC chưa tải model / không có LC → STT **cục bộ** (sherpa-onnx). |
+| 🎤 **Microphone** | Ghi âm từ mic bất kỳ → nhận dạng giọng nói cục bộ bằng STT sherpa-onnx. |
 
-> Chế độ System Audio / Microphone dùng **SenseVoice-Small** chạy hoàn toàn offline (CPU), tự tải model ~110MB lần đầu. Hỗ trợ: Tiếng Nhật, Trung, Anh, Hàn, Quảng Đông. Tích hợp lọc im lặng (RMS gating) + lọc ảo giác (hallucination filter).
+> STT cục bộ (sherpa-onnx) chạy offline trên CPU theo **bản đồ model từng ngôn ngữ**: **zh/en** (FunASR streaming Paraformer bilingual) và **ko** (streaming Zipformer) → caption **mọc dần real-time** như Live Captions; **ja/vi** (Zipformer offline) → cắt câu bằng VAD. Model bundle sẵn lúc build (không cần tải khi chạy). Tích hợp lọc im lặng (RMS gating) + lọc ảo giác (hallucination filter).
 
 ### Provider dịch thuật (2 lựa chọn, không cần API key)
 
@@ -95,9 +95,8 @@ App sẽ tự kết nối CDP, phát hiện meeting, theo dõi caption và hiể
 
 ### Chế độ System Audio / Microphone
 
-1. Cài Python deps: `pip install sherpa-onnx av`.
-2. Trong app → **⚙️ Cài đặt** → tab **🎙 Nguồn dịch** → chọn **Audio System** hoặc **Microphone** (chọn thiết bị mic nếu cần) → **Lưu**.
-3. Bấm **▶** để bắt đầu ghi âm. Lần đầu tự tải model SenseVoice (~110MB).
+1. Trong app → **⚙️ Cài đặt** → tab **🎙 Nguồn dịch** → chọn **Audio System** hoặc **Microphone** (chọn thiết bị mic nếu cần) + **Ngôn ngữ nguồn** → **Lưu**.
+2. Bấm **▶** để bắt đầu ghi âm. STT cục bộ (sherpa-onnx) chạy ngay — model bundle sẵn, không cần Python hay tải thêm.
 
 ### Chọn provider dịch / ngôn ngữ
 

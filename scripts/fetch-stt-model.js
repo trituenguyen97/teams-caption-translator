@@ -1,22 +1,57 @@
 #!/usr/bin/env node
 /**
- * fetch-stt-model.js — Tải model STT Whisper-small (sherpa-onnx) vào ./bin/stt để bundle (extraResources).
+ * fetch-stt-model.js — Tải model STT (sherpa-onnx) cho NHÁNH FALLBACK vào ./bin/stt/<dir>/ để bundle.
  *
- * Whisper đa ngôn ngữ (gồm tiếng Việt) thay cho SenseVoice cũ (chỉ zh/en/ja/ko/yue, KHÔNG có VI).
- * Chạy lúc BUILD (npm run build → prebuild). Tải TRỰC TIẾP 3 file int8 từ HuggingFace (không cần tar/bz2):
- *   small-encoder.int8.onnx (~107MB) + small-decoder.int8.onnx (~250MB) + small-tokens.txt.
- * Người dùng cuối KHÔNG phải tải gì (xem src/stt.js). Idempotent: đã có thì bỏ qua.
+ * THAY Whisper-small đa ngữ bằng BẢN ĐỒ MODEL THEO NGÔN NGỮ (xem src/stt.js):
+ *   zh-en → streaming Paraformer bilingual zh-en (FunASR)  [online, zh + en]
+ *   ko    → streaming Zipformer Korean                     [online]
+ *   ja    → Zipformer ReazonSpeech (Nhật)                  [offline + VAD]  ← không có model streaming Nhật
+ *   vi    → Zipformer Vietnamese                           [offline + VAD]  ← không có model streaming Việt
+ * + silero_vad.onnx (cắt câu cho nhánh offline ja/vi).
+ *
+ * Chuẩn hoá tên file về encoder.onnx / decoder.onnx / joiner.onnx / tokens.txt (build copy bản int8-ưu-tiên).
+ * Chạy lúc BUILD (npm run build → prebuild). Người dùng cuối KHÔNG phải tải gì. Idempotent: đã có thì bỏ qua.
+ * (ja lấy từ GitHub release .tar.bz2 → cần `tar` trên máy build; 3 model còn lại lấy file int8 lẻ từ HuggingFace.)
  */
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { execFileSync } = require('child_process');
 
-const BASE = 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-small/resolve/main/';
 const OUT_DIR = path.join(__dirname, '..', 'bin', 'stt');
-const FILES = ['small-encoder.int8.onnx', 'small-decoder.int8.onnx', 'small-tokens.txt'];
-// Silero VAD (~0.6MB) để cắt câu theo khoảng lặng (xem src/stt.js createVad). Khác release nên URL riêng.
-const EXTRA = [{ name: 'silero_vad.onnx', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx' }];
+const HF = (repo, file) => `https://huggingface.co/${repo}/resolve/main/${file}`;
+const GH = (asset) => `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${asset}`;
+
+// files: tải file lẻ từ HF rồi đổi tên (as). archive+pick: tải .tar.bz2 từ GH, giải nén, chọn file theo regex.
+const MODELS = [
+  { dir: 'zh-en', desc: 'streaming Paraformer bilingual zh-en (FunASR) [online zh/en]', files: [
+    { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'encoder.int8.onnx'), as: 'encoder.onnx' },
+    { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'decoder.int8.onnx'), as: 'decoder.onnx' },
+    { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'tokens.txt'),         as: 'tokens.txt' },
+  ] },
+  { dir: 'ko', desc: 'streaming Zipformer Korean [online ko]', files: [
+    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'encoder-epoch-99-avg-1.int8.onnx'), as: 'encoder.onnx' },
+    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'decoder-epoch-99-avg-1.int8.onnx'), as: 'decoder.onnx' },
+    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'joiner-epoch-99-avg-1.int8.onnx'),  as: 'joiner.onnx' },
+    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'tokens.txt'),                       as: 'tokens.txt' },
+  ] },
+  { dir: 'vi', desc: 'Zipformer Vietnamese [offline vi]', files: [
+    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'encoder-epoch-12-avg-8.int8.onnx'), as: 'encoder.onnx' },
+    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'decoder-epoch-12-avg-8.onnx'),      as: 'decoder.onnx' },  // decoder chỉ có bản fp32 (nhỏ)
+    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'joiner-epoch-12-avg-8.int8.onnx'),  as: 'joiner.onnx' },
+    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'tokens.txt'),                       as: 'tokens.txt' },
+  ] },
+  { dir: 'ja', desc: 'Zipformer ReazonSpeech Japanese [offline ja]', archive: GH('sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01.tar.bz2'),
+    pick: [
+      { as: 'encoder.onnx', prefer: [/encoder.*\.int8\.onnx$/i, /encoder.*\.onnx$/i] },
+      { as: 'decoder.onnx', prefer: [/decoder.*\.int8\.onnx$/i, /decoder.*\.onnx$/i] },
+      { as: 'joiner.onnx',  prefer: [/joiner.*\.int8\.onnx$/i,  /joiner.*\.onnx$/i] },
+      { as: 'tokens.txt',   prefer: [/(^|[\\/])tokens\.txt$/i] },
+    ] },
+];
+const SILERO = { url: GH('silero_vad.onnx'), dest: path.join(OUT_DIR, 'silero_vad.onnx') };
 
 function log(...a) { console.log('[fetch-stt-model]', ...a); }
 
@@ -33,13 +68,13 @@ function _request(url, redirectsLeft = 6) {
       resolve(res);
     });
     req.on('error', reject);
-    req.setTimeout(180000, () => req.destroy(new Error('timeout')));
+    req.setTimeout(600000, () => req.destroy(new Error('timeout')));
   });
 }
 
 async function download(url, dest) {
   const res = await _request(url);
-  if (res.statusCode !== 200) { res.resume(); throw new Error('HTTP ' + res.statusCode); }
+  if (res.statusCode !== 200) { res.resume(); throw new Error('HTTP ' + res.statusCode + ' @ ' + url); }
   const total = Number(res.headers['content-length'] || 0);
   let written = 0, lastPct = -1;
   await new Promise((resolve, reject) => {
@@ -52,15 +87,63 @@ async function download(url, dest) {
   if (total) process.stdout.write('\n');
 }
 
-(async () => {
-  const all = [...FILES.map(f => ({ name: f, url: BASE + f })), ...EXTRA];
-  if (all.every(x => fs.existsSync(path.join(OUT_DIR, x.name)))) { log('model đã có →', OUT_DIR, '(bỏ qua)'); return; }
-  fs.mkdirSync(OUT_DIR, { recursive: true });
-  for (const x of all) {
-    const dest = path.join(OUT_DIR, x.name);
-    if (fs.existsSync(dest)) { log('✓', x.name, '(đã có)'); continue; }
-    log('↓', x.name);
-    await download(x.url, dest);
+// Liệt kê file (đệ quy) trong thư mục → mảng đường dẫn tuyệt đối.
+function walk(dir) {
+  const out = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...walk(p)); else out.push(p);
   }
-  log('xong →', OUT_DIR, '|', all.map(x => x.name + ' ' + (fs.statSync(path.join(OUT_DIR, x.name)).size / 1e6).toFixed(1) + 'MB').join(', '));
-})().catch(e => { console.error('[fetch-stt-model] LỖI:', e.message); process.exit(1); });
+  return out;
+}
+
+async function fetchHfModel(m, dir) {
+  for (const f of m.files) {
+    const dest = path.join(dir, f.as);
+    if (fs.existsSync(dest)) { log('  ✓', f.as, '(đã có)'); continue; }
+    log('  ↓', f.as, '←', f.url.split('/resolve/main/')[1]);
+    await download(f.url, dest);
+  }
+}
+
+async function fetchArchiveModel(m, dir) {
+  const tmpTar = path.join(os.tmpdir(), 'ct-stt-' + m.dir + '.tar.bz2');
+  const tmpDir = path.join(os.tmpdir(), 'ct-stt-' + m.dir);
+  log('  ↓ archive', path.basename(m.archive), '(gồm cả fp32 — sẽ bỏ sau khi rút int8)');
+  await download(m.archive, tmpTar);
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  fs.mkdirSync(tmpDir, { recursive: true });
+  // -xf (KHÔNG -j): để tar TỰ nhận diện bz2 và giải nén nội bộ (bsdtar/libarchive + GNU tar ≥1.22 đều được).
+  // Dùng -j ép GNU tar pipe qua bzip2.exe ngoài — trên Windows hay lỗi "corrupted"/exit 128.
+  try { execFileSync('tar', ['-xf', tmpTar, '-C', tmpDir], { stdio: 'inherit' }); }
+  catch (e) { throw new Error('giải nén tar lỗi (cần `tar` hỗ trợ bz2 trên máy build): ' + e.message); }
+  const all = walk(tmpDir);
+  for (const p of m.pick) {
+    let src = null;
+    for (const re of p.prefer) { src = all.find(f => re.test(f.replace(/\\/g, '/'))); if (src) break; }
+    if (!src) throw new Error(`không tìm thấy file cho ${p.as} trong ${m.archive}`);
+    fs.copyFileSync(src, path.join(dir, p.as));
+    log('  ✓', p.as, '←', path.basename(src));
+  }
+  try { fs.unlinkSync(tmpTar); } catch {}
+  try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+}
+
+function modelComplete(m, dir) {
+  const need = m.files ? m.files.map(f => f.as) : m.pick.map(p => p.as);
+  return need.every(n => fs.existsSync(path.join(dir, n)));
+}
+
+(async () => {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  for (const m of MODELS) {
+    const dir = path.join(OUT_DIR, m.dir);
+    fs.mkdirSync(dir, { recursive: true });
+    if (modelComplete(m, dir)) { log('✓', m.dir, '—', m.desc, '(đã đủ)'); continue; }
+    log('↓', m.dir, '—', m.desc);
+    if (m.files) await fetchHfModel(m, dir); else await fetchArchiveModel(m, dir);
+  }
+  if (!fs.existsSync(SILERO.dest)) { log('↓ silero_vad.onnx (VAD cho ja/vi)'); await download(SILERO.url, SILERO.dest); }
+  else log('✓ silero_vad.onnx (đã có)');
+  log('xong → bin/stt/{' + MODELS.map(m => m.dir).join(',') + '} + silero_vad.onnx');
+})().catch(e => { console.error('\n[fetch-stt-model] LỖI:', e.message); process.exit(1); });
