@@ -47,7 +47,9 @@ function _request(url, headers = {}, redirectsLeft = 5) {
 }
 
 async function fetchJson(url) {
-  const res = await _request(url);
+  const headers = {};
+  if (process.env.GITHUB_TOKEN) headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
+  const res = await _request(url, headers);
   if (res.statusCode !== 200) { res.resume(); throw new Error(`HTTP ${res.statusCode} from ${url}`); }
   const chunks = [];
   for await (const c of res) chunks.push(c);
@@ -98,17 +100,63 @@ function flatten(dir) {
   }
 }
 
-async function findAssets(variants) {
-  const info = await fetchJson(`https://api.github.com/repos/${LLAMA_REPO}/releases/latest`);
-  const assets = info.assets || [];
+// Fallback: lấy tag mới nhất qua redirect (không dùng API, không bị rate limit)
+function getLatestTagViaRedirect() {
+  return new Promise((resolve, reject) => {
+    const u = new URL(`https://github.com/${LLAMA_REPO}/releases/latest`);
+    https.get({ hostname: u.hostname, path: u.pathname, headers: { 'User-Agent': 'caption-translator-build/1.0' } }, (res) => {
+      res.resume();
+      if ([301, 302].includes(res.statusCode) && res.headers.location) {
+        const m = res.headers.location.match(/\/tag\/([^/]+)$/);
+        if (m) return resolve(m[1]);
+      }
+      if (res.statusCode === 200 && res.headers.location) {
+        const m = res.headers.location.match(/\/tag\/([^/]+)$/);
+        if (m) return resolve(m[1]);
+      }
+      reject(new Error('Không lấy được tag từ redirect'));
+    }).on('error', reject);
+  });
+}
+
+// Fallback: parse HTML release page để lấy asset links
+async function findAssetsViaHtml(tag, variants) {
+  const url = `https://github.com/${LLAMA_REPO}/releases/expanded_assets/${tag}`;
+  const res = await _request(url);
+  if (res.statusCode !== 200) { res.resume(); throw new Error(`HTTP ${res.statusCode} from ${url}`); }
+  const chunks = [];
+  for await (const c of res) chunks.push(c);
+  const html = Buffer.concat(chunks).toString('utf8');
+
   const byVariant = {};
   for (const v of variants) {
-    const re = new RegExp('^llama-.*-bin-win-' + v + '[^/]*-x64\\.zip$', 'i');
-    const a = assets.find(x => re.test(x.name));
-    if (a) byVariant[v] = { name: a.name, url: a.browser_download_url, size: a.size };
+    const re = new RegExp(`href="([^"]*?/(llama-[^"]*?-bin-win-${v}[^"]*?-x64\\.zip))"`, 'i');
+    const m = html.match(re);
+    if (m) byVariant[v] = { name: m[2], url: `https://github.com${m[1]}`, size: 0 };
   }
-  const c = assets.find(x => /^cudart-.*-x64\.zip$/i.test(x.name));
-  return { tag: info.tag_name, byVariant, cudart: c ? { name: c.name, url: c.browser_download_url } : null };
+  const cre = /href="([^"]*?\/(cudart-[^"]*?-x64\.zip))"/i;
+  const cm = html.match(cre);
+  return { tag, byVariant, cudart: cm ? { name: cm[2], url: `https://github.com${cm[1]}` } : null };
+}
+
+async function findAssets(variants) {
+  // Thử API trước (nhanh hơn, có size info)
+  try {
+    const info = await fetchJson(`https://api.github.com/repos/${LLAMA_REPO}/releases/latest`);
+    const assets = info.assets || [];
+    const byVariant = {};
+    for (const v of variants) {
+      const re = new RegExp('^llama-.*-bin-win-' + v + '[^/]*-x64\\.zip$', 'i');
+      const a = assets.find(x => re.test(x.name));
+      if (a) byVariant[v] = { name: a.name, url: a.browser_download_url, size: a.size };
+    }
+    const c = assets.find(x => /^cudart-.*-x64\.zip$/i.test(x.name));
+    return { tag: info.tag_name, byVariant, cudart: c ? { name: c.name, url: c.browser_download_url } : null };
+  } catch (e) {
+    log('API thất bại:', e.message, '→ dùng fallback (HTML scrape)');
+    const tag = await getLatestTagViaRedirect();
+    return findAssetsViaHtml(tag, variants);
+  }
 }
 
 async function fetchOne(variant, asset, cudartAsset) {
