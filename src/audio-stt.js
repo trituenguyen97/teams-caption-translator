@@ -12,11 +12,7 @@ const state = require('./state');
 const { enqueueTranslate, preprocessText } = require('./translation');
 const { timestamp } = require('./caption-service');
 const stt = require('./stt');
-const { jaItn } = require('./ja-itn');
-const { koFix } = require('./ko-fix');
-const { punctuateJa, warmPunctuate, isAvailable: puncAvailable, addQuestion: _addQuestionJa } = require('./punctuate-ja');
-const { punctuateEn, warmPunctuateEn } = require('./punctuate-en');
-const { punctuateKo } = require('./punctuate-ko');
+// Nemotron 5-in-1 ra dấu câu + viết hoa + ITN NATIVE → KHÔNG còn module punctuate-*/ja-itn/ko-fix per-language.
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const send = (ch, data) => state.win?.webContents?.send(ch, data);
@@ -59,10 +55,7 @@ async function warmModel() {
   await new Promise(r => setImmediate(r));
   let ok = false;
   try {
-    ok = await stt.warm();
-    // ja/en: nạp SẴN model dấu câu trong lúc overlay đang hiện → commit câu đầu khỏi khựng vì load.
-    if (stt.currentLang() === 'ja') { try { await warmPunctuate(); } catch {} }
-    if (stt.currentLang() === 'en') { try { warmPunctuateEn(); } catch {} }
+    ok = await stt.warm();   // Nemotron: 1 model cho mọi lang, dấu câu native → không cần warm punctuation riêng
   }
   catch (e) { console.warn('[audio-stt] warm lỗi:', e.message); }
   finally { send('busy', { on: false }); }
@@ -85,8 +78,7 @@ function _finalizeOnline(text) {
   let sRaw = (text || '').trim();
   _liveText = '';
   if (!sRaw || stt.isHallucination(sRaw)) { _liveId = null; return; }
-  // en: model zipformer ra TOÀN HOA không dấu → phục hồi dấu câu + viết hoa (sherpa OnlinePunctuation). Lỗi → nguyên văn.
-  if (stt.currentLang() === 'en') { try { sRaw = punctuateEn(sRaw); } catch {} }
+  // (nhánh ONLINE chỉ dùng cho engine streaming; Nemotron là offline nên không đi đường này. Giữ scaffolding.)
   const id = _liveId || (++state.audioEntryId);
   _liveId = null;
   const now = Date.now();
@@ -194,11 +186,6 @@ let _offRing = [], _offRingLen = 0, _offPre = null;        // pre-roll ring + sn
 // dày hơn chỉ phí CPU cho kết quả sẽ bị skip; partial đầu của ko xuất hiện ~2.4s sau khi bắt đầu nói (đã đo).
 function _partialStep() { return Math.floor(16000 * (stt.currentLang() === 'ko' ? 2.0 : 0.6)); }
 const _PREROLL = Math.floor(16000 * 0.7);          // độ dài pre-roll (rộng hơn → ít rớt onset/đầu câu)
-// Đuôi CHƯA KẾT CÂU (trợ từ cách/đề は/を/に… + thể nối で/から): VAD ngắt giữa câu lúc ngập ngừng. KHÔNG ép 。 vào
-// đó, VÀ nếu model punctuation lỡ chấm cuối (nó coi biên VAD như hết câu → "…は。") thì BỎ 。 cuối → để TRỐNG, đoạn kế
-// nối tiếp như Live Captions (LC không chấm cuối mỗi dòng). Mất 。 ở câu thật kết bằng で/が hiếm + ít chướng hơn nhiều.
-const _NONTERM_TAIL = /(は|を|に|へ|も|と|が|の|や|で|から|まで)$/;
-const _NONTERM_TAIL_PUNC = /(は|を|に|へ|も|と|が|の|や|で|から|まで)。$/;
 function _mergeFrames(frames, len) { const b = new Float32Array(len); let o = 0; for (const p of frames) { b.set(p, o); o += p.length; } return b; }
 
 // Reset trạng thái 1 CÂU (gồm cả ring + pre-roll snapshot) — gọi sau mỗi finalize / đổi ngôn ngữ / phiên mới.
@@ -207,17 +194,6 @@ function _resetOfflineLive() {
   _offRing = []; _offRingLen = 0; _offPre = null;
 }
 
-// Hậu xử lý text FINAL theo ngôn ngữ: ja = ITN số kanji→chữ số; ko = sửa loanword garble hệ thống của
-// Moonshine (src/ko-fix.js, chỉ key phi-từ + biên từ — regression test: scripts/test-ko-fix.js). CHỈ áp
-// lên FINAL, không áp partial (giữ tính đơn điệu của LocalAgreement). Ngôn ngữ khác trả nguyên.
-function _itn(s) {
-  try {
-    const lang = stt.currentLang();
-    if (lang === 'ja') return jaItn(s);
-    if (lang === 'ko') return koFix(s);
-    return s;
-  } catch { return s; }
-}
 // Tiền tố chung dài nhất Ở MỨC KÝ TỰ (Array.from cho an toàn surrogate) — lõi của LocalAgreement.
 function _charLCP(a, b) {
   const A = Array.from(a || ''), B = Array.from(b || '');
@@ -281,24 +257,9 @@ async function _pumpSeg() {
   } finally { _segPumping = false; }
 }
 
-// Chốt 1 đoạn: (ja) punctuation → ITN → emit dưới entry partial (liveId) → "…" → dịch. Dedup khi chưa hiện partial.
+// Chốt 1 đoạn VAD: Nemotron đã ra dấu câu + viết hoa native → emit thẳng dưới entry partial (liveId) → "…" → dịch.
 async function _commitSeg(rawText, liveId) {
-  let base = (rawText || '').trim();
-  if (!base || stt.isHallucination(base)) return;
-  let sRaw;
-  if (stt.isNemotron()) {
-    sRaw = base.trim();   // Nemotron ra dấu câu + viết hoa NATIVE → KHÔNG dùng punctuate-*/ITN/ko-fix per-language
-  } else {
-    if (stt.currentLang() === 'ja') { try { base = await punctuateJa(base); } catch {} }   // dấu câu 、。？
-    // ko: heuristic dấu KẾT câu (đuôi 습니다/습니까/까요…) + sửa đuôi hỏng 슴니다→습니다 + bỏ "." sau đuôi nối
-    if (stt.currentLang() === 'ko') { try { base = punctuateKo(base); } catch {} }
-    sRaw = _itn(base).trim();                                                            // ITN số kanji→Ả Rập
-    if (stt.currentLang() === 'ja' && sRaw) {                                         // làm mượt ngắt câu khi VAD cắt giữa câu
-      if (_NONTERM_TAIL_PUNC.test(sRaw)) sRaw = sRaw.replace(/。$/, '');               //   model lỡ chấm sau trợ từ nối → bỏ 。 cuối
-      else if (!/[。、？！]$/.test(sRaw) && !_NONTERM_TAIL.test(sRaw)) sRaw += '。';   //   hết câu thật mà model quên chấm → ép 。
-    }
-    if (stt.currentLang() === 'ja') { try { sRaw = _addQuestionJa(sRaw); } catch {} }        // áp lại ？ trên dấu kết câu CUỐI (model đặt 。 lệch chỗ か)
-  }
+  const sRaw = (rawText || '').trim();
   if (!sRaw || stt.isHallucination(sRaw)) return;
   const now = Date.now();
   const norm = sRaw.toLowerCase().replace(/\s+/g, ' ').trim();

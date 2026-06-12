@@ -70,9 +70,6 @@ function modelInfo(appLang) {
   if (m.engine === 'nemotron') {
     return require('./stt-nemotron').nemotronComplete(d) ? { ...m, paths: { dir: d } } : null;
   }
-  if (m.kind === 'moonshine') {
-    return require('./stt-moonshine').moonshineComplete(d) ? { ...m, paths: { dir: d } } : null;
-  }
   const encoder = path.join(d, 'encoder.onnx');
   const decoder = path.join(d, 'decoder.onnx');
   const joiner  = path.join(d, 'joiner.onnx');
@@ -109,8 +106,6 @@ async function ensureReady() {
       let rec;
       if (info.engine === 'nemotron') {
         rec = await require('./stt-nemotron').createNemotron(info.paths.dir, { threads: 4 });
-      } else if (info.kind === 'moonshine') {
-        rec = await require('./stt-moonshine').createMoonshine(info.paths.dir, { threads: 2 });
       } else {
         rec = await sherpa().OfflineRecognizer.createAsync({
           featConfig: { sampleRate: 16000, featureDim: 80 },
@@ -253,8 +248,6 @@ async function transcribe(samples) {
   try {
     if (_offKind === 'nemotron') {
       text = ((await _offRec.transcribe(samples, MODELS[_lang()].nemoLang)) || '').trim();   // Nemotron 5-in-1: truyền lang_id theo ngôn ngữ hiện tại
-    } else if (_offKind === 'moonshine') {
-      text = ((await _offRec.transcribe(samples)) || '').trim();   // Moonshine: decode loop riêng (onnxruntime)
     } else {
       const stream = _offRec.createStream();
       stream.acceptWaveform({ sampleRate: 16000, samples });
