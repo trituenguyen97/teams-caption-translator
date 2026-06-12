@@ -388,6 +388,25 @@ function fixNumberScale(out, src) {
   return out.slice(0, bad.index) + _fmtVN(V) + out.slice(bad.index + bad.len);   // bậc VI tự nhiên (2 tỷ, không 2000 triệu)
 }
 
+// Sửa NĂM viết bằng SỐ CHỮ HÁN (vd 二千二十六年=2026): MiLMMT 1B hay RỚT chữ số (→"2006"). Tính năm thật từ nguồn,
+// nếu output có "năm YYYY" (hoặc số 4 chữ số dạng năm) KHÁC → vá. Guard chặt: nguồn đúng 1 năm hợp lệ [1900-2200],
+// chỉ thay số cũng nằm trong khoảng năm (không đụng số đếm/tiền). 月/日 (tháng/ngày) là số nhỏ, dịch đúng → bỏ qua.
+function fixYear(out, src) {
+  const yre = /[〇零一壹二两兩三四五六七八九十拾百佰千仟]{2,}年/g;
+  const years = []; let m;
+  while ((m = yre.exec(src || ''))) { const v = _cjkVal(m[0].slice(0, -1)); if (v >= 1900 && v <= 2200) years.push(v); }
+  if (years.length !== 1) return out;            // 0 hoặc nhiều năm → bỏ (an toàn)
+  const V = years[0];
+  const m2 = out.match(/(năm\s*)(\d{3,4})/i);     // ưu tiên cụm "năm YYYY"
+  if (m2) {
+    const D = parseInt(m2[2], 10);
+    return (D !== V && D >= 1900 && D <= 2200) ? out.replace(m2[0], m2[1] + V) : out;
+  }
+  const m3 = out.match(/\b(19\d\d|20\d\d|21\d\d)\b/);   // fallback: số 4 chữ số dạng năm
+  if (m3 && parseInt(m3[1], 10) !== V) return out.replace(m3[0], String(V));
+  return out;
+}
+
 // Làm câu tiếng Việt tự nhiên hơn sau khi dịch: chuẩn dấu câu/khoảng trắng, khử lặp artifact,
 // ép thuật ngữ, thêm tiểu từ lịch sự "ạ" theo thể です/ます của câu nguồn (giọng họp).
 // An toàn khi nguồn không phải Nhật / đích không phải Việt (các bước đặc thù tự bỏ qua).
@@ -422,6 +441,9 @@ function postprocessTranslation(out, jaSrc) {
 
   // 5c) Sửa số bậc lớn 万/億 deterministic (offline, chính xác) — chạy trước S7 nên S7 không cần flag nữa.
   if (isVi) t = fixNumberScale(t, jaSrc);
+
+  // 5d) Sửa năm số-chữ-Hán bị rớt chữ số (二千二十六年→"2006") — deterministic, guard chặt khoảng [1900-2200].
+  if (isVi) t = fixYear(t, jaSrc);
 
   // 6) Viết hoa chữ cái đầu
   t = t.replace(/^(\p{Ll})/u, c => c.toUpperCase());
@@ -790,7 +812,7 @@ function drainQueue() {
 module.exports = {
   LANG_NAMES, LANG_LABELS, PROV_NAMES,
   lookupPhrase, isLLMRefusal, hasUntranslatedCJK, preprocessText,
-  translateText, enqueueTranslate, fixNumberScale,
+  translateText, enqueueTranslate, fixNumberScale, fixYear,
   translateGoogleFree,
   translateViaEdge, translateViaTeamsToken,
   storeTeamsToken, parseJwtAudience,

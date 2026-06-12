@@ -139,6 +139,8 @@ let _nemoNoGrow = 0, _nemoUttLen = 0, _nemoGrew = false;   // samples kể từ 
 let _nemoCommittedText = '';   // phần hypothesis của utterance hiện tại ĐÃ chốt (đã thành caption riêng theo dấu câu)
 const _NEMO_SR = 16000;
 const _NEMO_NOGROW = 16000;                         // ngừng mọc ≥1.0s audio (>chunk 0.56s + frame) → chốt câu
+const _NEMO_NOGROW_SHORT = 28800;                   // mảnh NGẮN (từ nối/ngập ngừng giữa câu, vd 「しかも」): chờ ~1.8s
+const _NEMO_SHORT_CHARS = 6;                         //   để kịp gộp câu sau, tránh caption vụn 1-2 chữ
 const _NEMO_MAX_UTT = Math.floor(_NEMO_SR * 15);    // câu quá dài (không có dấu kết câu) → chốt chống run-on
 
 // Vị trí dấu KẾT CÂU ĐẦU TIÊN trong s (。！？．!?). ASCII '.' BỎ QUA nếu là số thập phân (\d.\d). -1 nếu không có.
@@ -225,8 +227,11 @@ async function _pumpNemo() {
         _nemoNoGrow += samples.length;   // không ra token mới → cộng dồn audio "im" (độc lập âm lượng)
       }
       _nemoUttLen += samples.length;
-      // endpoint: đã từng mọc + ngừng mọc ≥1s (ngừng nói), HOẶC câu quá dài
-      if ((_nemoGrew && _nemoNoGrow >= _NEMO_NOGROW) || _nemoUttLen >= _NEMO_MAX_UTT) {
+      // endpoint: đã từng mọc + ngừng mọc đủ lâu (ngừng nói), HOẶC câu quá dài. Mảnh đuôi NGẮN (từ nối/ngập ngừng
+      // giữa câu) đòi pause LÂU HƠN (1.8s) trước khi chốt → đỡ vụn (vd 「しかも」 kịp gộp với câu sau).
+      const _pendRaw = _nemoLiveText.startsWith(_nemoCommittedText) ? _nemoLiveText.slice(_nemoCommittedText.length) : _nemoLiveText;
+      const _need = _pendRaw.trim().length < _NEMO_SHORT_CHARS ? _NEMO_NOGROW_SHORT : _NEMO_NOGROW;
+      if ((_nemoGrew && _nemoNoGrow >= _need) || _nemoUttLen >= _NEMO_MAX_UTT) {
         let fin = '';
         try { fin = (await sess.finish()).trim(); } catch {}
         let tailRaw = fin.startsWith(_nemoCommittedText) ? fin.slice(_nemoCommittedText.length) : fin;
