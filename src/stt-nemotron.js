@@ -135,7 +135,83 @@ async function createNemotron(dir, opts = {}) {
     if (!T) return '';
     return vocab.decode(await greedy(E, T, H, forbiddenFor(langCode)));
   }
-  return { transcribe };
+
+  // ── STREAMING NATIVE (stateful): feed PCM dần → encoder cache TRƯỢT + RNN-T decode TĂNG DẦN, giữ state qua
+  //    các lần accept(). KHÁC transcribe() (xử trọn buffer, cache/decoder reset mỗi lần): partial mọc dần đơn
+  //    điệu (RNN-T greedy chỉ NỐI token, không rút lại) → KHÔNG re-decode, KHÔNG VAD. Cho ra ĐÚNG token như
+  //    transcribe() vì greedy vốn tuần tự theo thời gian + cache encoder mang left-context y hệt encodeAll.
+  //    Vòng đời 1 câu: accept(frame)* → text() đọc partial → finish() flush đuôi <CHUNK → reset() sang câu kế. ──
+  function createStream(langCode) {
+    const forbidden = forbiddenFor(langCode);
+    const langId = LANG_ID[langCode] != null ? LANG_ID[langCode] : 0;
+    const lid = i64([langId]);
+    let clc, clt, clcl, carry, prevTail, residual;   // state encoder (cache trượt + carryover + tail + dư <CHUNK)
+    let h, c, dout, hyp, runTok, runLen;              // state RNN-T decoder (LSTM h/c + giả thuyết + chặn-lặp)
+    function _reset() {
+      clc = zeros([1, 24, 56, 1024]); clt = zeros([1, 24, 1024, 8]); clcl = i64([0]);
+      carry = new Float32Array(CARRY * NMEL); prevTail = null; residual = new Float32Array(0);
+      h = zeros([2, 1, 640]); c = zeros([2, 1, 640]); dout = null; hyp = []; runTok = -1; runLen = 0;
+    }
+    _reset();
+    async function runDec(tid) {
+      const r = await dec.run({ targets: new O.Tensor('int64', BigInt64Array.from([BigInt(tid)]), [1, 1]), h_in: h, c_in: c });
+      h = r.h_out; c = r.c_out; return r.decoder_output;
+    }
+    // decode T frame encoded MỚI, TIẾP TỤC state (giống vòng trong của greedy nhưng dùng h/c/dout/hyp của session)
+    async function _decode(E, T, H) {
+      if (!dout) dout = await runDec(BLANK);
+      for (let t = 0; t < T; t++) {
+        const et = new O.Tensor('float32', E.subarray(t * H, (t + 1) * H), [1, 1, H]);
+        let sym = 0;
+        while (sym < MAXSYM) {
+          const dd = dout.data, dlt = dout.dims[2];
+          const dlast = new Float32Array(640);
+          for (let k = 0; k < 640; k++) dlast[k] = dd[k * dlt + (dlt - 1)];
+          const jo = await joint.run({ encoder_output: et, decoder_output: new O.Tensor('float32', dlast, [1, 1, 640]) });
+          const logits = jo.joint_output.data, V = jo.joint_output.dims[jo.joint_output.dims.length - 1];
+          let best = 0, bestV = -Infinity;
+          for (let v = 0; v < V; v++) { if (forbidden.has(v)) continue; const x = logits[v]; if (x > bestV) { bestV = x; best = v; } }
+          if (best === BLANK) break;
+          if (best === runTok && runLen >= 3) break;
+          runTok = best; runLen = best === hyp[hyp.length - 1] ? runLen + 1 : 1;
+          hyp.push(best); dout = await runDec(best); sym++;
+        }
+      }
+    }
+    async function _chunk(samples) {
+      const newMel = melChunk(samples, prevTail);
+      const af = new Float32Array(ENC_FRAMES * NMEL);
+      af.set(carry, 0); af.set(newMel, CARRY * NMEL);
+      const out = await enc.run({
+        audio_signal: new O.Tensor('float32', af, [1, ENC_FRAMES, NMEL]),
+        length: i64([ENC_FRAMES]),
+        cache_last_channel: clc, cache_last_time: clt, cache_last_channel_len: clcl, lang_id: lid,
+      });
+      clc = out.cache_last_channel_next; clt = out.cache_last_time_next; clcl = out.cache_last_channel_len_next;
+      carry = newMel.slice((NEW - CARRY) * NMEL);
+      prevTail = samples.slice(Math.max(0, samples.length - 257));   // left-context cho chunk sau (copy, tránh alias)
+      await _decode(out.outputs.data, out.outputs.dims[1], out.outputs.dims[2]);
+    }
+    return {
+      lang: langCode,
+      async accept(samples) {
+        if (!samples || !samples.length) return;
+        if (residual.length) { const m = new Float32Array(residual.length + samples.length); m.set(residual, 0); m.set(samples, residual.length); residual = m; }
+        else residual = samples.slice();
+        let off = 0;
+        while (off + CHUNK <= residual.length) { await _chunk(residual.subarray(off, off + CHUNK)); off += CHUNK; }
+        residual = residual.subarray(off);
+      },
+      text() { return vocab.decode(hyp); },
+      async finish() {
+        if (residual.length) { const ch = new Float32Array(CHUNK); ch.set(residual.subarray(0, Math.min(CHUNK, residual.length))); residual = new Float32Array(0); await _chunk(ch); }
+        return vocab.decode(hyp);
+      },
+      reset() { _reset(); },
+    };
+  }
+
+  return { transcribe, createStream };
 }
 
 function nemotronComplete(dir) {

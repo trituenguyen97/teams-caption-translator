@@ -2,11 +2,12 @@
  * audio-stt.js — Dịch vụ audio (system/mic) qua STT cục bộ sherpa-onnx-node (xem src/stt.js).
  * KHÔNG còn Python: renderer gửi PCM float32 @16k (Web Audio) → handlePcm → dịch.
  *
- * HAI NHÁNH theo ngôn ngữ (stt.isStreaming):
- *   - ONLINE (zh/en): đẩy PCM trực tiếp vào OnlineRecognizer → partial mọc dần (như Live Captions),
- *     chốt câu khi isEndpoint → dịch. KHÔNG cần VAD.
- *   - OFFLINE (ja/vi/ko): cắt câu bằng Silero VAD → transcribe trọn đoạn (ja/vi sherpa, ko Moonshine)
- *     → pseudo-stream partial mọc dần bằng re-decode + LocalAgreement-2 → commit khi VAD chốt.
+ * NHÁNH theo engine:
+ *   - NEMOTRON (cả 5 ngôn ngữ, mặc định nay): streaming NATIVE cache-aware (stt.createNemotronStream) — feed PCM
+ *     dần vào session giữ state → partial mọc dần ĐƠN ĐIỆU mỗi chunk ~560ms; endpoint theo trailing-silence
+ *     (0.8s) + max-length. KHÔNG VAD, KHÔNG re-decode, KHÔNG LocalAgreement (RNN-T chỉ nối token).
+ *   - ONLINE (sherpa, dự phòng): OnlineRecognizer → partial mọc dần, chốt khi isEndpoint. KHÔNG cần VAD.
+ *   - OFFLINE (sherpa, dự phòng): Silero VAD cắt đoạn → transcribe trọn đoạn → pseudo-stream re-decode + LA-2.
  */
 const state = require('./state');
 const { enqueueTranslate, preprocessText } = require('./translation');
@@ -109,6 +110,10 @@ function _handlePcmStreaming(samples) {
 // Chốt nốt câu ĐANG stream khi DỪNG ghi (user bấm ⏹ giữa câu) → câu cuối được dịch thay vì treo.
 function flushStreaming() {
   if (_online && _liveText) { _finalizeOnline(_liveText); try { _online.reset(); } catch {} }
+  // Nemotron: chốt nốt câu đang stream bằng partial cuối (KHÔNG gọi session.finish khi pump có thể đang chạy →
+  // tránh chạy chồng làm hỏng state; phần đuôi <chunk chưa kịp decode bị bỏ — chấp nhận khi user ⏹). Session
+  // được reset ở resetSegmentation lần ▶ kế.
+  if (_nemo && _nemoLiveText) _finalizeNemo(_nemoLiveText);
   // offline: chốt nốt câu đang nói dở (chưa qua VAD endpoint) — đẩy NGUYÊN buffer (đã gồm pre-roll seed) vào
   // queue; worker re-transcribe ĐẦY ĐỦ + commit. Một consumer duy nhất (_pumpSeg) → không double-commit.
   if (_offLen > 0) {
@@ -116,6 +121,85 @@ function flushStreaming() {
     _offUtt++; _resetOfflineLive();
   }
 }
+
+// ── NHÁNH NEMOTRON STREAMING NATIVE (5-in-1) ─────────────────────────────────────────────────────────
+// Cache-aware FastConformer + RNN-T: feed PCM dần vào session (giữ state), partial mọc dần ĐƠN ĐIỆU mỗi
+// chunk (~560ms), endpoint theo TRAILING-SILENCE (0.8s) + max-length (như sherpa online rule2/rule3).
+// THAY pseudo-stream offline+VAD: KHÔNG VAD, KHÔNG re-decode, KHÔNG LocalAgreement (RNN-T chỉ nối token).
+let _nemo = null, _nemoLang = null, _nemoLiveId = null, _nemoLiveText = '';
+let _nemoQ = [], _nemoPumping = false;
+let _nemoSilence = 0, _nemoUttLen = 0, _nemoSpoke = false;   // đếm sample im lặng đuôi + độ dài câu + đã có tiếng?
+const _NEMO_SR = 16000;
+const _NEMO_SIL_END = Math.floor(_NEMO_SR * 0.8);   // im lặng ≥0.8s SAU khi có tiếng → chốt câu (snappy như LC)
+const _NEMO_MAX_UTT = Math.floor(_NEMO_SR * 15);    // câu quá dài → chốt chống run-on
+const _NEMO_RMS = 0.008;                            // ngưỡng "có tiếng" cho endpoint (≈ stt.hasSpeech)
+
+function _ensureNemo() {
+  const lang = stt.currentLang();
+  if (_nemo && _nemoLang === lang) return _nemo;
+  _nemo = stt.createNemotronStream();   // null nếu model chưa nạp / không phải nemotron
+  _nemoLang = lang;
+  _nemoLiveId = null; _nemoLiveText = ''; _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
+  if (_nemo) console.log('[audio-stt] Nemotron streaming session:', lang);
+  return _nemo;
+}
+function _frameRms(s) { let sum = 0; for (let i = 0; i < s.length; i++) sum += s[i] * s[i]; return Math.sqrt(sum / s.length); }
+
+// Chốt câu nemotron đang stream: entry partial (_nemoLiveId) chuyển live→final (dịch). Lọc ảo giác + dedup.
+function _finalizeNemo(text) {
+  const sRaw = (text || '').trim();
+  const liveId = _nemoLiveId;
+  _nemoLiveId = null; _nemoLiveText = '';
+  if (!sRaw || stt.isHallucination(sRaw)) return;
+  const now = Date.now();
+  const norm = sRaw.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!liveId && _isDupRecent(norm, now)) return;
+  _rememberRecent(norm, now);
+  const id = liveId || (++state.audioEntryId);
+  const cleaned = preprocessText(sRaw);
+  send('caption-live', { id, author: 'STT', original: sRaw, translated: '…', ts: timestamp(), tsMs: now });
+  enqueueTranslate(cleaned).then(tr => {
+    if (state.audioPaused) return;   // user đã ⏹ giữa lúc dịch → bỏ kết quả tới muộn
+    const ok = tr && tr !== cleaned && tr !== sRaw;
+    send('caption-live', { id, author: 'STT', original: sRaw, translated: ok ? tr : null, ts: timestamp(), tsMs: now });
+  }).catch(() => {});
+}
+
+// Pump TUẦN TỰ (1 consumer — ORT async, không cho 2 accept chạy chồng làm hỏng state). Mỗi frame: feed session,
+// emit partial mọc dần, theo dõi im lặng → chốt câu khi đủ điều kiện endpoint. Dừng xử lý ngay khi user ⏹.
+async function _pumpNemo() {
+  if (_nemoPumping) return;
+  _nemoPumping = true;
+  try {
+    while (_nemoQ.length) {
+      const samples = _nemoQ.shift();
+      if (state.audioPaused) continue;   // đã ⏹ → drain hàng đợi như no-op (flushStreaming lo chốt câu dở)
+      const sess = _ensureNemo();
+      if (!sess) { _nemoQ.length = 0; break; }   // chưa tạo được session → bỏ phần còn lại (model chưa sẵn)
+      const rms = _frameRms(samples);
+      try { await sess.accept(samples); } catch (e) { console.warn('[audio-stt] nemo accept lỗi:', e.message); continue; }
+      if (state.audioPaused) continue;
+      // partial mọc dần (đơn điệu) — chỉ phát khi text đổi
+      const text = sess.text().trim();
+      if (text && text !== _nemoLiveText) {
+        _nemoLiveText = text;
+        if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
+        send('caption-live', { id: _nemoLiveId, author: 'STT', original: text, translated: '', ts: timestamp(), tsMs: Date.now() });
+      }
+      // theo dõi tiếng/im lặng đuôi cho endpoint
+      if (rms >= _NEMO_RMS) { _nemoSpoke = true; _nemoSilence = 0; } else { _nemoSilence += samples.length; }
+      _nemoUttLen += samples.length;
+      if ((_nemoSpoke && _nemoSilence >= _NEMO_SIL_END) || _nemoUttLen >= _NEMO_MAX_UTT) {
+        let fin = '';
+        try { fin = (await sess.finish()).trim(); } catch {}
+        _finalizeNemo(fin || _nemoLiveText);
+        try { sess.reset(); } catch {}
+        _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
+      }
+    }
+  } finally { _nemoPumping = false; }
+}
+function _handlePcmNemotron(samples) { _nemoQ.push(samples); _pumpNemo(); }
 
 // Dedup câu STT trùng trong cửa sổ ngắn (nhánh OFFLINE)
 const _sttRecentTexts = new Map();
@@ -293,6 +377,7 @@ function _drainVad() {
 async function handlePcm(samples) {
   if (state.captureSource === 'teams' || state.audioPaused) return;
   if (!samples || !samples.length) return;
+  if (stt.isNemotron()) { _handlePcmNemotron(samples); return; }   // streaming native 5-in-1 (cache-aware, không VAD)
   if (stt.isStreaming()) {
     if (_handlePcmStreaming(samples)) return;   // online (zh/en) — chốt câu trong vòng streaming
     // tạo session lỗi → rơi xuống offline phía dưới
@@ -340,6 +425,10 @@ function resetSegmentation() {
   // Online: bỏ stream cũ → phiên mới tạo session sạch (đổi ngôn ngữ cũng được tái tạo qua _ensureOnline).
   if (_online) { try { _online.reset(); } catch {} }
   _online = null; _onlineLang = null; _liveId = null; _liveText = '';
+  // Nemotron: bỏ session cũ → phiên mới _ensureNemo tạo lại sạch (đổi ngôn ngữ cũng tái tạo). Xoá trackers + queue.
+  if (_nemo) { try { _nemo.reset(); } catch {} }
+  _nemo = null; _nemoLang = null; _nemoLiveId = null; _nemoLiveText = '';
+  _nemoQ.length = 0; _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
 }
 
 // Không còn server Python — giữ tên export cho main.js (no-op).

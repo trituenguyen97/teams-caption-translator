@@ -27,8 +27,9 @@ const os = require('os');
 //   kind:   'paraformer' (encoder+decoder) | 'transducer' (encoder+decoder+joiner)
 // ⭐ NEMOTRON 5-in-1 (2026-06): NVIDIA Nemotron-3.5-ASR-Streaming-0.6B int4 — MỘT model cho cả 5 ngôn ngữ,
 // chạy thuần onnxruntime-node (src/stt-nemotron.js: mel + cache-aware FastConformer + RNN-T). Dấu câu + viết hoa
-// NATIVE (khỏi punctuate-* riêng). Offline + VAD (như cũ). Đổi ngôn ngữ = đổi lang_id, KHÔNG reload model.
-// engine 'nemotron'; nemoLang = mã LANG_ID của model (xem stt-nemotron.LANG_ID). Thay toàn bộ per-language cũ.
+// NATIVE (khỏi punctuate-* riêng). STREAMING NATIVE cache-aware (createNemotronStream → partial mọc dần per-chunk
+// ~560ms, KHÔNG VAD/re-decode). Đổi ngôn ngữ = đổi lang_id, KHÔNG reload model. engine 'nemotron'; nemoLang =
+// mã LANG_ID (xem stt-nemotron.LANG_ID). Thay toàn bộ per-language cũ. (transcribe() trọn-buffer vẫn giữ cho test.)
 const _NEMO = (nemoLang) => ({ dir: 'nemotron-int4', engine: 'nemotron', nemoLang });
 const MODELS = {
   'zh-CN': _NEMO('zh'),
@@ -155,6 +156,17 @@ function warm() {
   return ensureReady();
 }
 
+// Phiên STREAMING NATIVE cho Nemotron (engine 'nemotron'): cache-aware FastConformer + RNN-T, partial mọc dần,
+// KHÔNG VAD/re-decode. Yêu cầu model ĐÃ nạp (warm()/ensureReady chạy lúc khởi động service) — trả null nếu chưa.
+// audio-stt đẩy PCM vào accept(), đọc partial qua text(), flush đuôi + chốt câu qua finish(), sang câu kế qua reset().
+//   { lang, accept(samples), text()->string, finish()->Promise<string>, reset() }
+function createNemotronStream() {
+  if (!isNemotron(_lang())) return null;
+  if (!_offRec || _offKind !== 'nemotron' || typeof _offRec.createStream !== 'function') return null;
+  try { return _offRec.createStream(MODELS[_lang()].nemoLang); }
+  catch (e) { console.warn('[stt] tạo nemotron stream lỗi:', e.message); return null; }
+}
+
 function createOnlineSession() {
   const info = modelInfo(_lang());
   if (!info || info.engine !== 'online') return null;
@@ -266,8 +278,8 @@ async function recognize(samples) {
 module.exports = {
   // chung
   setLanguage, currentLang, isModelAvailable, isStreaming, isNemotron, isHallucination,
-  // online (streaming)
-  createOnlineSession, warm,
+  // online (streaming) + nemotron streaming native
+  createOnlineSession, createNemotronStream, warm,
   // offline (VAD + transcribe)
   ensureReady, transcribe, recognize, createVad, isVadAvailable, maxSpeechSec,
   // hằng (test/độ phủ)
