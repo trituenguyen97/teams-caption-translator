@@ -10,7 +10,7 @@
  *   - OFFLINE (sherpa, dự phòng): Silero VAD cắt đoạn → transcribe trọn đoạn → pseudo-stream re-decode + LA-2.
  */
 const state = require('./state');
-const { enqueueTranslate, translatePartial, preprocessText } = require('./translation');
+const { enqueueTranslate, preprocessText } = require('./translation');
 const { timestamp } = require('./caption-service');
 const stt = require('./stt');
 // Nemotron 5-in-1 ra dấu câu + viết hoa + ITN NATIVE → KHÔNG còn module punctuate-*/ja-itn/ko-fix per-language.
@@ -110,11 +110,14 @@ function _handlePcmStreaming(samples) {
 // Chốt nốt câu ĐANG stream khi DỪNG ghi (user bấm ⏹ giữa câu) → câu cuối được dịch thay vì treo.
 function flushStreaming() {
   if (_online && _liveText) { _finalizeOnline(_liveText); try { _online.reset(); } catch {} }
-  // Nemotron: chốt nốt câu đang stream bằng partial cuối (KHÔNG gọi session.finish khi pump có thể đang chạy →
-  // tránh chạy chồng làm hỏng state; phần đuôi <chunk chưa kịp decode bị bỏ — chấp nhận khi user ⏹). Session
-  // được reset ở resetSegmentation lần ▶ kế.
-  if (_nemo && _nemoLiveText) _finalizeNemo(_nemoLiveText);   // đã bump _nemoTrGen + reset state partial-dịch
-  _nemoTrBusy = false;   // mở khoá phòng partial-dịch đang bay lúc ⏹ (gen đã bump → callback của nó tự loại)
+  // Nemotron: chốt nốt câu đang nói dở từ text đã decode (KHÔNG gọi session.finish khi pump có thể đang chạy →
+  // tránh chạy chồng hỏng state; đuôi <chunk chưa decode bị bỏ — chấp nhận khi ⏹). Cắt nốt câu hoàn chỉnh + đuôi dở.
+  if (_nemo && _nemoLiveText) {
+    let tailRaw = _nemoLiveText.startsWith(_nemoCommittedText) ? _nemoLiveText.slice(_nemoCommittedText.length) : _nemoLiveText;
+    tailRaw = _commitSentencesIn(tailRaw);
+    if (tailRaw.trim()) _commitNemoSentence(tailRaw.trim(), _nemoLiveId);
+    _nemoLiveId = null; _nemoCommittedText = ''; _nemoLiveText = '';
+  }
   // offline: chốt nốt câu đang nói dở (chưa qua VAD endpoint) — đẩy NGUYÊN buffer (đã gồm pre-roll seed) vào
   // queue; worker re-transcribe ĐẦY ĐỦ + commit. Một consumer duy nhất (_pumpSeg) → không double-commit.
   if (_offLen > 0) {
@@ -124,50 +127,28 @@ function flushStreaming() {
 }
 
 // ── NHÁNH NEMOTRON STREAMING NATIVE (5-in-1) ─────────────────────────────────────────────────────────
-// Cache-aware FastConformer + RNN-T: feed PCM dần vào session (giữ state), partial mọc dần ĐƠN ĐIỆU mỗi
-// chunk (~560ms), endpoint theo TRAILING-SILENCE (0.8s) + max-length (như sherpa online rule2/rule3).
-// THAY pseudo-stream offline+VAD: KHÔNG VAD, KHÔNG re-decode, KHÔNG LocalAgreement (RNN-T chỉ nối token).
+// Cache-aware FastConformer + RNN-T: feed PCM dần vào session (giữ state), nguồn mọc dần ĐƠN ĐIỆU mỗi
+// chunk (~560ms). CHỐT CÂU theo (a) DẤU KẾT CÂU native (。．.!?！？ — cắt run-on dài như Live Captions) HOẶC
+// (b) TRAILING-SILENCE 0.8s / max-length. DỊCH CHỈ KHI CHỐT CÂU (không dịch streaming — MiLMMT trên CPU
+// nạp token chậm, dịch dở làm giật + tốn CPU của STT). THAY pseudo-stream offline+VAD: KHÔNG VAD/re-decode.
 let _nemo = null, _nemoLang = null, _nemoLiveId = null, _nemoLiveText = '';
 let _nemoQ = [], _nemoPumping = false;
 let _nemoSilence = 0, _nemoUttLen = 0, _nemoSpoke = false;   // đếm sample im lặng đuôi + độ dài câu + đã có tiếng?
+let _nemoCommittedText = '';   // phần hypothesis của utterance hiện tại ĐÃ chốt (đã thành caption riêng theo dấu câu)
 const _NEMO_SR = 16000;
 const _NEMO_SIL_END = Math.floor(_NEMO_SR * 0.8);   // im lặng ≥0.8s SAU khi có tiếng → chốt câu (snappy như LC)
-const _NEMO_MAX_UTT = Math.floor(_NEMO_SR * 15);    // câu quá dài → chốt chống run-on
+const _NEMO_MAX_UTT = Math.floor(_NEMO_SR * 15);    // câu quá dài (không có dấu kết câu) → chốt chống run-on
 const _NEMO_RMS = 0.008;                            // ngưỡng "có tiếng" cho endpoint (≈ stt.hasSpeech)
+const _SENT_MIN_REAL = 2;                           // ≥2 ký tự chữ/số mới coi là 1 câu (tránh tách trên "。" lẻ)
 
-// ── DỊCH-PARTIAL (preview bản dịch khi câu nguồn đang MỌC) — LocalAgreement-2 trên OUTPUT bản dịch ─────
-// Nguồn Nemotron đơn điệu + có dấu câu native. Mỗi lần nguồn mọc đủ: dịch FULL nguồn hiện tại (local-only,
-// translatePartial) rồi CHỈ hiện prefix bản dịch mà 2 lần dịch liên tiếp ĐỒNG Ý (so ký tự, _charLCP) → bản
-// dịch mọc ĐƠN ĐIỆU, không nháy lùi; phần đuôi (chưa ổn) bị LA-2 giữ lại tới khi hội tụ. Endpoint vẫn là bản
-// dịch THẬT (enqueueTranslate đầy đủ cascade/TM) — partial chỉ là preview hội tụ về nó.
-//   _nemoTrGen: bộ đếm "thế hệ câu" — bump ở _finalizeNemo (vào) + resetSegmentation → partial tới muộn bị loại.
-//   _nemoTrBusy: skip-if-busy (1 dịch/lần, DROP chứ không xếp hàng → không dồn ứ làm trễ endpoint).
-let _nemoTrGen = 0, _nemoTrBusy = false, _nemoTrLive = '', _nemoTrPrevHyp = '', _nemoTrFiredLen = 0;
-const _NEMO_TR_STEP = 6;   // nguồn phải mọc ≥6 ký tự kể từ lần dịch trước mới fire lại (skip-if-busy là phanh chính)
-
-function _resetNemoTr() { _nemoTrLive = ''; _nemoTrPrevHyp = ''; _nemoTrFiredLen = 0; }
-
-// Dịch nguồn đang mọc → áp LocalAgreement-2 lên BẢN DỊCH → cập nhật entry partial (fire-and-forget).
-// gen chụp lúc fire; câu đã chốt/đổi (gen lệch) hoặc bản dịch null/ngờ → bỏ. KHÔNG await trong _pumpNemo.
-async function _emitNemoTrPartial(gen) {
-  if (_nemoTrBusy) return;
-  const src = preprocessText(_nemoLiveText);   // cùng tiền xử lý (glossary/filler/tên) như endpoint → đồng nhất
-  if (!src || src.length < 2) return;
-  _nemoTrBusy = true;
-  try {
-    const tr = await translatePartial(src);
-    if (!tr || gen !== _nemoTrGen) return;   // câu đã chốt/sang câu khác, hoặc bản dịch ngờ → bỏ qua nhịp này
-    // LA-2 ĐƠN ĐIỆU NGHIÊM: chỉ MỞ RỘNG prefix đã hiện khi 2 lần dịch liên tiếp ĐỒNG Ý (so ký tự) dài hơn nó.
-    // KHÔNG BAO GIỜ rút lùi/đổi prefix (kể cả model sửa đầu câu) → 0 nháy. Bản chốt sửa = endpoint (authoritative).
-    // (Lần dịch ĐẦU: _nemoTrPrevHyp='' → agreed='' → chưa hiện; hiện từ lần thứ 2 trở đi khi đã có 2 bản đồng ý.)
-    const agreed = _charLCP(_nemoTrPrevHyp, tr);
-    _nemoTrPrevHyp = tr;
-    if (agreed.startsWith(_nemoTrLive) && agreed.length > _nemoTrLive.length) {
-      _nemoTrLive = agreed;
-      if (_nemoLiveId) send('caption-live', { id: _nemoLiveId, author: 'STT', original: _nemoLiveText, translated: _nemoTrLive, isPartial: true, ts: timestamp(), tsMs: Date.now() });
-    }
-  } catch (e) { /* dịch lỗi → giữ bản đang hiện */ }
-  finally { _nemoTrBusy = false; }
+// Vị trí dấu KẾT CÂU ĐẦU TIÊN trong s (。！？．!?). ASCII '.' BỎ QUA nếu là số thập phân (\d.\d). -1 nếu không có.
+function _firstSentenceEnd(s) {
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '。' || c === '！' || c === '？' || c === '．' || c === '!' || c === '?') return i;
+    if (c === '.' && !(/[0-9]/.test(s[i - 1] || '') && /[0-9]/.test(s[i + 1] || ''))) return i;
+  }
+  return -1;
 }
 
 function _ensureNemo() {
@@ -175,36 +156,45 @@ function _ensureNemo() {
   if (_nemo && _nemoLang === lang) return _nemo;
   _nemo = stt.createNemotronStream();   // null nếu model chưa nạp / không phải nemotron
   _nemoLang = lang;
-  _nemoLiveId = null; _nemoLiveText = ''; _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
-  _nemoTrGen++; _resetNemoTr();   // đổi ngôn ngữ giữa chừng → vô hiệu partial-dịch đang bay của ngôn ngữ cũ + xoá hypothesis cũ
+  _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = ''; _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
   if (_nemo) console.log('[audio-stt] Nemotron streaming session:', lang);
   return _nemo;
 }
 function _frameRms(s) { let sum = 0; for (let i = 0; i < s.length; i++) sum += s[i] * s[i]; return Math.sqrt(sum / s.length); }
 
-// Chốt câu nemotron đang stream: entry partial (_nemoLiveId) chuyển live→final (dịch). Lọc ảo giác + dedup.
-function _finalizeNemo(text) {
-  const sRaw = (text || '').trim();
-  const liveId = _nemoLiveId;
-  const partialShown = _nemoTrLive;   // bản dịch partial đang hiện (giữ làm placeholder thay '…' → không nháy lùi)
-  _nemoLiveId = null; _nemoLiveText = '';
-  _nemoTrGen++; _resetNemoTr();        // vô hiệu partial-dịch đang bay của câu này + xoá state cho câu kế
+// Chốt 1 CÂU: entry (liveId nếu là entry đang sống, else mới) → "đang dịch…" → enqueueTranslate (cascade/TM/QE
+// đầy đủ) → bản dịch THẬT. KHÔNG isPartial (vào captionData/export). Lọc ảo giác + dedup câu trùng cửa sổ ngắn.
+function _commitNemoSentence(sentence, liveId) {
+  const sRaw = (sentence || '').trim();
   if (!sRaw || stt.isHallucination(sRaw)) return;
   const now = Date.now();
   const norm = sRaw.toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!liveId && _isDupRecent(norm, now)) return;
+  if (!liveId && _isDupRecent(norm, now)) return;   // entry mới + trùng gần đây → bỏ (entry đang sống thì luôn chốt)
   _rememberRecent(norm, now);
   const id = liveId || (++state.audioEntryId);
   const cleaned = preprocessText(sRaw);
-  // placeholder: giữ partial đã hiện nếu có (đỡ nháy về "đang dịch…"), else '…'. isPartial → KHÔNG lưu vào
-  // captionData (export/summary) — chỉ bản chốt authoritative ở .then dưới (không isPartial) mới được lưu.
-  send('caption-live', { id, author: 'STT', original: sRaw, translated: partialShown || '…', isPartial: true, ts: timestamp(), tsMs: now });
+  send('caption-live', { id, author: 'STT', original: sRaw, translated: '…', ts: timestamp(), tsMs: now });
   enqueueTranslate(cleaned).then(tr => {
     if (state.audioPaused) return;   // user đã ⏹ giữa lúc dịch → bỏ kết quả tới muộn
     const ok = tr && tr !== cleaned && tr !== sRaw;
-    // bản dịch THẬT (authoritative). Nếu fail mà đã có partial → giữ partial (đỡ tụt về "—"); else null.
-    send('caption-live', { id, author: 'STT', original: sRaw, translated: ok ? tr : (partialShown || null), ts: timestamp(), tsMs: now });
+    send('caption-live', { id, author: 'STT', original: sRaw, translated: ok ? tr : null, ts: timestamp(), tsMs: now });
   }).catch(() => {});
+}
+
+// Chốt MỌI câu hoàn chỉnh (tới từng dấu kết câu) trong pendingRaw → mỗi câu = 1 caption (câu ĐẦU dùng entry đang
+// sống _nemoLiveId, câu sau mở entry mới). Cập nhật _nemoCommittedText. Trả phần ĐUÔI DỞ còn lại (chưa có dấu câu).
+function _commitSentencesIn(pendingRaw) {
+  let rest = pendingRaw, consumed = '';
+  let e;
+  while ((e = _firstSentenceEnd(rest)) >= 0) {
+    const sentRaw = rest.slice(0, e + 1);
+    rest = rest.slice(e + 1);
+    consumed += sentRaw;
+    _commitNemoSentence(sentRaw, _nemoLiveId);   // _commitNemoSentence tự bỏ nếu ảo giác/quá ngắn (vd "。" lẻ)
+    _nemoLiveId = null;                           // câu kế mở entry mới
+  }
+  _nemoCommittedText += consumed;
+  return rest;
 }
 
 // Pump TUẦN TỰ (1 consumer — ORT async, không cho 2 accept chạy chồng làm hỏng state). Mỗi frame: feed session,
@@ -221,16 +211,17 @@ async function _pumpNemo() {
       const rms = _frameRms(samples);
       try { await sess.accept(samples); } catch (e) { console.warn('[audio-stt] nemo accept lỗi:', e.message); continue; }
       if (state.audioPaused) continue;
-      // partial mọc dần (đơn điệu) — chỉ phát khi text đổi. translated mang _nemoTrLive (bản dịch partial đã
-      // hội tụ tới giờ, có thể '') → KHÔNG xoá bản dịch đang hiện mỗi lần nguồn mọc (renderer coi ''=textContent rỗng).
+      // nguồn mọc → CHỐT các câu hoàn chỉnh (dấu kết câu) thành caption riêng, hiện phần ĐUÔI DỞ làm partial sống.
       const text = sess.text().trim();
       if (text && text !== _nemoLiveText) {
         _nemoLiveText = text;
-        if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
-        send('caption-live', { id: _nemoLiveId, author: 'STT', original: text, translated: _nemoTrLive || '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
-        // dịch-partial: CHỈ provider 'local' (online dịch ở endpoint, đã nhanh + tránh rate-limit). Nguồn mọc đủ +
-        // không bận → dịch preview. Fire-and-forget (không await trong pump).
-        if (state.provider === 'local' && !_nemoTrBusy && text.length - _nemoTrFiredLen >= _NEMO_TR_STEP) { _nemoTrFiredLen = text.length; _emitNemoTrPartial(_nemoTrGen); }
+        let pendingRaw = text.startsWith(_nemoCommittedText) ? text.slice(_nemoCommittedText.length) : (_nemoCommittedText = '', text);
+        pendingRaw = _commitSentencesIn(pendingRaw);   // chốt+dịch mọi câu đã xong; còn lại = đuôi dở
+        const pending = pendingRaw.trim();
+        if (pending) {   // đuôi câu đang nói dở → hiện partial (translated:'' = chưa dịch; dịch khi câu chốt)
+          if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
+          send('caption-live', { id: _nemoLiveId, author: 'STT', original: pending, translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
+        }
       }
       // theo dõi tiếng/im lặng đuôi cho endpoint
       if (rms >= _NEMO_RMS) { _nemoSpoke = true; _nemoSilence = 0; } else { _nemoSilence += samples.length; }
@@ -238,7 +229,10 @@ async function _pumpNemo() {
       if ((_nemoSpoke && _nemoSilence >= _NEMO_SIL_END) || _nemoUttLen >= _NEMO_MAX_UTT) {
         let fin = '';
         try { fin = (await sess.finish()).trim(); } catch {}
-        _finalizeNemo(fin || _nemoLiveText);
+        let tailRaw = fin.startsWith(_nemoCommittedText) ? fin.slice(_nemoCommittedText.length) : fin;
+        tailRaw = _commitSentencesIn(tailRaw);          // chốt nốt câu hoàn chỉnh trong đuôi finish()
+        if (tailRaw.trim()) _commitNemoSentence(tailRaw.trim(), _nemoLiveId);   // chốt đuôi dở (không dấu câu) = caption cuối
+        _nemoLiveId = null; _nemoCommittedText = ''; _nemoLiveText = '';
         try { sess.reset(); } catch {}
         _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
       }
@@ -473,9 +467,8 @@ function resetSegmentation() {
   _online = null; _onlineLang = null; _liveId = null; _liveText = '';
   // Nemotron: bỏ session cũ → phiên mới _ensureNemo tạo lại sạch (đổi ngôn ngữ cũng tái tạo). Xoá trackers + queue.
   if (_nemo) { try { _nemo.reset(); } catch {} }
-  _nemo = null; _nemoLang = null; _nemoLiveId = null; _nemoLiveText = '';
+  _nemo = null; _nemoLang = null; _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = '';
   _nemoQ.length = 0; _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
-  _nemoTrGen++; _nemoTrBusy = false; _resetNemoTr();   // partial-dịch: vô hiệu nhịp đang bay + xoá state cho phiên mới
 }
 
 // Không còn server Python — giữ tên export cho main.js (no-op).
