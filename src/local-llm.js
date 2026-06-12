@@ -540,8 +540,12 @@ async function startServer({ port = 8080, ctxSize, threads, ngl } = {}) {
   if (!rv) return { ok: false, error: `Binary '${variant}' chưa có (bundle lẫn userData)` };
   const exe = rv.exe;
 
-  // MiLMMT (REPORT_speedup.md): 4 threads (KHÔNG SMT/HT) là điểm ngọt, ctx 2048 đủ cho dịch câu.
-  const t   = threads || 4;
+  // MiLMMT decode NGHẼN BĂNG THÔNG RAM (đọc ~1GB trọng số/token). Benchmark thật trên Core Ultra 5 225H +
+  // llama build 9585 (2026-06): generation tok/s tăng theo thread tới ~t8 (t4=42, t6=48, t8=49.5) rồi CHỮNG ở
+  // ~50GB/s eff-BW (t12 TỤT); pin P-core LÀM TỆ (scheduler tự xếp tốt hơn). Vì memory-bound nên chạy ĐỒNG THỜI
+  // với STT (6 thread) gần như KHÔNG đua (t8+STT vẫn 47.8). → máy ≥12 luồng dùng t6 (+13-15%, vẫn chừa core cho
+  // STT); máy nhỏ giữ 4 (tránh oversubscribe). (Thay con số 4 cũ của REPORT_speedup — đo lại trên build/máy này.)
+  const t   = threads || ((os.cpus() || []).length >= 12 ? 6 : 4);
   const ctx = ctxSize || 2048;
   const gpuLayers = (ngl !== undefined) ? ngl : (variant === 'cpu' ? 0 : 99);
   const onGpu = gpuLayers > 0;
