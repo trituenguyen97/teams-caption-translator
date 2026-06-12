@@ -702,6 +702,26 @@ async function translateOnline(text) {
   return text;
 }
 
+// ── Dịch PARTIAL (preview câu ĐANG nói, cho STT streaming) ────────────────────────────────────────
+// CHỈ provider 'local' (MiLMMT concurrency=1 ~500ms → trễ tới endpoint là rõ rệt → đáng dịch sớm).
+// Provider 'online' BỎ QUA: Google/MS đã nhanh + free endpoint dễ dính rate-limit (429) nếu spam mỗi clause
+// → để dịch ở endpoint là đủ. Partial KHÔNG đụng TM cache (tránh nhiễm bản dở), KHÔNG fallback Google (giảm
+// tải), QE-gate ẩn kết quả ngờ. Trả null = "đừng hiện partial lúc này" (caller giữ nguyên bản đang hiển thị).
+async function translatePartial(text) {
+  if (state.provider !== 'local') return null;
+  if (_running > 0) return null;        // endpoint/queue đang dịch (local concurrency=1) → BỎ partial: tránh 2 call
+                                        // MiLMMT chồng lên server 1-luồng (làm trễ endpoint) + đua ghi _lastMilmmtQE.
+  const t = (text || '').trim();
+  if (t.length < 2) return null;
+  const instant = lookupPhrase(t);
+  if (instant) return instant;                          // câu xã giao có sẵn → dùng ngay (đã chuẩn)
+  const out = await translateLocalMiLMMT(t, state.targetLang);   // set _lastMilmmtQE; tự cooldown nếu server chết
+  const myQE = _lastMilmmtQE;           // chụp NGAY (không await xen giữa) → QE của ĐÚNG call này, không bị call khác ghi đè
+  if (!out || out === t || isLLMRefusal(out, t) || hasUntranslatedCJK(out)) return null;
+  if (myQE >= QE_THRESHOLD) return null;                // ngờ cao → đợi bản tốt hơn (không phun rác lên màn)
+  return out;
+}
+
 // ── Translation Queue ─────────────────────────────────
 const _queue = [];
 let _running = 0;
@@ -746,7 +766,7 @@ function drainQueue() {
 module.exports = {
   LANG_NAMES, LANG_LABELS, PROV_NAMES,
   lookupPhrase, isLLMRefusal, hasUntranslatedCJK, preprocessText,
-  translateText, enqueueTranslate,
+  translateText, enqueueTranslate, translatePartial,
   translateGoogleFree,
   translateViaEdge, translateViaTeamsToken,
   storeTeamsToken, parseJwtAudience,

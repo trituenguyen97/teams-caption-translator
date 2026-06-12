@@ -1399,7 +1399,7 @@
     }
 
     // ── Caption: hiển/cập nhật entry (pending rồi được dịch) ──
-    api.onCaptionLive(({ id, author, original, translated, ts, tsMs }) => {
+    api.onCaptionLive(({ id, author, original, translated, ts, tsMs, isPartial }) => {
       listEl.querySelector('.empty, .hint-banner')?.remove();
 
       const isPending  = translated === '…';
@@ -1407,7 +1407,9 @@
 
       // Cập nhật captionData cho summary (giữ tsMs lần đầu để tính duration meeting) — LUÔN làm,
       // kể cả khi node DOM đã bị evict, để export/summary không mất dòng.
-      if (!isPending) {
+      // isPartial (preview dịch streaming, chưa chốt) → KHÔNG lưu: tránh export dính bản dịch partial chất lượng
+      // thấp khi endpoint chưa kịp trả. Bản chốt authoritative (không isPartial) sẽ ghi đè entry này.
+      if (!isPending && !isPartial) {
         const prev = captionData.get(id);
         captionData.set(id, {
           author, original, translated,
