@@ -129,17 +129,17 @@ function flushStreaming() {
 // ── NHÁNH NEMOTRON STREAMING NATIVE (5-in-1) ─────────────────────────────────────────────────────────
 // Cache-aware FastConformer + RNN-T: feed PCM dần vào session (giữ state), nguồn mọc dần ĐƠN ĐIỆU mỗi
 // chunk (~560ms). CHỐT CÂU theo (a) DẤU KẾT CÂU native (。．.!?！？ — cắt run-on dài như Live Captions) HOẶC
-// (b) TRAILING-SILENCE 0.8s / max-length. DỊCH CHỈ KHI CHỐT CÂU (không dịch streaming — MiLMMT trên CPU
-// nạp token chậm, dịch dở làm giật + tốn CPU của STT). THAY pseudo-stream offline+VAD: KHÔNG VAD/re-decode.
+// (b) HYPOTHESIS NGỪNG MỌC ~1s (không ra token mới = ngừng nói) / max-length. DỊCH CHỈ KHI CHỐT CÂU (không
+// dịch streaming — MiLMMT trên CPU nạp token chậm, dịch dở làm giật + tốn CPU của STT). KHÔNG VAD/re-decode.
+// Endpoint đo bằng AUDIO-SAMPLES "kể từ token mới cuối" (KHÔNG dùng RMS): độc lập âm lượng → người nói nhỏ /
+// mic xa / clip lặng vẫn chốt đúng (RMS 0.008 cũ bỏ sót audio nhỏ). Ngưỡng > 1 chunk (8960) để không cắt giữa câu.
 let _nemo = null, _nemoLang = null, _nemoLiveId = null, _nemoLiveText = '';
 let _nemoQ = [], _nemoPumping = false;
-let _nemoSilence = 0, _nemoUttLen = 0, _nemoSpoke = false;   // đếm sample im lặng đuôi + độ dài câu + đã có tiếng?
+let _nemoNoGrow = 0, _nemoUttLen = 0, _nemoGrew = false;   // samples kể từ lần hypothesis mọc cuối + độ dài câu + đã từng mọc?
 let _nemoCommittedText = '';   // phần hypothesis của utterance hiện tại ĐÃ chốt (đã thành caption riêng theo dấu câu)
 const _NEMO_SR = 16000;
-const _NEMO_SIL_END = Math.floor(_NEMO_SR * 0.8);   // im lặng ≥0.8s SAU khi có tiếng → chốt câu (snappy như LC)
+const _NEMO_NOGROW = 16000;                         // ngừng mọc ≥1.0s audio (>chunk 0.56s + frame) → chốt câu
 const _NEMO_MAX_UTT = Math.floor(_NEMO_SR * 15);    // câu quá dài (không có dấu kết câu) → chốt chống run-on
-const _NEMO_RMS = 0.008;                            // ngưỡng "có tiếng" cho endpoint (≈ stt.hasSpeech)
-const _SENT_MIN_REAL = 2;                           // ≥2 ký tự chữ/số mới coi là 1 câu (tránh tách trên "。" lẻ)
 
 // Vị trí dấu KẾT CÂU ĐẦU TIÊN trong s (。！？．!?). ASCII '.' BỎ QUA nếu là số thập phân (\d.\d). -1 nếu không có.
 function _firstSentenceEnd(s) {
@@ -156,11 +156,10 @@ function _ensureNemo() {
   if (_nemo && _nemoLang === lang) return _nemo;
   _nemo = stt.createNemotronStream();   // null nếu model chưa nạp / không phải nemotron
   _nemoLang = lang;
-  _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = ''; _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
+  _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = ''; _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
   if (_nemo) console.log('[audio-stt] Nemotron streaming session:', lang);
   return _nemo;
 }
-function _frameRms(s) { let sum = 0; for (let i = 0; i < s.length; i++) sum += s[i] * s[i]; return Math.sqrt(sum / s.length); }
 
 // Chốt 1 CÂU: entry (liveId nếu là entry đang sống, else mới) → "đang dịch…" → enqueueTranslate (cascade/TM/QE
 // đầy đủ) → bản dịch THẬT. KHÔNG isPartial (vào captionData/export). Lọc ảo giác + dedup câu trùng cửa sổ ngắn.
@@ -208,13 +207,13 @@ async function _pumpNemo() {
       if (state.audioPaused) continue;   // đã ⏹ → drain hàng đợi như no-op (flushStreaming lo chốt câu dở)
       const sess = _ensureNemo();
       if (!sess) { _nemoQ.length = 0; break; }   // chưa tạo được session → bỏ phần còn lại (model chưa sẵn)
-      const rms = _frameRms(samples);
       try { await sess.accept(samples); } catch (e) { console.warn('[audio-stt] nemo accept lỗi:', e.message); continue; }
       if (state.audioPaused) continue;
       // nguồn mọc → CHỐT các câu hoàn chỉnh (dấu kết câu) thành caption riêng, hiện phần ĐUÔI DỞ làm partial sống.
       const text = sess.text().trim();
-      if (text && text !== _nemoLiveText) {
-        _nemoLiveText = text;
+      const grew = text && text !== _nemoLiveText;
+      if (grew) {
+        _nemoLiveText = text; _nemoNoGrow = 0; _nemoGrew = true;
         let pendingRaw = text.startsWith(_nemoCommittedText) ? text.slice(_nemoCommittedText.length) : (_nemoCommittedText = '', text);
         pendingRaw = _commitSentencesIn(pendingRaw);   // chốt+dịch mọi câu đã xong; còn lại = đuôi dở
         const pending = pendingRaw.trim();
@@ -222,11 +221,12 @@ async function _pumpNemo() {
           if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
           send('caption-live', { id: _nemoLiveId, author: 'STT', original: pending, translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
         }
+      } else {
+        _nemoNoGrow += samples.length;   // không ra token mới → cộng dồn audio "im" (độc lập âm lượng)
       }
-      // theo dõi tiếng/im lặng đuôi cho endpoint
-      if (rms >= _NEMO_RMS) { _nemoSpoke = true; _nemoSilence = 0; } else { _nemoSilence += samples.length; }
       _nemoUttLen += samples.length;
-      if ((_nemoSpoke && _nemoSilence >= _NEMO_SIL_END) || _nemoUttLen >= _NEMO_MAX_UTT) {
+      // endpoint: đã từng mọc + ngừng mọc ≥1s (ngừng nói), HOẶC câu quá dài
+      if ((_nemoGrew && _nemoNoGrow >= _NEMO_NOGROW) || _nemoUttLen >= _NEMO_MAX_UTT) {
         let fin = '';
         try { fin = (await sess.finish()).trim(); } catch {}
         let tailRaw = fin.startsWith(_nemoCommittedText) ? fin.slice(_nemoCommittedText.length) : fin;
@@ -234,7 +234,7 @@ async function _pumpNemo() {
         if (tailRaw.trim()) _commitNemoSentence(tailRaw.trim(), _nemoLiveId);   // chốt đuôi dở (không dấu câu) = caption cuối
         _nemoLiveId = null; _nemoCommittedText = ''; _nemoLiveText = '';
         try { sess.reset(); } catch {}
-        _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
+        _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
       }
     }
   } finally { _nemoPumping = false; }
@@ -468,7 +468,7 @@ function resetSegmentation() {
   // Nemotron: bỏ session cũ → phiên mới _ensureNemo tạo lại sạch (đổi ngôn ngữ cũng tái tạo). Xoá trackers + queue.
   if (_nemo) { try { _nemo.reset(); } catch {} }
   _nemo = null; _nemoLang = null; _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = '';
-  _nemoQ.length = 0; _nemoSilence = 0; _nemoUttLen = 0; _nemoSpoke = false;
+  _nemoQ.length = 0; _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
 }
 
 // Không còn server Python — giữ tên export cho main.js (no-op).
