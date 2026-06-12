@@ -11,6 +11,10 @@
  */
 const state = require('./state');
 const { enqueueTranslate, preprocessText } = require('./translation');
+const { jaItn } = require('./ja-itn');   // ITN tiếng Nhật: số kanji → chữ số (Nemotron KHÔNG ITN native cho ja)
+// Chuyển số kanji→chữ số cho nguồn TIẾNG NHẬT (2026年/11.8%/1763億円) — áp cho cả hiển thị lẫn dịch (MiLMMT đọc
+// chữ số chuẩn hơn: 十一点八→11.8 tránh dịch nhầm "11/8"). Ngôn ngữ khác giữ nguyên.
+function _jaNum(s) { try { return stt.currentLang() === 'ja' ? jaItn(s) : s; } catch { return s; } }
 const { timestamp } = require('./caption-service');
 const stt = require('./stt');
 // Nemotron 5-in-1 ra dấu câu + viết hoa + ITN NATIVE → KHÔNG còn module punctuate-*/ja-itn/ko-fix per-language.
@@ -166,8 +170,9 @@ function _ensureNemo() {
 // Chốt 1 CÂU: entry (liveId nếu là entry đang sống, else mới) → "đang dịch…" → enqueueTranslate (cascade/TM/QE
 // đầy đủ) → bản dịch THẬT. KHÔNG isPartial (vào captionData/export). Lọc ảo giác + dedup câu trùng cửa sổ ngắn.
 function _commitNemoSentence(sentence, liveId) {
-  const sRaw = (sentence || '').trim();
+  let sRaw = (sentence || '').trim();
   if (!sRaw || stt.isHallucination(sRaw)) return;
+  sRaw = _jaNum(sRaw);   // ja: số kanji → chữ số (cho cả caption hiển thị + bản dịch). Khác ja: nguyên văn.
   const now = Date.now();
   const norm = sRaw.toLowerCase().replace(/\s+/g, ' ').trim();
   if (!liveId && _isDupRecent(norm, now)) return;   // entry mới + trùng gần đây → bỏ (entry đang sống thì luôn chốt)
@@ -221,7 +226,7 @@ async function _pumpNemo() {
         const pending = pendingRaw.trim();
         if (pending) {   // đuôi câu đang nói dở → hiện partial (translated:'' = chưa dịch; dịch khi câu chốt)
           if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
-          send('caption-live', { id: _nemoLiveId, author: 'STT', original: pending, translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
+          send('caption-live', { id: _nemoLiveId, author: 'STT', original: _jaNum(pending), translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
         }
       } else {
         _nemoNoGrow += samples.length;   // không ra token mới → cộng dồn audio "im" (độc lập âm lượng)
