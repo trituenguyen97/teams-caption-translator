@@ -42,11 +42,15 @@ async function createNemotron(dir, opts = {}) {
   const BLANK = cfg.blank_id;
   // max_symbols/frame: hạ 10→4 (NeMo mặc định 10 cho offline; streaming chunk nhỏ không cần, giảm cơ hội "xả" lặp/collapse).
   const MAXSYM = opts.maxSymbols || 4;
-  const so = { intraOpNumThreads: opts.threads || 4, interOpNumThreads: 1, executionMode: 'sequential' };
+  // Encoder (nặng ~88% thời gian) đa luồng; decoder(LSTM)/joint TÍ HON nhưng gọi MỖI TOKEN → để 1 thread mỗi
+  // cái: 3 session × 4 thread = ~12 thread oversubscribe CPU hybrid (đo: RTF ~1.0, 6.7 core) → tranh chấp, CHẬM.
+  // enc(4)+dec(1)+joint(1)=6 thread → hết oversubscribe, RTF về ~0.4-0.5 (đủ headroom cho streaming real-time).
   const O = ort();
-  const enc = await O.InferenceSession.create(path.join(dir, 'encoder.onnx'), so);
-  const dec = await O.InferenceSession.create(path.join(dir, 'decoder.onnx'), so);
-  const joint = await O.InferenceSession.create(path.join(dir, 'joint.onnx'), so);
+  const soEnc = { intraOpNumThreads: opts.threads || 4, interOpNumThreads: 1, executionMode: 'sequential' };
+  const soSmall = { intraOpNumThreads: 1, interOpNumThreads: 1, executionMode: 'sequential' };
+  const enc = await O.InferenceSession.create(path.join(dir, 'encoder.onnx'), soEnc);
+  const dec = await O.InferenceSession.create(path.join(dir, 'decoder.onnx'), soSmall);
+  const joint = await O.InferenceSession.create(path.join(dir, 'joint.onnx'), soSmall);
   const vocab = _buildVocab(path.join(dir, 'vocab.txt'));
   // ── Chống script-collapse (greedy + quantization + low-resource hay phun chữ SAI script lặp, vd zh→"ตาาาา").
   // Mask token ngoài-script TRƯỚC argmax: cấm Thái/Cyrillic mọi lang; cấm Hangul (trừ ko); cấm Kana (trừ ja). Han luôn cho. ──
