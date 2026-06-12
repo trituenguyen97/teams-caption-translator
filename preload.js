@@ -43,11 +43,4 @@ contextBridge.exposeInMainWorld('__caption', {
   startLocalServer:    (opts)    => ipcRenderer.invoke('local-llm-start', opts || {}),
   stopLocalServer:     ()        => ipcRenderer.invoke('local-llm-stop'),
   onLocalProgress:     cb        => ipcRenderer.on('local-llm-progress', (_, d) => cb(d)),
-
-  // Windows Live Captions STT models (source = system/mic)
-  lcAvailable:         ()        => ipcRenderer.invoke('stt-lc-available'),
-  checkSttModels:      (o)       => ipcRenderer.invoke('stt-lc-check-models', o || {}),
-  downloadSttModels:   (o)       => ipcRenderer.invoke('stt-lc-download-models', o || {}),
-  cancelSttDownload:   ()        => ipcRenderer.invoke('stt-lc-cancel-download'),
-  onSttDownloadProgress: cb      => ipcRenderer.on('stt-lc-progress', (_, d) => cb(d)),
 });

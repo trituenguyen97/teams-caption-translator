@@ -1154,20 +1154,6 @@
         <span data-i18n="settings.chooseMic">Chọn Microphone</span>
         <select id="s-mic-device"></select>
       </div>
-      <div class="menu-row" id="s-stt-dl-row" style="display:none; flex-direction:column; align-items:stretch; gap:6px">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px">
-          <span>Model STT (Live Captions)</span>
-          <div style="display:flex; gap:6px">
-            <button id="s-stt-dl-btn" style="display:none; padding:3px 10px; border-radius:6px; cursor:pointer; border:1px solid rgba(127,127,127,.4); background:transparent; color:inherit; font-size:12px">Tải model</button>
-            <button id="s-stt-dl-all-btn" title="Tải model Live Captions cho cả 4 ngôn ngữ (en/ja/ko/zh) trong một lần" style="display:none; padding:3px 10px; border-radius:6px; cursor:pointer; border:1px solid rgba(127,127,127,.4); background:transparent; color:inherit; font-size:12px">Tải tất cả (4)</button>
-          </div>
-        </div>
-        <div id="s-stt-dl-status" style="font-size:11px; opacity:.7"></div>
-        <div id="s-stt-dl-bar-wrap" style="display:none; height:6px; background:rgba(127,127,127,.25); border-radius:3px; overflow:hidden">
-          <div id="s-stt-dl-bar" style="height:100%; width:0%; background:#3aa776; transition:width .25s"></div>
-        </div>
-      </div>
-
       <div class="menu-sep"></div>
 
       <!-- Nhóm: Dịch thuật (dịch vụ) — ngôn ngữ nguồn/đích đã ra status bar cạnh ▶ -->
@@ -1489,12 +1475,6 @@
     //  - system/mic: chọn tay → hiện cờ _srcLang, bấm mở picker.
     function applyCaptureUI(source) {
       sMicRow.style.display = source === 'mic' ? '' : 'none';
-      const sttRow = document.getElementById('s-stt-dl-row');
-      if (sttRow) {
-        const isAudio = source === 'system' || source === 'mic';
-        sttRow.style.display = isAudio ? '' : 'none';
-        if (isAudio && typeof refreshSttModels === 'function') refreshSttModels();
-      }
       const lqSrcEl = document.getElementById('lq-src');
       if (lqSrcEl) {
         const teams = source === 'teams';
@@ -1547,94 +1527,6 @@
       api.saveSettings({ micDeviceId: sMicDevice.value });
     });
 
-    // ── Tải model STT của Windows Live Captions (source = system/mic; en/ja/ko/zh — tiếng Việt dùng STT nội bộ) ──
-    const sSttDlRow     = document.getElementById('s-stt-dl-row');
-    const sSttDlBtn     = document.getElementById('s-stt-dl-btn');
-    const sSttDlAllBtn  = document.getElementById('s-stt-dl-all-btn');
-    const sSttDlStatus  = document.getElementById('s-stt-dl-status');
-    const sSttDlBarWrap = document.getElementById('s-stt-dl-bar-wrap');
-    const sSttDlBar     = document.getElementById('s-stt-dl-bar');
-    let _sttDling = false;
-
-    // app source lang → LC locale (vi KHÔNG có trong Live Captions → dùng STT cục bộ).
-    const LC_LOCALE = { en: 'en-US', ja: 'ja-JP', ko: 'ko-KR', 'zh-CN': 'zh-CN' };
-    // CHỈ quan tâm model của NGÔN NGỮ NGUỒN hiện tại (không phải cả 4) — tải model LC là TUỲ CHỌN: không tải thì
-    // vẫn chạy STT cục bộ (sherpa-onnx). Có model → play dùng Live Captions gốc của Windows.
-    async function refreshSttModels() {
-      if (!sSttDlRow || _sttDling) return;
-      try {
-        const avail = await api.lcAvailable();
-        const loc = LC_LOCALE[_srcLang];
-        // Nút "Tải tất cả (4)" chỉ hiện khi LC khả dụng (tải cả 4 trong 1 lần; bỏ qua locale đã có).
-        if (sSttDlAllBtn) { sSttDlAllBtn.style.display = avail ? '' : 'none'; sSttDlAllBtn.disabled = false; }
-        if (!avail || !loc) {
-          sSttDlStatus.textContent = !avail
-            ? 'Windows Live Captions không khả dụng (cần Windows 11) — đang dùng STT cục bộ (sherpa-onnx).'
-            : 'Ngôn ngữ nguồn này dùng STT cục bộ (sherpa-onnx) — không cần model Live Captions.';
-          if (sSttDlBtn) sSttDlBtn.style.display = 'none';
-          return;
-        }
-        const { installed = [] } = (await api.checkSttModels({ locales: [loc] })) || {};
-        if (installed.includes(loc)) {
-          sSttDlStatus.textContent = `Đã có model Live Captions cho ${loc}. (Có thể "Tải tất cả" để dùng nhiều ngôn ngữ.)`;
-          if (sSttDlBtn) sSttDlBtn.style.display = 'none';
-        } else {
-          sSttDlStatus.textContent = `Chưa có model Live Captions cho ${loc} — tải để dùng caption gốc của Windows (tuỳ chọn; không tải vẫn chạy STT cục bộ).`;
-          if (sSttDlBtn) { sSttDlBtn.style.display = ''; sSttDlBtn.disabled = false; }
-        }
-      } catch (e) {}
-    }
-
-    // Tải model cho danh sách locale (1 hoặc cả 4) — chung cho nút "Tải model" và "Tải tất cả".
-    // Tải TẤT CẢ trong MỘT lần chạy (script lặp tuần tự, ~12-15s/locale sau lần khởi tạo LC đầu). KHÔNG chạy
-    // song song được: LC là single-instance + dùng chung registry CaptionLanguage → 4 tiến trình sẽ xung đột.
-    async function runDownload(locales, labelText) {
-      if (_sttDling || !locales || !locales.length) return;
-      _sttDling = true;
-      if (sSttDlBtn) sSttDlBtn.disabled = true;
-      if (sSttDlAllBtn) sSttDlAllBtn.disabled = true;
-      sSttDlBarWrap.style.display = ''; sSttDlBar.style.width = '0%';
-      sSttDlStatus.textContent = `Đang tải model ${labelText}…`;
-      let r = null;
-      try { r = await api.downloadSttModels({ locales }); } catch (e) { r = { ok: false, error: e.message }; }
-      _sttDling = false;
-      if (sSttDlAllBtn) sSttDlAllBtn.disabled = false;
-      sSttDlBarWrap.style.display = 'none';
-      await refreshSttModels();
-      if (r && !r.ok && r.error) {
-        sSttDlStatus.textContent = (r.error === 'already-running')
-          ? 'Đang có tiến trình tải model chạy — chờ xong rồi thử lại.'
-          : 'Lỗi tải model: ' + r.error;
-      }
-    }
-
-    if (sSttDlBtn) sSttDlBtn.addEventListener('click', () => {
-      const loc = LC_LOCALE[_srcLang];
-      if (!loc) { refreshSttModels(); return; }
-      runDownload([loc], loc);
-    });
-    if (sSttDlAllBtn) sSttDlAllBtn.addEventListener('click', () => {
-      runDownload(['en-US', 'ja-JP', 'ko-KR', 'zh-CN'], 'cả 4 ngôn ngữ');
-    });
-
-    api.onSttDownloadProgress((p) => {
-      if (!sSttDlBar || !p) return;
-      if (typeof p.overall === 'number') {
-        if (sSttDlBarWrap) sSttDlBarWrap.style.display = '';
-        sSttDlBar.style.width = p.overall + '%';
-        // Lần đầu LC phải tự khởi tạo (consent + setup) ~30-60s TRƯỚC khi % tải nhảy → hiện rõ "đang chuẩn bị"
-        // để 0% lâu KHÔNG bị tưởng treo. Khi đã 'downloading' mới hiện %.
-        if (p.status === 'downloading' || p.overall > 0) {
-          sSttDlStatus.textContent = `Đang tải model... ${p.overall}%` + (p.lang ? ` — ${p.lang}` : '');
-        } else {
-          sSttDlStatus.textContent = 'Đang chuẩn bị Live Captions… (lần đầu có thể mất ~1 phút)';
-        }
-      }
-      if (p.t === 'err') sSttDlStatus.textContent = 'Lỗi tải model: ' + (p.m || '');
-      if (p.t === 'done' && !_sttDling) { sSttDlBarWrap.style.display = 'none'; refreshSttModels(); }
-    });
-
-
     // ── Header: đổi ngôn ngữ giao diện (🌐) + chế độ sáng/tối (🌙/☀️) — áp dụng + lưu NGAY (toggle trực tiếp) ──
     // ── Header menu (⋮): gộp ngôn ngữ dịch / ngôn ngữ app / theme / export / settings ──
     const themeBtn  = document.getElementById('theme-btn');
@@ -1684,7 +1576,6 @@
     // Source: ép chọn tay (system/mic) → lưu srcLang (main feed thẳng vào Whisper). Teams thì auto (disable).
     buildFlagRow(lqSrcPop, LANG_FLAG_ORDER, (code) => {
       _srcLang = code; setQuickFlag(lqSrc, code); lqSrcPop.classList.remove('open'); api.saveSettings({ srcLang: code });
-      try { refreshSttModels(); } catch {}   // đổi ngôn ngữ nguồn → cập nhật trạng thái model LC của lang đó
     });
     buildFlagRow(lqTgtPop, LANG_FLAG_ORDER, (code) => {
       setQuickFlag(lqTgt, code); lqTgtPop.classList.remove('open'); api.setLang(code);

@@ -3,6 +3,12 @@
  * Electron app lifecycle + createWindow + startService loop.
  * Táº¥t cáº£ logic Ä‘Ã£ Ä‘Æ°á»£c tÃ¡ch sang src/ modules.
  */
+// ⚠️ BẮT BUỘC LOAD ĐẦU TIÊN — TRƯỚC MỌI require src/ (đặc biệt trước sherpa-onnx-node).
+// Windows chỉ giữ MỘT onnxruntime.dll mỗi process: nếu sherpa (bundle ORT riêng) load trước thì onnxruntime-node
+// load SAU sẽ chết "The operating system cannot run %1" → punctuate-ja (dấu câu Nhật) + stt-moonshine (STT Hàn)
+// chết lặng lẽ. Load onnxruntime-node TRƯỚC thì cả hai runtime cùng sống (đã verify). ĐỪNG chèn require lên trên dòng này.
+try { require('onnxruntime-node'); } catch (e) { console.warn('[main] onnxruntime-node load lỗi (punctuation ja + STT ko sẽ tắt):', e.message); }
+
 const { app, BrowserWindow, desktopCapturer, Menu, nativeTheme } = require('electron');
 const path = require('path');
 const state = require('./src/state');
@@ -183,15 +189,11 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopSTTServer();
   try { stopUiaHelper(); } catch {}
-  try { require('./src/win-livecaptions').shutdown(); } catch {}   // tắt cửa sổ LC ẩn (không để treo)
   try { require('./src/local-llm').stopServer(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   try { stopUiaHelper(); } catch {}
-  try { require('./src/win-livecaptions').shutdown(); } catch {}
-  // Kill ĐỒNG BỘ để chắc chắn LiveCaptions.exe (đang ẩn) chết HẲN trước khi app thoát (spawn async có thể bị cắt giữa chừng).
-  try { require('child_process').execSync('taskkill /F /IM LiveCaptions.exe', { stdio: 'ignore', windowsHide: true }); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
 });

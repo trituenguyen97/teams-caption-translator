@@ -11,6 +11,8 @@
     "build": "electron-builder"
   },
   "dependencies": {
+    "@geolonia/japanese-numeral": "^1.0.2",
+    "onnxruntime-node": "^1.26.0",
     "puppeteer-core": "^24.42.0",
     "sherpa-onnx-node": "^1.13.2"
   },
@@ -44,7 +46,8 @@
     ],
     "asarUnpack": [
       "node_modules/sherpa-onnx-node/**",
-      "node_modules/sherpa-onnx-*/**"
+      "node_modules/sherpa-onnx-*/**",
+      "node_modules/onnxruntime-node/**"
     ],
     "extraResources": [
       {

@@ -5,10 +5,11 @@
  * (b) máy KHÔNG có Live Captions, hoặc (c) LC chưa tải model → định tuyến rơi xuống đây.
  *
  * THAY Whisper (offline đa ngữ, cắt câu bằng VAD → có trễ) bằng BẢN ĐỒ MODEL THEO NGÔN NGỮ:
- *   - zh-CN / en → ONLINE streaming Paraformer bilingual zh-en (FunASR) → caption mọc dần real-time như Live Captions.
- *   - ko        → ONLINE streaming Zipformer transducer (Hàn).
- *   - ja        → OFFLINE Zipformer transducer (ReazonSpeech) + VAD (không có model streaming Nhật).
- *   - vi        → OFFLINE Zipformer transducer (Việt) + VAD (không có model streaming Việt).
+ *   - zh-CN → ONLINE streaming Paraformer bilingual zh-en (FunASR) → caption mọc dần real-time như Live Captions.
+ *   - en    → ONLINE streaming Zipformer GigaSpeech (riêng tiếng Anh).
+ *   - ko    → OFFLINE Moonshine base-ko (onnxruntime-node, src/stt-moonshine.js) + VAD (không có streaming ko tốt).
+ *   - ja    → OFFLINE Zipformer transducer (ReazonSpeech) + VAD (không có model streaming Nhật).
+ *   - vi    → OFFLINE Zipformer transducer (Việt) + VAD (không có model streaming Việt).
  * Engine 'online' = OnlineRecognizer (đồng bộ, streaming, partial từng chunk). Engine 'offline' = OfflineRecognizer
  * (như Whisper cũ: transcribe trọn đoạn VAD). Model bundle ở bin/stt/<dir>/ (tải lúc build — xem fetch-stt-model.js).
  *
@@ -26,8 +27,11 @@ const os = require('os');
 //   kind:   'paraformer' (encoder+decoder) | 'transducer' (encoder+decoder+joiner)
 const MODELS = {
   'zh-CN': { dir: 'zh-en', engine: 'online',  kind: 'paraformer'  },
-  'en':    { dir: 'zh-en', engine: 'online',  kind: 'paraformer'  },   // dùng CHUNG model bilingual zh-en
-  'ko':    { dir: 'ko',    engine: 'online',  kind: 'transducer'  },
+  'en':    { dir: 'en',    engine: 'online',  kind: 'transducer'  },   // streaming Zipformer English (GigaSpeech 2023-06-21) — RIÊNG, chính xác hơn HẲN paraformer zh-en (vốn là model Trung, nghe Anh rất kém + lọt chữ Hán)
+  // ko: Moonshine base-ko (UsefulSensors, đơn ngữ 61M int8) qua onnxruntime-node — A/B 3 clip: ≈ Live Captions
+  // (đúng 김효재/윤석열/공영방송…), ĐÈ BẸP cả streaming-zipformer-ko (공룡방송…) lẫn offline-zipformer-ko (기모지…).
+  // Offline + VAD (không có streaming ko nào tốt, tới 06/2026). Xem src/stt-moonshine.js.
+  'ko':    { dir: 'ko',    engine: 'offline', kind: 'moonshine'   },
   'ja':    { dir: 'ja',    engine: 'offline', kind: 'transducer'  },
   'vi':    { dir: 'vi',    engine: 'offline', kind: 'transducer'  },
 };
@@ -57,9 +61,13 @@ function setLanguage(code) {
 }
 
 // Trả {dir, engine, kind, paths:{encoder,decoder,joiner?,tokens}} cho 1 ngôn ngữ, hoặc null nếu THIẾU file.
+// kind 'moonshine': bộ file khác (encoder_model_int8/decoder_model_merged_int8/tokenizer.json/config.json) — chỉ cần dir.
 function modelInfo(appLang) {
   const m = MODELS[appLang] || MODELS[DEFAULT_LANG];
   const d = path.join(sttRoot(), m.dir);
+  if (m.kind === 'moonshine') {
+    return require('./stt-moonshine').moonshineComplete(d) ? { ...m, paths: { dir: d } } : null;
+  }
   const encoder = path.join(d, 'encoder.onnx');
   const decoder = path.join(d, 'decoder.onnx');
   const joiner  = path.join(d, 'joiner.onnx');
@@ -82,8 +90,8 @@ function _modelConfig(info) {
   return { ...base, transducer: { encoder: info.paths.encoder, decoder: info.paths.decoder, joiner: info.paths.joiner } };
 }
 
-// ── OFFLINE (ja/vi): OfflineRecognizer transducer — transcribe trọn 1 đoạn VAD (như Whisper cũ) ──────
-let _offRec = null, _offLoading = null, _offDir = '';
+// ── OFFLINE (ja/vi: sherpa transducer; ko: Moonshine/onnxruntime) — transcribe trọn 1 đoạn VAD ──────
+let _offRec = null, _offLoading = null, _offDir = '', _offKind = '';
 async function ensureReady() {
   const info = modelInfo(_lang());
   if (!info || info.engine !== 'offline') return false;   // online không dùng đường này
@@ -92,12 +100,17 @@ async function ensureReady() {
   _offRec = null;
   _offLoading = (async () => {
     try {
-      const rec = await sherpa().OfflineRecognizer.createAsync({
-        featConfig: { sampleRate: 16000, featureDim: 80 },
-        modelConfig: _modelConfig(info),
-      });
-      _offRec = rec; _offDir = info.dir;
-      console.log('[stt] offline recognizer sẵn sàng:', info.dir);
+      let rec;
+      if (info.kind === 'moonshine') {
+        rec = await require('./stt-moonshine').createMoonshine(info.paths.dir, { threads: 2 });
+      } else {
+        rec = await sherpa().OfflineRecognizer.createAsync({
+          featConfig: { sampleRate: 16000, featureDim: 80 },
+          modelConfig: _modelConfig(info),
+        });
+      }
+      _offRec = rec; _offDir = info.dir; _offKind = info.kind;
+      console.log('[stt] offline recognizer sẵn sàng:', info.dir, '(' + info.kind + ')');
       return true;
     } catch (e) { console.warn('[stt] load offline lỗi:', e.message); _offRec = null; return false; }
     finally { _offLoading = null; }
@@ -105,7 +118,7 @@ async function ensureReady() {
   return _offLoading;
 }
 
-// ── ONLINE (zh/en/ko): OnlineRecognizer streaming — đồng bộ, KHÔNG createAsync/decodeAsync ────────────
+// ── ONLINE (zh/en): OnlineRecognizer streaming — đồng bộ, KHÔNG createAsync/decodeAsync ────────────
 const _onRecCache = new Map();   // dir → OnlineRecognizer (tái dùng giữa các phiên cùng ngôn ngữ)
 function _buildOnline(info) {
   if (_onRecCache.has(info.dir)) return _onRecCache.get(info.dir);
@@ -161,7 +174,10 @@ function createOnlineSession() {
 // ── VAD (chỉ dùng cho nhánh OFFLINE ja/vi) — cắt câu theo khoảng lặng (Silero) ─────────────────────
 //   threshold/minSilence/minSpeech/maxSpeech: tinh chỉnh theo ngôn ngữ. Thiếu silero_vad.onnx → fallback chunk.
 const STT_CONFIG = {
-  ja:      { threshold: 0.6, minSilenceDuration: 0.65, minSpeechDuration: 0.3,  maxSpeechDuration: 10 },
+  // maxSpeech 8s (hạ từ 12): transducer offline ReazonSpeech RỚT phần giữa/đuôi khi đoạn >~10s (đo A/B vs Live
+  // Captions: đoạn 13.7s chỉ phun ~5s text). 8s thu hồi phần lớn nội dung rớt mà ít cắt-giữa-từ hơn 6-7s.
+  ja:      { threshold: 0.5, minSilenceDuration: 0.55, minSpeechDuration: 0.2,  maxSpeechDuration: 8 },
+  ko:      { threshold: 0.5, minSilenceDuration: 0.5,  minSpeechDuration: 0.2,  maxSpeechDuration: 8 },   // Moonshine offline (config đã A/B vs LC)
   vi:      { threshold: 0.5, minSilenceDuration: 0.4,  minSpeechDuration: 0.25, maxSpeechDuration: 8 },
   default: { threshold: 0.5, minSilenceDuration: 0.4,  minSpeechDuration: 0.25, maxSpeechDuration: 8 },
 };
@@ -227,10 +243,14 @@ async function transcribe(samples) {
   if (!hasSpeech(samples)) return '';
   let text = '';
   try {
-    const stream = _offRec.createStream();
-    stream.acceptWaveform({ sampleRate: 16000, samples });
-    const r = await _offRec.decodeAsync(stream);   // decode off-thread → không nghẽn main
-    text = ((r && r.text) || '').trim();
+    if (_offKind === 'moonshine') {
+      text = ((await _offRec.transcribe(samples)) || '').trim();   // Moonshine: decode loop riêng (onnxruntime)
+    } else {
+      const stream = _offRec.createStream();
+      stream.acceptWaveform({ sampleRate: 16000, samples });
+      const r = await _offRec.decodeAsync(stream);   // decode off-thread → không nghẽn main
+      text = ((r && r.text) || '').trim();
+    }
   } catch (e) { console.warn('[stt] decode lỗi:', e.message); return ''; }
   if (!text || isHallucination(text)) return '';
   return text;

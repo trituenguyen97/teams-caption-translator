@@ -31,11 +31,19 @@ const MODELS = [
     { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'decoder.int8.onnx'), as: 'decoder.onnx' },
     { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'tokens.txt'),         as: 'tokens.txt' },
   ] },
-  { dir: 'ko', desc: 'streaming Zipformer Korean [online ko]', files: [
-    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'encoder-epoch-99-avg-1.int8.onnx'), as: 'encoder.onnx' },
-    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'decoder-epoch-99-avg-1.int8.onnx'), as: 'decoder.onnx' },
-    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'joiner-epoch-99-avg-1.int8.onnx'),  as: 'joiner.onnx' },
-    { url: HF('k2-fsa/sherpa-onnx-streaming-zipformer-korean-2024-06-16', 'tokens.txt'),                       as: 'tokens.txt' },
+  { dir: 'en', desc: 'streaming Zipformer English GigaSpeech 2023-06-21 [online en]', files: [
+    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'encoder-epoch-99-avg-1.int8.onnx'), as: 'encoder.onnx' },
+    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'decoder-epoch-99-avg-1.int8.onnx'), as: 'decoder.onnx' },
+    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'joiner-epoch-99-avg-1.int8.onnx'),  as: 'joiner.onnx' },
+    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'tokens.txt'),                       as: 'tokens.txt' },
+  ] },
+  // ko: Moonshine base-ko (đơn ngữ, int8 ~62MB) — chạy qua onnxruntime-node (src/stt-moonshine.js), KHÔNG phải sherpa
+  // (format ONNX transformers.js, sherpa không nạp). A/B: ≈ Live Captions, hơn hẳn zipformer-ko (cả streaming lẫn offline).
+  { dir: 'ko', desc: 'Moonshine base-ko (onnxruntime, offline+VAD) [ko]', files: [
+    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'onnx/encoder_model_int8.onnx'),        as: 'encoder_model_int8.onnx' },
+    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'onnx/decoder_model_merged_int8.onnx'), as: 'decoder_model_merged_int8.onnx' },
+    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'tokenizer.json'),                      as: 'tokenizer.json' },
+    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'config.json'),                        as: 'config.json' },
   ] },
   { dir: 'vi', desc: 'Zipformer Vietnamese [offline vi]', files: [
     { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'encoder-epoch-12-avg-8.int8.onnx'), as: 'encoder.onnx' },
@@ -52,6 +60,17 @@ const MODELS = [
     ] },
 ];
 const SILERO = { url: GH('silero_vad.onnx'), dest: path.join(OUT_DIR, 'silero_vad.onnx') };
+// Phục hồi dấu câu + VIẾT HOA tiếng Anh (chạy qua sherpa OnlinePunctuation) → bin/punct/en. Archive .tar.bz2 (tag
+// punctuation-models) gồm cả fp32 — rút model.int8.onnx (~7.5MB) + bpe.vocab. (en STT zipformer ra TOÀN HOA không dấu.)
+const PUNCT_EN_DIR = path.join(__dirname, '..', 'bin', 'punct', 'en');
+const PUNCT_EN = {
+  dir: 'punct-en', desc: 'English punctuation+truecasing (sherpa OnlinePunctuation int8)',
+  archive: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-online-punct-en-2024-08-06.tar.bz2',
+  pick: [
+    { as: 'model.int8.onnx', prefer: [/model\.int8\.onnx$/i] },
+    { as: 'bpe.vocab',       prefer: [/bpe\.vocab$/i] },
+  ],
+};
 
 function log(...a) { console.log('[fetch-stt-model]', ...a); }
 
@@ -145,5 +164,9 @@ function modelComplete(m, dir) {
   }
   if (!fs.existsSync(SILERO.dest)) { log('↓ silero_vad.onnx (VAD cho ja/vi)'); await download(SILERO.url, SILERO.dest); }
   else log('✓ silero_vad.onnx (đã có)');
-  log('xong → bin/stt/{' + MODELS.map(m => m.dir).join(',') + '} + silero_vad.onnx');
+  // En punctuation + truecasing → bin/punct/en (ja punct dựng riêng bằng scripts/export-punc-ja.py).
+  fs.mkdirSync(PUNCT_EN_DIR, { recursive: true });
+  if (modelComplete(PUNCT_EN, PUNCT_EN_DIR)) log('✓ punct/en — ' + PUNCT_EN.desc + ' (đã đủ)');
+  else { log('↓ punct/en — ' + PUNCT_EN.desc); await fetchArchiveModel(PUNCT_EN, PUNCT_EN_DIR); }
+  log('xong → bin/stt/{' + MODELS.map(m => m.dir).join(',') + '} + silero_vad.onnx + bin/punct/en');
 })().catch(e => { console.error('\n[fetch-stt-model] LỖI:', e.message); process.exit(1); });
