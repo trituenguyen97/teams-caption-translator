@@ -233,6 +233,10 @@ const JA_GLOSSARY = {
   'マイルストーン': 'milestone', 'プロジェクト': 'project', 'リソース': 'resource',
   'ステータス': 'status', 'バージョン': 'version', 'パフォーマンス': 'performance',
   'ブリッジ': 'Bridge (BrSE)', 'ブレッジ': 'Bridge (BrSE)',
+  // connection pool: MiLMMT dịch sai ("bồn chứa dữ liệu") kể cả nguồn sạch → ghim thuật ngữ EN. Cả ja (katakana/
+  // kanji) + zh giản/phồn (caption Trung). Người dùng tự thêm thuật ngữ team vào đây.
+  'コネクションプール': 'connection pool', '接続プール': 'connection pool',
+  '连接池': 'connection pool', '連接池': 'connection pool',
 };
 const _glossRe = new RegExp(
   Object.keys(JA_GLOSSARY).sort((a, b) => b.length - a.length)
@@ -321,27 +325,67 @@ function restoreITTerms(out, src) {
   return t;
 }
 
-// Sửa số bậc lớn 万/億/兆 DETERMINISTIC (offline): tự tính giá trị đúng từ nguồn rồi vá vào output —
-// mạnh hơn S7 (chỉ flag→Google) vì sửa offline + bắt cả ca model dùng SAI từ-bậc ("100 triệu" cho 10億).
-// CHỈ vá số đứng TRƯỚC đơn vị tiền (yên/đồng) để KHÔNG đụng ngày tháng/số đếm. Đã đo: 6/6 quyết định đúng.
-const _JP_MULT = { '百': 1e2, '千': 1e3, '万': 1e4, '億': 1e8, '兆': 1e12 };
-const _VN_SCALE = { 'nghìn': 1e3, 'ngàn': 1e3, 'triệu': 1e6, 'tỷ': 1e9, 'tỉ': 1e9 };
+// Sửa số bậc lớn 万/萬/億/亿/兆 DETERMINISTIC (offline): tính giá trị ĐÚNG từ nguồn rồi vá vào output. MiLMMT 1B
+// hay LỆCH BẬC khi đích là tiếng Việt (VI dùng nghìn/triệu/tỷ = 10^3/6/9, KHÔNG có 万 10^4 / 億 10^8) → vd
+// 三千两百万 (=32 triệu) bị dịch "320 triệu" (×10) hoặc rớt hẳn 万 (×10000). Khác bản cũ: (a) PARSE SỐ CHỮ HÁN
+// (三千两百万/二十亿) lẫn arabic+đơn-vị, (b) KHÔNG đòi đơn vị tiền (元/无 đều xử), (c) chỉ vá khi output lệch
+// ĐÚNG bội-10 so với giá trị thật (an toàn: không đụng %/ngày/số đếm vì chúng không lệch bội-10 từ số lớn).
+const _VN_SCALE = { 'nghìn': 1e3, 'ngàn': 1e3, 'vạn': 1e4, 'triệu': 1e6, 'tỷ': 1e9, 'tỉ': 1e9, 'ức': 1e8 };
 const _groupVN = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-function fixNumberScale(out, jaSrc) {
-  const nums = [];
-  (jaSrc || '').replace(/(?:\d+[百千万億兆])+\d*/g, (m) => {
-    let v = 0; const re = /(\d+)([百千万億兆])?/g; let x;
-    while ((x = re.exec(m))) { if (!x[1]) continue; v += parseInt(x[1], 10) * (x[2] ? _JP_MULT[x[2]] : 1); }
-    nums.push(v); return m;
+// ── Số chữ Hán (zh giản/phồn + ja) → giá trị ──
+const _CJK_DIGIT = { '〇':0,'零':0,'一':1,'壹':1,'二':2,'两':2,'兩':2,'贰':2,'貳':2,'三':3,'叁':3,'參':3,'四':4,'肆':4,'五':5,'伍':5,'六':6,'陆':6,'陸':6,'七':7,'柒':7,'八':8,'捌':8,'九':9,'玖':9 };
+const _CJK_SMALL = { '十':10,'拾':10,'百':100,'佰':100,'千':1000,'仟':1000 };
+const _CJK_BIG = { '万':1e4,'萬':1e4,'億':1e8,'亿':1e8,'兆':1e12 };
+function _cjkVal(s) {   // thuật toán đoạn 万/億: section(<万) + total(×万/億/兆). Arabic digit cộng dồn vị trí; chữ Hán THAY num.
+  let total = 0, section = 0, num = 0, saw = false;
+  for (const ch of s) {
+    if (ch >= '0' && ch <= '9') { num = num * 10 + (ch.charCodeAt(0) - 48); saw = true; }
+    else if (_CJK_DIGIT[ch] != null) { num = _CJK_DIGIT[ch]; saw = true; }
+    else if (_CJK_SMALL[ch] != null) { section += (num || 1) * _CJK_SMALL[ch]; num = 0; saw = true; }
+    else if (_CJK_BIG[ch] != null) { total += (section + num) * _CJK_BIG[ch]; section = 0; num = 0; saw = true; }
+  }
+  return saw ? total + section + num : null;
+}
+const _NUMRUN = /[0-9〇零一壹二两兩贰貳三叁參四肆五伍六陆陸七柒八捌九玖十拾百佰千仟万萬億亿兆]+/g;
+function _largeUnitValues(src) {   // chỉ lấy run CÓ đơn vị lớn (万/億/兆) — số nhỏ/ngày (千/百) bỏ qua, an toàn
+  const out = [];
+  for (const run of ((src || '').match(_NUMRUN) || [])) {
+    if (!/[万萬億亿兆]/.test(run)) continue;
+    const v = _cjkVal(run);
+    if (v != null && v >= 10000) out.push(v);
+  }
+  return out;
+}
+function _fmtCoef(n) { return Number.isInteger(n) ? String(n) : (Math.round(n * 100) / 100).toString().replace('.', ','); }
+// Định dạng V theo bậc VI TỰ NHIÊN (tỷ/triệu/nghìn) — vd 2e9→"2 tỷ" (không "2000 triệu"), 32e6→"32 triệu"; lẻ → chữ số nhóm.
+function _fmtVN(V) {
+  for (const [w, s] of [['tỷ', 1e9], ['triệu', 1e6], ['nghìn', 1e3]]) {
+    if (V >= s) { const c = V / s; if (Math.round(c * 100) === c * 100) return _fmtCoef(c) + ' ' + w; }
+  }
+  return _groupVN(V);
+}
+function fixNumberScale(out, src) {
+  const vals = _largeUnitValues(src);
+  if (vals.length !== 1) return out;            // chỉ ca 1 số lớn → an toàn (nhiều số: để S7 + Google lo)
+  const V = vals[0];
+  const RE = /(\d[\d.,]*)\s*(nghìn|ngàn|vạn|triệu|tỷ|tỉ|ức)?/gi;
+  const matches = []; let m;
+  while ((m = RE.exec(out))) {
+    const num = parseFloat(m[1].replace(/\./g, '').replace(',', '.'));   // VI: '.' phân nghìn, ',' thập phân
+    if (!(num > 0)) continue;
+    const word = (m[2] || '').toLowerCase();
+    matches.push({ index: m.index, len: m[0].length, num, word, val: num * (_VN_SCALE[word] || 1) });
+  }
+  if (!matches.length) return out;
+  if (matches.some(x => Math.abs(x.val - V) <= V * 0.02)) return out;   // output ĐÃ có số đúng → thôi
+  // tìm số SAI = lệch ĐÚNG bội-10 (≥10×) so với V (rớt/sai đơn vị 万/億) → vá; khác bội-10 (vd %/đếm) KHÔNG đụng
+  const bad = matches.find(x => {
+    const r = x.val > V ? x.val / V : V / x.val;
+    const rr = Math.round(r);
+    return r >= 9.5 && /^10*$/.test(String(rr)) && Math.abs(r - rr) <= 0.06 * rr;
   });
-  if (nums.length !== 1) return out;            // chỉ xử lý ca 1 số → an toàn (nhiều số: để S7 + Google lo)
-  const expected = nums[0];
-  const m = out.match(/(\d[\d.,]*)\s*(nghìn|ngàn|triệu|tỷ|tỉ)?\s*(yên|yen|đồng|JPY)/i);
-  if (!m) return out;
-  const got = parseFloat(m[1].replace(/[.,]/g, '')) * (_VN_SCALE[(m[2] || '').toLowerCase()] || 1);
-  if (!(got > 0) || got === expected) return out;                                  // đã đúng
-  if (Math.max(got, expected) / Math.min(got, expected) < 5) return out;          // lệch <5x → bỏ (rounding)
-  return out.slice(0, m.index) + _groupVN(expected) + ' ' + m[3] + out.slice(m.index + m[0].length);
+  if (!bad) return out;
+  return out.slice(0, bad.index) + _fmtVN(V) + out.slice(bad.index + bad.len);   // bậc VI tự nhiên (2 tỷ, không 2000 triệu)
 }
 
 // Làm câu tiếng Việt tự nhiên hơn sau khi dịch: chuẩn dấu câu/khoảng trắng, khử lặp artifact,
@@ -746,7 +790,7 @@ function drainQueue() {
 module.exports = {
   LANG_NAMES, LANG_LABELS, PROV_NAMES,
   lookupPhrase, isLLMRefusal, hasUntranslatedCJK, preprocessText,
-  translateText, enqueueTranslate,
+  translateText, enqueueTranslate, fixNumberScale,
   translateGoogleFree,
   translateViaEdge, translateViaTeamsToken,
   storeTeamsToken, parseJwtAudience,
