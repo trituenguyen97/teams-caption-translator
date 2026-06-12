@@ -41,8 +41,11 @@ function _fracToDigits(s) {
 function jaItn(text) {
   if (!text || typeof text !== 'string') return text;
   try {
+    // 0) パーセント/㌫/％ → "%": (a) hiển thị gọn như Live Captions; (b) số đứng TRƯỚC % được nhận diện vì
+    //    '%' ∈ _UNIT_AFTER → "二%"→"2%" (trước đây "二パーセント" giữ nguyên vì パ không phải đơn-vị-theo-sau).
+    let out = text.replace(/パーセント|㌫|％/g, '%');
     // 1) thập phân TRƯỚC (để phần nguyên không bị regex số nguyên nuốt mất dấu chấm)
-    let out = text.replace(_DEC_RE, (m, intp, frac) => {
+    out = out.replace(_DEC_RE, (m, intp, frac) => {
       const i = _convInt(intp), f = _fracToDigits(frac);
       return (f == null || /[^\d]/.test(i)) ? m : `${i}.${f}`;
     });
