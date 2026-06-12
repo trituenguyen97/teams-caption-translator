@@ -25,15 +25,17 @@ const os = require('os');
 // → runtime KHỎI biết tên epoch gốc và KHỎI quan tâm int8 hay không.
 //   engine: 'online' (OnlineRecognizer, streaming) | 'offline' (OfflineRecognizer, theo đoạn VAD)
 //   kind:   'paraformer' (encoder+decoder) | 'transducer' (encoder+decoder+joiner)
+// ⭐ NEMOTRON 5-in-1 (2026-06): NVIDIA Nemotron-3.5-ASR-Streaming-0.6B int4 — MỘT model cho cả 5 ngôn ngữ,
+// chạy thuần onnxruntime-node (src/stt-nemotron.js: mel + cache-aware FastConformer + RNN-T). Dấu câu + viết hoa
+// NATIVE (khỏi punctuate-* riêng). Offline + VAD (như cũ). Đổi ngôn ngữ = đổi lang_id, KHÔNG reload model.
+// engine 'nemotron'; nemoLang = mã LANG_ID của model (xem stt-nemotron.LANG_ID). Thay toàn bộ per-language cũ.
+const _NEMO = (nemoLang) => ({ dir: 'nemotron-int4', engine: 'nemotron', nemoLang });
 const MODELS = {
-  'zh-CN': { dir: 'zh-en', engine: 'online',  kind: 'paraformer'  },
-  'en':    { dir: 'en',    engine: 'online',  kind: 'transducer'  },   // streaming Zipformer English (GigaSpeech 2023-06-21) — RIÊNG, chính xác hơn HẲN paraformer zh-en (vốn là model Trung, nghe Anh rất kém + lọt chữ Hán)
-  // ko: Moonshine base-ko (UsefulSensors, đơn ngữ 61M int8) qua onnxruntime-node — A/B 3 clip: ≈ Live Captions
-  // (đúng 김효재/윤석열/공영방송…), ĐÈ BẸP cả streaming-zipformer-ko (공룡방송…) lẫn offline-zipformer-ko (기모지…).
-  // Offline + VAD (không có streaming ko nào tốt, tới 06/2026). Xem src/stt-moonshine.js.
-  'ko':    { dir: 'ko',    engine: 'offline', kind: 'moonshine'   },
-  'ja':    { dir: 'ja',    engine: 'offline', kind: 'transducer'  },
-  'vi':    { dir: 'vi',    engine: 'offline', kind: 'transducer'  },
+  'zh-CN': _NEMO('zh'),
+  'en':    _NEMO('en'),
+  'ko':    _NEMO('ko'),
+  'ja':    _NEMO('ja'),
+  'vi':    _NEMO('vi'),
 };
 const DEFAULT_LANG = 'ja';
 
@@ -57,7 +59,7 @@ function setLanguage(code) {
   const next = MODELS[code] ? code : '';
   if (next === _appLang) return;
   _appLang = next;
-  console.log('[stt] ngôn ngữ nguồn →', _lang(), '(', (MODELS[_lang()].engine), MODELS[_lang()].kind, ')');
+  console.log('[stt] ngôn ngữ nguồn →', _lang(), '(', MODELS[_lang()].engine, MODELS[_lang()].kind || MODELS[_lang()].nemoLang, ')');
 }
 
 // Trả {dir, engine, kind, paths:{encoder,decoder,joiner?,tokens}} cho 1 ngôn ngữ, hoặc null nếu THIẾU file.
@@ -65,6 +67,9 @@ function setLanguage(code) {
 function modelInfo(appLang) {
   const m = MODELS[appLang] || MODELS[DEFAULT_LANG];
   const d = path.join(sttRoot(), m.dir);
+  if (m.engine === 'nemotron') {
+    return require('./stt-nemotron').nemotronComplete(d) ? { ...m, paths: { dir: d } } : null;
+  }
   if (m.kind === 'moonshine') {
     return require('./stt-moonshine').moonshineComplete(d) ? { ...m, paths: { dir: d } } : null;
   }
@@ -79,6 +84,7 @@ function modelInfo(appLang) {
   return { ...m, paths: { encoder, decoder, joiner, tokens } };
 }
 function isStreaming(appLang) { const m = MODELS[appLang || _lang()]; return !!m && m.engine === 'online'; }
+function isNemotron(appLang) { const m = MODELS[appLang || _lang()]; return !!m && m.engine === 'nemotron'; }   // 1 model 5-in-1, dấu câu native
 function isModelAvailable() { return !!modelInfo(_lang()); }
 
 let _sherpa = null;
@@ -94,14 +100,16 @@ function _modelConfig(info) {
 let _offRec = null, _offLoading = null, _offDir = '', _offKind = '';
 async function ensureReady() {
   const info = modelInfo(_lang());
-  if (!info || info.engine !== 'offline') return false;   // online không dùng đường này
-  if (_offRec && _offDir === info.dir) return true;
+  if (!info || (info.engine !== 'offline' && info.engine !== 'nemotron')) return false;   // online không dùng đường này
+  if (_offRec && _offDir === info.dir) return true;   // nemotron: 1 model cho mọi lang → cache dùng chung
   if (_offLoading) return _offLoading;
   _offRec = null;
   _offLoading = (async () => {
     try {
       let rec;
-      if (info.kind === 'moonshine') {
+      if (info.engine === 'nemotron') {
+        rec = await require('./stt-nemotron').createNemotron(info.paths.dir, { threads: 4 });
+      } else if (info.kind === 'moonshine') {
         rec = await require('./stt-moonshine').createMoonshine(info.paths.dir, { threads: 2 });
       } else {
         rec = await sherpa().OfflineRecognizer.createAsync({
@@ -109,8 +117,8 @@ async function ensureReady() {
           modelConfig: _modelConfig(info),
         });
       }
-      _offRec = rec; _offDir = info.dir; _offKind = info.kind;
-      console.log('[stt] offline recognizer sẵn sàng:', info.dir, '(' + info.kind + ')');
+      _offRec = rec; _offDir = info.dir; _offKind = info.kind || info.engine;
+      console.log('[stt] offline recognizer sẵn sàng:', info.dir, '(' + _offKind + ')');
       return true;
     } catch (e) { console.warn('[stt] load offline lỗi:', e.message); _offRec = null; return false; }
     finally { _offLoading = null; }
@@ -243,7 +251,9 @@ async function transcribe(samples) {
   if (!hasSpeech(samples)) return '';
   let text = '';
   try {
-    if (_offKind === 'moonshine') {
+    if (_offKind === 'nemotron') {
+      text = ((await _offRec.transcribe(samples, MODELS[_lang()].nemoLang)) || '').trim();   // Nemotron 5-in-1: truyền lang_id theo ngôn ngữ hiện tại
+    } else if (_offKind === 'moonshine') {
       text = ((await _offRec.transcribe(samples)) || '').trim();   // Moonshine: decode loop riêng (onnxruntime)
     } else {
       const stream = _offRec.createStream();
@@ -262,7 +272,7 @@ async function recognize(samples) {
 
 module.exports = {
   // chung
-  setLanguage, currentLang, isModelAvailable, isStreaming, isHallucination,
+  setLanguage, currentLang, isModelAvailable, isStreaming, isNemotron, isHallucination,
   // online (streaming)
   createOnlineSession, warm,
   // offline (VAD + transcribe)

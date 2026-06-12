@@ -285,16 +285,20 @@ async function _pumpSeg() {
 async function _commitSeg(rawText, liveId) {
   let base = (rawText || '').trim();
   if (!base || stt.isHallucination(base)) return;
-  if (stt.currentLang() === 'ja') { try { base = await punctuateJa(base); } catch {} }   // dấu câu 、。？
-  // ko: heuristic dấu KẾT câu (đuôi 습니다/습니까/까요…) + sửa đuôi hỏng 슴니다→습니다 + bỏ "." sau đuôi nối
-  // (~하고/~지만 = VAD cắt giữa câu, mirror rule trợ từ ja bên dưới). Sync, thuần regex — src/punctuate-ko.js.
-  if (stt.currentLang() === 'ko') { try { base = punctuateKo(base); } catch {} }
-  let sRaw = _itn(base).trim();                                                            // ITN số kanji→Ả Rập
-  if (stt.currentLang() === 'ja' && sRaw) {                                         // làm mượt ngắt câu khi VAD cắt giữa câu
-    if (_NONTERM_TAIL_PUNC.test(sRaw)) sRaw = sRaw.replace(/。$/, '');               //   model lỡ chấm sau trợ từ nối → bỏ 。 cuối
-    else if (!/[。、？！]$/.test(sRaw) && !_NONTERM_TAIL.test(sRaw)) sRaw += '。';   //   hết câu thật mà model quên chấm → ép 。
+  let sRaw;
+  if (stt.isNemotron()) {
+    sRaw = base.trim();   // Nemotron ra dấu câu + viết hoa NATIVE → KHÔNG dùng punctuate-*/ITN/ko-fix per-language
+  } else {
+    if (stt.currentLang() === 'ja') { try { base = await punctuateJa(base); } catch {} }   // dấu câu 、。？
+    // ko: heuristic dấu KẾT câu (đuôi 습니다/습니까/까요…) + sửa đuôi hỏng 슴니다→습니다 + bỏ "." sau đuôi nối
+    if (stt.currentLang() === 'ko') { try { base = punctuateKo(base); } catch {} }
+    sRaw = _itn(base).trim();                                                            // ITN số kanji→Ả Rập
+    if (stt.currentLang() === 'ja' && sRaw) {                                         // làm mượt ngắt câu khi VAD cắt giữa câu
+      if (_NONTERM_TAIL_PUNC.test(sRaw)) sRaw = sRaw.replace(/。$/, '');               //   model lỡ chấm sau trợ từ nối → bỏ 。 cuối
+      else if (!/[。、？！]$/.test(sRaw) && !_NONTERM_TAIL.test(sRaw)) sRaw += '。';   //   hết câu thật mà model quên chấm → ép 。
+    }
+    if (stt.currentLang() === 'ja') { try { sRaw = _addQuestionJa(sRaw); } catch {} }        // áp lại ？ trên dấu kết câu CUỐI (model đặt 。 lệch chỗ か)
   }
-  if (stt.currentLang() === 'ja') { try { sRaw = _addQuestionJa(sRaw); } catch {} }        // áp lại ？ trên dấu kết câu CUỐI (model đặt 。 lệch chỗ か)
   if (!sRaw || stt.isHallucination(sRaw)) return;
   const now = Date.now();
   const norm = sRaw.toLowerCase().replace(/\s+/g, ' ').trim();
