@@ -24,53 +24,24 @@ const OUT_DIR = path.join(__dirname, '..', 'bin', 'stt');
 const HF = (repo, file) => `https://huggingface.co/${repo}/resolve/main/${file}`;
 const GH = (asset) => `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${asset}`;
 
-// files: tải file lẻ từ HF rồi đổi tên (as). archive+pick: tải .tar.bz2 từ GH, giải nén, chọn file theo regex.
+// ⭐ NEMOTRON 5-in-1 (2026-06): MỘT model NVIDIA Nemotron-3.5-ASR-Streaming-0.6B int4 cho cả ja/en/ko/zh/vi,
+// chạy thuần onnxruntime-node (src/stt-nemotron.js: mel + cache-aware FastConformer + RNN-T, dấu câu native).
+// Thay TOÀN BỘ 5 model per-language cũ (paraformer/gigaspeech/moonshine/reazonspeech/zipformer-vi) + punct.
+// genai-format từ onnx-community (encoder/decoder/joint + .onnx.data + genai_config + vocab). ~757MB.
+const NEMO_REPO = 'onnx-community/nemotron-3.5-asr-streaming-0.6b-onnx-int4';
 const MODELS = [
-  { dir: 'zh-en', desc: 'streaming Paraformer bilingual zh-en (FunASR) [online zh/en]', files: [
-    { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'encoder.int8.onnx'), as: 'encoder.onnx' },
-    { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'decoder.int8.onnx'), as: 'decoder.onnx' },
-    { url: HF('csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en', 'tokens.txt'),         as: 'tokens.txt' },
+  { dir: 'nemotron-int4', desc: 'NVIDIA Nemotron-3.5-ASR-Streaming 0.6B int4 (5-in-1: ja/en/ko/zh/vi)', files: [
+    { url: HF(NEMO_REPO, 'encoder.onnx'),       as: 'encoder.onnx' },
+    { url: HF(NEMO_REPO, 'encoder.onnx.data'),  as: 'encoder.onnx.data' },
+    { url: HF(NEMO_REPO, 'decoder.onnx'),       as: 'decoder.onnx' },
+    { url: HF(NEMO_REPO, 'decoder.onnx.data'),  as: 'decoder.onnx.data' },
+    { url: HF(NEMO_REPO, 'joint.onnx'),         as: 'joint.onnx' },
+    { url: HF(NEMO_REPO, 'joint.onnx.data'),    as: 'joint.onnx.data' },
+    { url: HF(NEMO_REPO, 'genai_config.json'),  as: 'genai_config.json' },
+    { url: HF(NEMO_REPO, 'vocab.txt'),          as: 'vocab.txt' },
   ] },
-  { dir: 'en', desc: 'streaming Zipformer English GigaSpeech 2023-06-21 [online en]', files: [
-    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'encoder-epoch-99-avg-1.int8.onnx'), as: 'encoder.onnx' },
-    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'decoder-epoch-99-avg-1.int8.onnx'), as: 'decoder.onnx' },
-    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'joiner-epoch-99-avg-1.int8.onnx'),  as: 'joiner.onnx' },
-    { url: HF('csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-21', 'tokens.txt'),                       as: 'tokens.txt' },
-  ] },
-  // ko: Moonshine base-ko (đơn ngữ, int8 ~62MB) — chạy qua onnxruntime-node (src/stt-moonshine.js), KHÔNG phải sherpa
-  // (format ONNX transformers.js, sherpa không nạp). A/B: ≈ Live Captions, hơn hẳn zipformer-ko (cả streaming lẫn offline).
-  { dir: 'ko', desc: 'Moonshine base-ko (onnxruntime, offline+VAD) [ko]', files: [
-    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'onnx/encoder_model_int8.onnx'),        as: 'encoder_model_int8.onnx' },
-    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'onnx/decoder_model_merged_int8.onnx'), as: 'decoder_model_merged_int8.onnx' },
-    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'tokenizer.json'),                      as: 'tokenizer.json' },
-    { url: HF('onnx-community/moonshine-base-ko-ONNX', 'config.json'),                        as: 'config.json' },
-  ] },
-  { dir: 'vi', desc: 'Zipformer Vietnamese [offline vi]', files: [
-    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'encoder-epoch-12-avg-8.int8.onnx'), as: 'encoder.onnx' },
-    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'decoder-epoch-12-avg-8.onnx'),      as: 'decoder.onnx' },  // decoder chỉ có bản fp32 (nhỏ)
-    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'joiner-epoch-12-avg-8.int8.onnx'),  as: 'joiner.onnx' },
-    { url: HF('csukuangfj/sherpa-onnx-zipformer-vi-int8-2025-04-20', 'tokens.txt'),                       as: 'tokens.txt' },
-  ] },
-  { dir: 'ja', desc: 'Zipformer ReazonSpeech Japanese [offline ja]', archive: GH('sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01.tar.bz2'),
-    pick: [
-      { as: 'encoder.onnx', prefer: [/encoder.*\.int8\.onnx$/i, /encoder.*\.onnx$/i] },
-      { as: 'decoder.onnx', prefer: [/decoder.*\.int8\.onnx$/i, /decoder.*\.onnx$/i] },
-      { as: 'joiner.onnx',  prefer: [/joiner.*\.int8\.onnx$/i,  /joiner.*\.onnx$/i] },
-      { as: 'tokens.txt',   prefer: [/(^|[\\/])tokens\.txt$/i] },
-    ] },
 ];
-const SILERO = { url: GH('silero_vad.onnx'), dest: path.join(OUT_DIR, 'silero_vad.onnx') };
-// Phục hồi dấu câu + VIẾT HOA tiếng Anh (chạy qua sherpa OnlinePunctuation) → bin/punct/en. Archive .tar.bz2 (tag
-// punctuation-models) gồm cả fp32 — rút model.int8.onnx (~7.5MB) + bpe.vocab. (en STT zipformer ra TOÀN HOA không dấu.)
-const PUNCT_EN_DIR = path.join(__dirname, '..', 'bin', 'punct', 'en');
-const PUNCT_EN = {
-  dir: 'punct-en', desc: 'English punctuation+truecasing (sherpa OnlinePunctuation int8)',
-  archive: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-online-punct-en-2024-08-06.tar.bz2',
-  pick: [
-    { as: 'model.int8.onnx', prefer: [/model\.int8\.onnx$/i] },
-    { as: 'bpe.vocab',       prefer: [/bpe\.vocab$/i] },
-  ],
-};
+const SILERO = { url: GH('silero_vad.onnx'), dest: path.join(OUT_DIR, 'silero_vad.onnx') };   // VAD cắt câu (offline pseudo-stream)
 
 function log(...a) { console.log('[fetch-stt-model]', ...a); }
 
@@ -162,11 +133,8 @@ function modelComplete(m, dir) {
     log('↓', m.dir, '—', m.desc);
     if (m.files) await fetchHfModel(m, dir); else await fetchArchiveModel(m, dir);
   }
-  if (!fs.existsSync(SILERO.dest)) { log('↓ silero_vad.onnx (VAD cho ja/vi)'); await download(SILERO.url, SILERO.dest); }
+  if (!fs.existsSync(SILERO.dest)) { log('↓ silero_vad.onnx (VAD cắt câu)'); await download(SILERO.url, SILERO.dest); }
   else log('✓ silero_vad.onnx (đã có)');
-  // En punctuation + truecasing → bin/punct/en (ja punct dựng riêng bằng scripts/export-punc-ja.py).
-  fs.mkdirSync(PUNCT_EN_DIR, { recursive: true });
-  if (modelComplete(PUNCT_EN, PUNCT_EN_DIR)) log('✓ punct/en — ' + PUNCT_EN.desc + ' (đã đủ)');
-  else { log('↓ punct/en — ' + PUNCT_EN.desc); await fetchArchiveModel(PUNCT_EN, PUNCT_EN_DIR); }
-  log('xong → bin/stt/{' + MODELS.map(m => m.dir).join(',') + '} + silero_vad.onnx + bin/punct/en');
+  // Nemotron ra dấu câu + viết hoa NATIVE → KHÔNG cần model punctuation riêng (đã bỏ punct/en + export-punc-ja).
+  log('xong → bin/stt/{' + MODELS.map(m => m.dir).join(',') + '} + silero_vad.onnx');
 })().catch(e => { console.error('\n[fetch-stt-model] LỖI:', e.message); process.exit(1); });
