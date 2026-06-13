@@ -214,36 +214,43 @@ async function _pumpNemo() {
       if (state.audioPaused) continue;   // đã ⏹ → drain hàng đợi như no-op (flushStreaming lo chốt câu dở)
       const sess = _ensureNemo();
       if (!sess) { _nemoQ.length = 0; break; }   // chưa tạo được session → bỏ phần còn lại (model chưa sẵn)
-      try { await sess.accept(samples); } catch (e) { console.warn('[audio-stt] nemo accept lỗi:', e.message); continue; }
-      if (state.audioPaused) continue;
-      // nguồn mọc → CHỐT các câu hoàn chỉnh (dấu kết câu) thành caption riêng, hiện phần ĐUÔI DỞ làm partial sống.
-      const text = sess.text().trim();
-      const grew = text && text !== _nemoLiveText;
-      if (grew) {
-        _nemoLiveText = text; _nemoNoGrow = 0; _nemoGrew = true;
-        let pendingRaw = text.startsWith(_nemoCommittedText) ? text.slice(_nemoCommittedText.length) : (_nemoCommittedText = '', text);
-        pendingRaw = _commitSentencesIn(pendingRaw);   // chốt+dịch mọi câu đã xong; còn lại = đuôi dở
-        const pending = pendingRaw.trim();
-        if (pending) {   // đuôi câu đang nói dở → hiện partial (translated:'' = chưa dịch; dịch khi câu chốt)
-          if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
-          send('caption-live', { id: _nemoLiveId, author: 'STT', original: _jaNum(pending), translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
+      try {
+        await sess.accept(samples);
+        if (state.audioPaused) continue;
+        // nguồn mọc → CHỐT các câu hoàn chỉnh (dấu kết câu) thành caption riêng, hiện phần ĐUÔI DỞ làm partial sống.
+        const text = sess.text().trim();
+        const grew = text && text !== _nemoLiveText;
+        if (grew) {
+          _nemoLiveText = text; _nemoNoGrow = 0; _nemoGrew = true;
+          let pendingRaw = text.startsWith(_nemoCommittedText) ? text.slice(_nemoCommittedText.length) : (_nemoCommittedText = '', text);
+          pendingRaw = _commitSentencesIn(pendingRaw);   // chốt+dịch mọi câu đã xong; còn lại = đuôi dở
+          const pending = pendingRaw.trim();
+          if (pending) {   // đuôi câu đang nói dở → hiện partial (translated:'' = chưa dịch; dịch khi câu chốt)
+            if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
+            send('caption-live', { id: _nemoLiveId, author: 'STT', original: _jaNum(pending), translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
+          }
+        } else {
+          _nemoNoGrow += samples.length;   // không ra token mới → cộng dồn audio "im" (độc lập âm lượng)
         }
-      } else {
-        _nemoNoGrow += samples.length;   // không ra token mới → cộng dồn audio "im" (độc lập âm lượng)
-      }
-      _nemoUttLen += samples.length;
-      // endpoint: đã từng mọc + ngừng mọc đủ lâu (ngừng nói), HOẶC câu quá dài. Mảnh đuôi NGẮN (từ nối/ngập ngừng
-      // giữa câu) đòi pause LÂU HƠN (1.8s) trước khi chốt → đỡ vụn (vd 「しかも」 kịp gộp với câu sau).
-      const _pendRaw = _nemoLiveText.startsWith(_nemoCommittedText) ? _nemoLiveText.slice(_nemoCommittedText.length) : _nemoLiveText;
-      const _need = _pendRaw.trim().length < _NEMO_SHORT_CHARS ? _NEMO_NOGROW_SHORT : _NEMO_NOGROW;
-      if ((_nemoGrew && _nemoNoGrow >= _need) || _nemoUttLen >= _NEMO_MAX_UTT) {
-        let fin = '';
-        try { fin = (await sess.finish()).trim(); } catch {}
-        let tailRaw = fin.startsWith(_nemoCommittedText) ? fin.slice(_nemoCommittedText.length) : fin;
-        tailRaw = _commitSentencesIn(tailRaw);          // chốt nốt câu hoàn chỉnh trong đuôi finish()
-        if (tailRaw.trim()) _commitNemoSentence(tailRaw.trim(), _nemoLiveId);   // chốt đuôi dở (không dấu câu) = caption cuối
-        _nemoLiveId = null; _nemoCommittedText = ''; _nemoLiveText = '';
-        try { sess.reset(); } catch {}
+        _nemoUttLen += samples.length;
+        // endpoint: đã từng mọc + ngừng mọc đủ lâu (ngừng nói), HOẶC câu quá dài. Mảnh đuôi NGẮN (từ nối/ngập ngừng
+        // giữa câu) đòi pause LÂU HƠN (1.8s) trước khi chốt → đỡ vụn (vd 「しかも」 kịp gộp với câu sau).
+        const _pendRaw = _nemoLiveText.startsWith(_nemoCommittedText) ? _nemoLiveText.slice(_nemoCommittedText.length) : _nemoLiveText;
+        const _need = _pendRaw.trim().length < _NEMO_SHORT_CHARS ? _NEMO_NOGROW_SHORT : _NEMO_NOGROW;
+        if ((_nemoGrew && _nemoNoGrow >= _need) || _nemoUttLen >= _NEMO_MAX_UTT) {
+          const fin = (await sess.finish()).trim();
+          let tailRaw = fin.startsWith(_nemoCommittedText) ? fin.slice(_nemoCommittedText.length) : fin;
+          tailRaw = _commitSentencesIn(tailRaw);          // chốt nốt câu hoàn chỉnh trong đuôi finish()
+          if (tailRaw.trim()) _commitNemoSentence(tailRaw.trim(), _nemoLiveId);   // chốt đuôi dở (không dấu câu) = caption cuối
+          _nemoLiveId = null; _nemoCommittedText = ''; _nemoLiveText = '';
+          sess.reset();
+          _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
+        }
+      } catch (e) {
+        // BẤT KỲ lỗi nào (accept/decode/finish/cache hỏng do audio bất thường, vd KHI TUA LẠI audio) → TÁI TẠO
+        // session để TỰ LÀNH, KHỎI phải ⏹▶. Bỏ câu đang dở + state về 0; _ensureNemo lần sau tạo session sạch.
+        console.warn('[audio-stt] nemo pump lỗi → tái tạo session:', e && e.message);
+        _nemo = null; _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = '';
         _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
       }
     }

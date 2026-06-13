@@ -1661,6 +1661,7 @@
     // nên phía main (sherpa-onnx-node) KHÔNG cần Python/PyAV/ffmpeg để decode.
     let _recordingActive = false;
     let _audioCtx = null, _srcNode = null, _procNode = null, _zeroGain = null;
+    let _lastPcmTs = 0, _audioWatchdog = null;   // tự-lành: phát hiện onaudioprocess ngừng bắn → resume ctx
 
     async function startAudioCapture(source) {
       try {
@@ -1681,6 +1682,11 @@
         const Ctx = window.AudioContext || window.webkitAudioContext;
         _audioCtx = new Ctx({ sampleRate: 16000 });               // tự resample stream về 16k
         if (_audioCtx.state === 'suspended') { try { await _audioCtx.resume(); } catch (e) {} }
+        // TỰ-LÀNH: nếu AudioContext bị suspend giữa chừng (vd tua/đổi thiết bị audio) → onaudioprocess NGỪNG bắn
+        // → STT chết thầm lặng (phải ⏹▶). resume() ngay khi rời 'running' (không re-prompt) để PCM chảy lại.
+        _audioCtx.onstatechange = () => {
+          if (_recordingActive && _audioCtx && _audioCtx.state !== 'running') { _audioCtx.resume().catch(() => {}); }
+        };
         _srcNode = _audioCtx.createMediaStreamSource(_audioStream);
         _procNode = _audioCtx.createScriptProcessor(4096, 1, 1);
         _zeroGain = _audioCtx.createGain(); _zeroGain.gain.value = 0;   // gain 0: không vọng ra loa
@@ -1688,9 +1694,20 @@
           if (!_recordingActive) return;
           // Gửi KHUNG NHỎ (~256ms, 4096 mẫu) thay vì gom 2.5s → VAD ở main tự ghép thành câu trọn,
           // cắt theo khoảng lặng (không cắt mù giữa câu). Độ trễ thấp + endpoint chính xác.
+          _lastPcmTs = Date.now();   // nhịp tim cho watchdog (ScriptProcessor bắn đều ~256ms kể cả khi im lặng)
           const ch = e.inputBuffer.getChannelData(0);   // mono float32 @ 16k
           api.sendAudioPcm(new Float32Array(ch).buffer);
         };
+        // Watchdog: nếu >3s không có khung PCM nào (ctx kẹt/suspend ngầm sau tua/đổi thiết bị) → resume (an toàn,
+        // KHÔNG re-prompt). Bổ trợ onstatechange cho ca state không đổi mà onaudioprocess vẫn ngừng.
+        _lastPcmTs = Date.now();
+        clearInterval(_audioWatchdog);
+        _audioWatchdog = setInterval(() => {
+          if (_recordingActive && _audioCtx && Date.now() - _lastPcmTs > 3000) {
+            console.warn('[audio] PCM ngừng >3s → resume AudioContext');
+            _audioCtx.resume().catch(() => {});
+          }
+        }, 2000);
         _srcNode.connect(_procNode);
         _procNode.connect(_zeroGain);
         _zeroGain.connect(_audioCtx.destination);   // ScriptProcessor cần ở trong graph tới destination
@@ -1708,6 +1725,7 @@
 
     function stopAudioCapture() {
       _recordingActive = false;
+      clearInterval(_audioWatchdog); _audioWatchdog = null;
       try { if (_procNode) { _procNode.onaudioprocess = null; _procNode.disconnect(); } } catch (e) {}
       try { if (_srcNode) _srcNode.disconnect(); } catch (e) {}
       try { if (_zeroGain) _zeroGain.disconnect(); } catch (e) {}
