@@ -106,7 +106,10 @@ async function ensureReady() {
     try {
       let rec;
       if (info.engine === 'nemotron') {
-        rec = await require('./stt-nemotron').createNemotron(info.paths.dir, { threads: 4 });
+        // threads:2 — encoder int4 NGHẼN băng thông DDR5 nên latency PHẲNG từ 2→4 thread (đo bench-ort-threads):
+        // t4=2.7 core/436 CPU-ms/run → t2=1.7 core/269 CPU-ms (−38%), RTF vẫn 0.28«1 (chịu cả burst llama 5.4-core).
+        // Thread 3-4 chỉ thêm core đọc bus đã bão hoà = lãng phí. Token Y HỆT. (Máy YẾU hơn 225H nhiều → cân nhắc 3.)
+        rec = await require('./stt-nemotron').createNemotron(info.paths.dir, { threads: 2 });
       } else {
         rec = await sherpa().OfflineRecognizer.createAsync({
           featConfig: { sampleRate: 16000, featureDim: 80 },
@@ -166,6 +169,9 @@ function createNemotronStream() {
   try { return _offRec.createStream(MODELS[_lang()].nemoLang); }
   catch (e) { console.warn('[stt] tạo nemotron stream lỗi:', e.message); return null; }
 }
+
+// Thư mục model Nemotron hiện tại (chứa encoder/decoder/joint + silero_vad.onnx) — cho audio-stt nạp VAD-gate.
+function nemotronDir() { const info = modelInfo(_lang()); return (info && info.engine === 'nemotron') ? info.paths.dir : null; }
 
 function createOnlineSession() {
   const info = modelInfo(_lang());
@@ -279,7 +285,7 @@ module.exports = {
   // chung
   setLanguage, currentLang, isModelAvailable, isStreaming, isNemotron, isHallucination,
   // online (streaming) + nemotron streaming native
-  createOnlineSession, createNemotronStream, warm,
+  createOnlineSession, createNemotronStream, nemotronDir, warm,
   // offline (VAD + transcribe)
   ensureReady, transcribe, recognize, createVad, isVadAvailable, maxSpeechSec,
   // hằng (test/độ phủ)

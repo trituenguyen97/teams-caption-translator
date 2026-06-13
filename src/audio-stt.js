@@ -17,6 +17,8 @@ const { jaItn } = require('./ja-itn');   // ITN tiếng Nhật: số kanji → c
 function _jaNum(s) { try { return stt.currentLang() === 'ja' ? jaItn(s) : s; } catch { return s; } }
 const { timestamp } = require('./caption-service');
 const stt = require('./stt');
+const path = require('path');
+let _ortMod = null; const _ort = () => (_ortMod = _ortMod || require('onnxruntime-node'));   // lazy (VAD-gate)
 // Nemotron 5-in-1 ra dấu câu + viết hoa + ITN NATIVE → KHÔNG còn module punctuate-*/ja-itn/ko-fix per-language.
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -147,6 +149,22 @@ const _NEMO_NOGROW_SHORT = 28800;                   // mảnh NGẮN (từ nối
 const _NEMO_SHORT_CHARS = 6;                         //   để kịp gộp câu sau, tránh caption vụn 1-2 chữ
 const _NEMO_MAX_UTT = Math.floor(_NEMO_SR * 15);    // câu quá dài (không có dấu kết câu) → chốt chống run-on
 
+// ── VAD-gate: BỎ QUA chạy encoder lúc IM LẶNG (encoder ~0.59 core/chunk vs silero_vad ~0.015) ──────────────────
+//   Lợi: ~0.5 core/chunk-im; họp 40-60% im → ~0.24-0.35 core TB + điện/nhiệt. Lúc đang nói: ~0 lợi (+VAD ~0.015).
+//   AN TOÀN: hangover 1.15s > cửa sổ no-grow 1.0s → encoder LUÔN chạy hết tới lúc endpoint chốt câu (KHÔNG gate giữa
+//   câu). Im lặng bền = ranh câu (app đã reset() ở 1.0s) → bỏ chunk im KHÔNG hỏng cache. Pre-roll 1 frame chống cắt
+//   onset. VAD lỗi/không nạp → fail-open (coi như speech, không gate). Đặt _NEMO_VAD_GATE=false để tắt khi A/B.
+const _NEMO_VAD_GATE = true;
+const _NEMO_VAD_THRESH = 0.35;                       // prob ≥ ngưỡng = speech (verify: giọng nhỏ amp0.03→0.92; noise amp0.3→0.11)
+const _NEMO_VAD_WIN = 512;                            // silero v5 cửa sổ cố định @16k
+const _NEMO_VAD_HANG = Math.floor(_NEMO_SR * 1.15);  // hangover ~1.15s > no-grow 1.0s → chạy hết tới endpoint
+let _nemoVad = null, _nemoVadFailed = false;          // session silero_vad.onnx (v5); failed=true → thôi thử nạp
+let _nemoVadState = null;                              // Tensor recurrent [2,1,128]
+let _nemoVadResidual = new Float32Array(0);           // mẩu <512 sample dư giữa frame → cửa sổ VAD đúng 512
+let _nemoVadHang = 0;                                  // sample còn lại VẪN chạy encoder sau khi hết speech
+let _nemoVadPrev = null;                               // frame im NGAY TRƯỚC speech (pre-roll prepend chống cắt onset)
+function _resetNemoVad() { _nemoVadState = null; _nemoVadResidual = new Float32Array(0); _nemoVadHang = 0; _nemoVadPrev = null; }
+
 // Vị trí dấu KẾT CÂU ĐẦU TIÊN trong s (。！？．!?). ASCII '.' BỎ QUA nếu là số thập phân (\d.\d). -1 nếu không có.
 function _firstSentenceEnd(s) {
   for (let i = 0; i < s.length; i++) {
@@ -165,6 +183,52 @@ function _ensureNemo() {
   _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = ''; _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
   if (_nemo) console.log('[audio-stt] Nemotron streaming session:', lang);
   return _nemo;
+}
+
+// Nạp silero_vad.onnx (v5, nằm cùng thư mục model Nemotron) cho VAD-gate. Lỗi/không có → _nemoVadFailed (fail-open).
+function _ensureNemoVad() {
+  if (_nemoVad || _nemoVadFailed) return _nemoVad;
+  try {
+    const dir = stt.nemotronDir();
+    if (!dir) { _nemoVadFailed = true; return null; }
+    const O = _ort();
+    // 1 thread + spinning off: khớp cấu hình STT, không thêm busy-wait. create đồng bộ qua biến tạm (createSync).
+    _nemoVad = O.InferenceSession.create(path.join(dir, 'silero_vad.onnx'), {
+      intraOpNumThreads: 1, interOpNumThreads: 1, executionMode: 'sequential',
+      extra: { session: { 'intra_op.allow_spinning': '0', 'inter_op.allow_spinning': '0' } },
+    });
+    // create() trả Promise (onnxruntime-node async) → bọc: _nemoVad tạm là Promise, _nemoVadProb await nó.
+    return _nemoVad;
+  } catch (e) { console.warn('[audio-stt] VAD-gate nạp lỗi → fail-open (không gate):', e && e.message); _nemoVadFailed = true; return null; }
+}
+
+// Xác suất SPEECH lớn nhất của 1 frame PCM (chạy silero theo cửa sổ 512, giữ recurrent state, carry residual <512).
+// Trả 1 (=speech) khi VAD chưa sẵn/lỗi → FAIL-OPEN (không bao giờ gate nhầm lúc chưa chắc).
+async function _nemoVadProb(samples) {
+  let sess = _ensureNemoVad();
+  if (!sess) return 1;
+  try {
+    sess = await sess;            // create() là Promise lần đầu; các lần sau đã là session
+    _nemoVad = sess;
+    const O = _ort();
+    let buf = samples;
+    if (_nemoVadResidual.length) {
+      const c = new Float32Array(_nemoVadResidual.length + samples.length);
+      c.set(_nemoVadResidual, 0); c.set(samples, _nemoVadResidual.length); buf = c;
+    }
+    if (!_nemoVadState) _nemoVadState = new O.Tensor('float32', new Float32Array(2 * 1 * 128), [2, 1, 128]);
+    const sr = new O.Tensor('int64', BigInt64Array.from([16000n]), []);
+    let maxP = 0, off = 0;
+    for (; off + _NEMO_VAD_WIN <= buf.length; off += _NEMO_VAD_WIN) {
+      const input = new O.Tensor('float32', buf.slice(off, off + _NEMO_VAD_WIN), [1, _NEMO_VAD_WIN]);
+      const r = await sess.run({ input, state: _nemoVadState, sr });
+      _nemoVadState = r.stateN;
+      const p = r.output.data[0];
+      if (p > maxP) maxP = p;
+    }
+    _nemoVadResidual = buf.slice(off);   // mẩu <512 còn dư → frame sau
+    return maxP;
+  } catch (e) { console.warn('[audio-stt] VAD-gate chạy lỗi → fail-open:', e && e.message); _nemoVadFailed = true; _nemoVad = null; return 1; }
 }
 
 // Chốt 1 CÂU: entry (liveId nếu là entry đang sống, else mới) → "đang dịch…" → enqueueTranslate (cascade/TM/QE
@@ -215,22 +279,38 @@ async function _pumpNemo() {
       const sess = _ensureNemo();
       if (!sess) { _nemoQ.length = 0; break; }   // chưa tạo được session → bỏ phần còn lại (model chưa sẵn)
       try {
-        await sess.accept(samples);
-        if (state.audioPaused) continue;
-        // nguồn mọc → CHỐT các câu hoàn chỉnh (dấu kết câu) thành caption riêng, hiện phần ĐUÔI DỞ làm partial sống.
-        const text = sess.text().trim();
-        const grew = text && text !== _nemoLiveText;
-        if (grew) {
-          _nemoLiveText = text; _nemoNoGrow = 0; _nemoGrew = true;
-          let pendingRaw = text.startsWith(_nemoCommittedText) ? text.slice(_nemoCommittedText.length) : (_nemoCommittedText = '', text);
-          pendingRaw = _commitSentencesIn(pendingRaw);   // chốt+dịch mọi câu đã xong; còn lại = đuôi dở
-          const pending = pendingRaw.trim();
-          if (pending) {   // đuôi câu đang nói dở → hiện partial (translated:'' = chưa dịch; dịch khi câu chốt)
-            if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
-            send('caption-live', { id: _nemoLiveId, author: 'STT', original: _jaNum(pending), translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
+        // VAD-gate: chỉ chạy encoder khi có SPEECH hoặc còn HANGOVER (~1.15s sau speech, phủ trọn cửa sổ chốt câu
+        // 1.0s → KHÔNG gate giữa câu). Im lặng bền → bỏ qua accept (encoder KHÔNG chạy) nhưng vẫn cộng _nemoNoGrow
+        // để endpoint chốt câu như cũ. VAD lỗi/chưa nạp → _nemoVadProb trả 1 = fail-open (chạy encoder mọi frame).
+        const _prob = _NEMO_VAD_GATE ? await _nemoVadProb(samples) : 1;
+        if (state.audioPaused) continue;   // có thể đã ⏹ trong lúc await VAD
+        const _speech = _prob >= _NEMO_VAD_THRESH;
+        if (_speech) _nemoVadHang = _NEMO_VAD_HANG;
+        else if (_nemoVadHang > 0) _nemoVadHang -= samples.length;
+        const _runEnc = _speech || _nemoVadHang > 0;
+
+        if (_runEnc) {
+          if (_nemoVadPrev) { try { await sess.accept(_nemoVadPrev); } catch {} _nemoVadPrev = null; }   // pre-roll frame im trước onset
+          await sess.accept(samples);
+          if (state.audioPaused) continue;
+          // nguồn mọc → CHỐT các câu hoàn chỉnh (dấu kết câu) thành caption riêng, hiện phần ĐUÔI DỞ làm partial sống.
+          const text = sess.text().trim();
+          const grew = text && text !== _nemoLiveText;
+          if (grew) {
+            _nemoLiveText = text; _nemoNoGrow = 0; _nemoGrew = true;
+            let pendingRaw = text.startsWith(_nemoCommittedText) ? text.slice(_nemoCommittedText.length) : (_nemoCommittedText = '', text);
+            pendingRaw = _commitSentencesIn(pendingRaw);   // chốt+dịch mọi câu đã xong; còn lại = đuôi dở
+            const pending = pendingRaw.trim();
+            if (pending) {   // đuôi câu đang nói dở → hiện partial (translated:'' = chưa dịch; dịch khi câu chốt)
+              if (!_nemoLiveId) _nemoLiveId = ++state.audioEntryId;
+              send('caption-live', { id: _nemoLiveId, author: 'STT', original: _jaNum(pending), translated: '', isPartial: true, ts: timestamp(), tsMs: Date.now() });
+            }
+          } else {
+            _nemoNoGrow += samples.length;   // không ra token mới → cộng dồn audio "im" (độc lập âm lượng)
           }
         } else {
-          _nemoNoGrow += samples.length;   // không ra token mới → cộng dồn audio "im" (độc lập âm lượng)
+          _nemoVadPrev = samples;            // im lặng (đã gate) → giữ frame mới nhất làm pre-roll; KHÔNG chạy encoder
+          _nemoNoGrow += samples.length;     // vẫn cộng dồn để endpoint chốt câu (im = không token mới)
         }
         _nemoUttLen += samples.length;
         // endpoint: đã từng mọc + ngừng mọc đủ lâu (ngừng nói), HOẶC câu quá dài. Mảnh đuôi NGẮN (từ nối/ngập ngừng
@@ -245,6 +325,7 @@ async function _pumpNemo() {
           _nemoLiveId = null; _nemoCommittedText = ''; _nemoLiveText = '';
           sess.reset();
           _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
+          _resetNemoVad();   // câu chốt → reset recurrent state/hangover/residual VAD cho câu kế (im sau đây sẽ bị gate)
         }
       } catch (e) {
         // BẤT KỲ lỗi nào (accept/decode/finish/cache hỏng do audio bất thường, vd KHI TUA LẠI audio) → TÁI TẠO
@@ -252,6 +333,7 @@ async function _pumpNemo() {
         console.warn('[audio-stt] nemo pump lỗi → tái tạo session:', e && e.message);
         _nemo = null; _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = '';
         _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
+        _resetNemoVad();
       }
     }
   } finally { _nemoPumping = false; }
@@ -486,6 +568,7 @@ function resetSegmentation() {
   if (_nemo) { try { _nemo.reset(); } catch {} }
   _nemo = null; _nemoLang = null; _nemoLiveId = null; _nemoLiveText = ''; _nemoCommittedText = '';
   _nemoQ.length = 0; _nemoNoGrow = 0; _nemoUttLen = 0; _nemoGrew = false;
+  _resetNemoVad();   // VAD-gate: xoá recurrent state/hangover/residual (giữ session _nemoVad đã nạp để khỏi load lại)
 }
 
 // Không còn server Python — giữ tên export cho main.js (no-op).

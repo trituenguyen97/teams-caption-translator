@@ -42,12 +42,19 @@ async function createNemotron(dir, opts = {}) {
   const BLANK = cfg.blank_id;
   // max_symbols/frame: hạ 10→4 (NeMo mặc định 10 cho offline; streaming chunk nhỏ không cần, giảm cơ hội "xả" lặp/collapse).
   const MAXSYM = opts.maxSymbols || 4;
-  // Encoder (nặng ~88% thời gian) đa luồng; decoder(LSTM)/joint TÍ HON nhưng gọi MỖI TOKEN → để 1 thread mỗi
-  // cái: 3 session × 4 thread = ~12 thread oversubscribe CPU hybrid (đo: RTF ~1.0, 6.7 core) → tranh chấp, CHẬM.
-  // enc(4)+dec(1)+joint(1)=6 thread → hết oversubscribe, RTF về ~0.4-0.5 (đủ headroom cho streaming real-time).
+  // Encoder (nặng ~88% thời gian); decoder(LSTM)/joint TÍ HON nhưng gọi MỖI TOKEN → để 1 thread mỗi cái.
+  // Encoder int4 (MatMulNBits) NGHẼN băng thông DDR5 → latency PHẲNG từ 2→4 thread (đo scripts/bench-ort-threads):
+  // thread 3-4 chỉ thêm core đọc bus đã bão hoà = lãng phí (+38% CPU-giây, 0 nhanh hơn). Mặc định ENC = 2 thread
+  // (caller stt.js truyền 2): 1.7 core/run, RTF ~0.22-0.28 « 1, chừa core cho dịch MiLMMT tranh CPU cùng máy.
   const O = ort();
-  const soEnc = { intraOpNumThreads: opts.threads || 4, interOpNumThreads: 1, executionMode: 'sequential' };
-  const soSmall = { intraOpNumThreads: 1, interOpNumThreads: 1, executionMode: 'sequential' };
+  // allow_spinning='0': TẮT busy-wait của threadpool intra/inter-op GIỮA các chunk (cadence 560ms). Đo A/B trên
+  // máy này (scripts/bench-ort-spinning.cjs): encoder spinning ON = 2.10 core idle, OFF = 0.40 core → GIẢI PHÓNG
+  // ~1.7 core cho dịch MiLMMT (memory-bound, tranh CPU cùng cores). Giá: run 94→109ms (+16%) nhưng RTF 0.20 « 1
+  // (budget 560ms dư sức). ⚠ binding IM LẶNG bỏ key sai → xác minh bằng DELTA CPU, KHÔNG bằng create() chạy được.
+  //   Key LÁ nằm dưới extra.session (binding tự thêm tiền tố 'session.'); viết đủ 'session.intra_op…' = no-op.
+  const _noSpin = { 'intra_op.allow_spinning': '0', 'inter_op.allow_spinning': '0' };
+  const soEnc = { intraOpNumThreads: opts.threads || 2, interOpNumThreads: 1, executionMode: 'sequential', extra: { session: _noSpin } };
+  const soSmall = { intraOpNumThreads: 1, interOpNumThreads: 1, executionMode: 'sequential', extra: { session: _noSpin } };
   const enc = await O.InferenceSession.create(path.join(dir, 'encoder.onnx'), soEnc);
   const dec = await O.InferenceSession.create(path.join(dir, 'decoder.onnx'), soSmall);
   const joint = await O.InferenceSession.create(path.join(dir, 'joint.onnx'), soSmall);

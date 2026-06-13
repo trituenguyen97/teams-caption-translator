@@ -7,6 +7,11 @@
 // Windows chỉ giữ MỘT onnxruntime.dll mỗi process: nếu sherpa (bundle ORT riêng) load trước thì onnxruntime-node
 // load SAU sẽ chết "The operating system cannot run %1" → punctuate-ja (dấu câu Nhật) + stt-moonshine (STT Hàn)
 // chết lặng lẽ. Load onnxruntime-node TRƯỚC thì cả hai runtime cùng sống (đã verify). ĐỪNG chèn require lên trên dòng này.
+// libuv threadpool: STT (onnxruntime enc/dec/joint + silero VAD) VÀ TTS (sherpa generateAsync) DÙNG CHUNG pool libuv
+// (mặc định 4). 1 lần TTS synth giữ slot ~0.5s → chèn hàng trước các Run() ngắn của RNN-T STT khi 3 tầng cùng chạy →
+// jank cadence partial. Nâng 8 (≤14 core, không oversubscribe) để TTS không kẹt sau STT. PHẢI đặt TRƯỚC khi native
+// module spin pool (= trước require dưới). Không phải require nên không vi phạm cảnh báo thứ tự load ở trên.
+process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '8';
 try { require('onnxruntime-node'); } catch (e) { console.warn('[main] onnxruntime-node load lỗi (punctuation ja + STT ko sẽ tắt):', e.message); }
 
 const { app, BrowserWindow, desktopCapturer, Menu, nativeTheme } = require('electron');
@@ -189,11 +194,13 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopSTTServer();
   try { stopUiaHelper(); } catch {}
+  try { require('./src/process-audio').stop(); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   try { stopUiaHelper(); } catch {}
+  try { require('./src/process-audio').stop(); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
 });

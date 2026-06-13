@@ -16,6 +16,8 @@ const {
 } = require('./cdp-browser');
 const { handlePcm, resetSegmentation, flushStreaming, warmModel } = require('./audio-stt');
 const stt = require('./stt');
+const tts = require('./tts');
+const processAudio = require('./process-audio');
 const uia = require('./uia-captions');
 const overlay = require('./caption-overlay');
 const { timestamp } = require('./caption-service');
@@ -66,6 +68,18 @@ function registerAll(app) {
     Store.set('lang', lang);   // lưu để mở app giữ nguyên ngôn ngữ đích đã chọn
   });
 
+  // ── TTS (đọc to bản dịch tiếng Việt — Piper VITS, sherpa-onnx) ──
+  // Renderer quyết khi nào đọc (biết target=vi + bật loa); main chỉ sinh PCM off-thread rồi trả về phát.
+  ipcMain.handle('tts-available', () => { try { return tts.isAvailable(); } catch { return false; } });
+  ipcMain.handle('tts-warm',      async () => { try { return !!(await tts.warm()); } catch { return false; } });
+  ipcMain.handle('tts-speak', async (_, text) => {
+    try {
+      // Supertonic-3 đa ngữ: đọc theo NGÔN NGỮ ĐÍCH hiện tại (state.langCode) + GIỌNG đã chọn (Store ttsVoice 0-9).
+      const r = await tts.synthesize(text, { sid: Store.get('ttsVoice', 0), lang: state.langCode });
+      return r ? { samples: r.samples, sampleRate: r.sampleRate } : null;
+    } catch (e) { console.warn('[tts] speak lỗi:', e.message); return null; }
+  });
+
   // ── Window ────────────────────────────
   ipcMain.on('focus-window', () => { state.win?.show(); state.win?.focus(); });
   ipcMain.on('window-minimize', () => { try { state.win?.minimize(); } catch {} });
@@ -89,16 +103,26 @@ function registerAll(app) {
       const label = state.captureSource === 'mic' ? 'Microphone' : 'System Audio';
       if (state.audioPaused) {
         try { flushStreaming(); } catch {}        // chốt nốt câu streaming đang dở → dịch trước khi dừng
-        send('stop-audio-capture', {});
+        if (processAudio.isActive()) processAudio.stop();   // nguồn = 1 tiến trình (main-side) → dừng helper
+        else send('stop-audio-capture', {});                // nguồn = toàn hệ thống (renderer getDisplayMedia)
         send('cc-state', { active: false });
         send('status', { type: 'ended', key: 'status.recordingPaused' });
         return;
       }
-      // STT cục bộ sherpa-onnx (mỗi ngôn ngữ 1 model offline — xem src/stt.js): renderer capture PCM → handlePcm.
-      try { resetSegmentation(); } catch {}   // bắt đầu phiên ghi mới → VAD sạch
-      send('start-audio-capture', { source: state.captureSource });
-      send('cc-state', { active: true });
-      send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
+      // STT cục bộ (Nemotron, xem src/stt.js). Nguồn audio:
+      //  - audioProcessPid đã chọn → thu THEO TIẾN TRÌNH ở main (process-audio → handlePcm); khử feedback TTS.
+      //  - chưa chọn ("Toàn hệ thống") → renderer getDisplayMedia loopback như cũ.
+      try { resetSegmentation(); } catch {}   // bắt đầu phiên ghi mới → VAD/stream sạch
+      const _pid = Store.get('audioProcessPid', '');
+      if (_pid && state.captureSource === 'system' && processAudio.isSupported() && processAudio.start(_pid)) {
+        send('cc-state', { active: true });
+        send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
+      } else {
+        if (_pid) console.warn('[toggle] thu theo tiến trình thất bại → fallback toàn hệ thống');
+        send('start-audio-capture', { source: state.captureSource });
+        send('cc-state', { active: true });
+        send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
+      }
       return;
     }
 
@@ -150,6 +174,12 @@ function registerAll(app) {
     else if (data && data.buffer) f32 = new Float32Array(data.buffer, data.byteOffset || 0, Math.floor((data.byteLength || 0) / 4));
     else return;
     try { await handlePcm(f32); } catch (e) { console.warn('[audio-pcm] handlePcm lỗi:', e.message); }
+  });
+
+  // ── Liệt kê tiến trình có cửa sổ để chọn nguồn audio theo tiến trình (Process Loopback) ──
+  ipcMain.handle('list-audio-processes', async () => {
+    try { return processAudio.isSupported() ? await processAudio.listProcesses() : []; }
+    catch (e) { console.warn('[list-audio-processes] lỗi:', e.message); return []; }
   });
 
   // ── Ngôn ngữ caption Teams (spoken language) ──
@@ -219,6 +249,10 @@ function registerAll(app) {
     captureSource:   Store.get('captureSource',   'teams'),
     micDeviceId:     Store.get('micDeviceId',     ''),
     srcLang:         Store.get('srcLang',         ''),
+    ttsEnabled:      Store.get('ttsEnabled',      false),
+    ttsVoice:        Store.get('ttsVoice',        0),
+    audioProcessPid:   Store.get('audioProcessPid',   ''),
+    audioProcessTitle: Store.get('audioProcessTitle', ''),
     overlayEnabled:  Store.get('overlayEnabled',  true),
     localPreset:        Store.get('localPreset',        'milmmt'),
     localBaseUrl:       Store.get('localBaseUrl',       LOCAL_DEFAULTS.baseUrl),
@@ -236,11 +270,33 @@ function registerAll(app) {
       if (s.captureSource !== state.captureSource) {
         state.captureSourceChanged = true;
         state.userActive = false;   // đổi nguồn → reset về idle, không auto-play nguồn mới (cũng tránh teams auto-resume)
+        try { if (processAudio.isActive()) processAudio.stop(); } catch {}   // đổi nguồn → dừng thu-theo-tiến-trình đang chạy
       }
       state.captureSource = s.captureSource;
       Store.set('captureSource', s.captureSource);
     }
     if (s.micDeviceId     !== undefined) { Store.set('micDeviceId',     s.micDeviceId); }
+    if (s.audioProcessTitle !== undefined) { Store.set('audioProcessTitle', s.audioProcessTitle || ''); }
+    if (s.audioProcessPid !== undefined) {
+      const next = s.audioProcessPid || '';
+      const changed = next !== Store.get('audioProcessPid', '');
+      Store.set('audioProcessPid', next);
+      // Đổi tiến trình khi ĐANG thu (system, đã ▶) → khởi động lại nguồn cho khớp lựa chọn mới.
+      if (changed && state.captureSource === 'system' && !state.audioPaused) {
+        try { flushStreaming(); } catch {}
+        try { resetSegmentation(); } catch {}
+        if (processAudio.isActive()) processAudio.stop();
+        else send('stop-audio-capture', {});
+        if (next && processAudio.isSupported() && processAudio.start(next)) { /* thu theo tiến trình */ }
+        else send('start-audio-capture', { source: state.captureSource });
+      }
+    }
+    if (s.ttsVoice        !== undefined) { Store.set('ttsVoice', Math.max(0, Math.min(9, parseInt(s.ttsVoice, 10) || 0))); }
+    if (s.ttsEnabled      !== undefined) {
+      Store.set('ttsEnabled', !!s.ttsEnabled);
+      if (s.ttsEnabled) { try { tts.warm(); } catch {} }   // bật loa → nạp sẵn model để câu đầu không khựng
+      else { try { tts.unload(); } catch {} }              // tắt loa → nhả RAM model (B2)
+    }
     if (s.srcLang         !== undefined) {
       const srcChanged = s.srcLang !== Store.get('srcLang', '');
       Store.set('srcLang', s.srcLang); try { stt.setLanguage(s.srcLang); } catch {}

@@ -14,7 +14,13 @@ contextBridge.exposeInMainWorld('__caption', {
   sendAudioPcm:    buf  => ipcRenderer.send('audio-pcm', buf),
   setLang:        lang => ipcRenderer.send('set-lang',     lang),
   setSttLang:     lang => ipcRenderer.send('set-stt-lang', lang),
+
+  // TTS (đọc to bản dịch — Piper VITS tiếng Việt)
+  ttsAvailable:   ()   => ipcRenderer.invoke('tts-available'),
+  ttsWarm:        ()   => ipcRenderer.invoke('tts-warm'),
+  ttsSpeak:       text => ipcRenderer.invoke('tts-speak', text),
   getSttLang:     ()   => ipcRenderer.invoke('get-stt-lang'),
+  listAudioProcesses: () => ipcRenderer.invoke('list-audio-processes'),
   getSettings:    ()   => ipcRenderer.invoke('get-settings'),
   saveSettings:   s    => ipcRenderer.send('save-settings', s),
   getOpenWindows:     ()       => ipcRenderer.invoke('get-open-windows'),

@@ -172,7 +172,7 @@ function hasUntranslatedCJK(out, targetLang) {
 // nữa (chậm ~40%/câu vì vocab 262k) → avgLogprob=null → S6 không cộng. Bật lại nếu cần độ chính xác QE.
 const QE_THRESHOLD = 0.5;     // ngờ ≥ ngưỡng → ưu tiên Google (tinh chỉnh theo log thực tế)
 const _VI_DIACRITIC = /[ăâđêôơưĂÂĐÊÔƠƯạáàảãậấầẩẫắằẳẵặẹéèẻẽệếềểễọóòỏõộốồổỗợớờởỡụúùủũựứừửữỵýỳỷỹĐ]/;
-let _lastMilmmtQE = 1;        // độ ngờ lần MiLMMT gần nhất (local concurrency=1 → an toàn dùng biến module)
+// (QE giờ trả PER-REQUEST qua qeOut của translateLocalMiLMMT — bỏ biến module _lastMilmmtQE để khỏi đua ở np≥2)
 
 function qeSuspicion(jaSrc, vi, avgLogprob) {
   if (!vi || vi.trim().length < 2) return 1;                                        // rỗng / quá ngắn
@@ -617,7 +617,10 @@ function detectSourceLang(text) {
   return 'English';
 }
 
-async function translateLocalMiLMMT(text, tgtLang) {
+// qeOut (tùy chọn): object nhận điểm QE PER-REQUEST (qeOut.qe). Tránh biến module-global đua khi concurrency>1
+// (np=2): 2 call song song ghi đè QE của nhau trước khi reader đọc → quyết định fallback-Google sai ~½. Caller
+// ngoài (test) gọi không truyền qeOut vẫn nhận string như cũ (tương thích ngược).
+async function translateLocalMiLMMT(text, tgtLang, qeOut) {
   if (Date.now() - _localLastFailTs < LOCAL_FAIL_COOLDOWN_MS) return null;
 
   const baseUrl = state.localBaseUrl || LOCAL_DEFAULTS.baseUrl;
@@ -663,10 +666,11 @@ async function translateLocalMiLMMT(text, tgtLang) {
     out = postprocessTranslation(out, text);   // #A: làm câu tự nhiên hơn
     // #QE: chấm độ ngờ bằng S1–S5 (chuỗi/độ dài/lặp/refusal). S6 (avg logprob) đã bỏ cùng n_probs
     // để tăng tốc ~40%/câu — qeSuspicion nhận avgLogprob=null sẽ tự bỏ qua S6.
-    _lastMilmmtQE = qeSuspicion(text, out, null);   // #QE: orchestrator dùng để quyết định fallback
+    const qe = qeSuspicion(text, out, null);   // #QE: orchestrator dùng để quyết định fallback (PER-REQUEST)
+    if (qeOut) qeOut.qe = qe;
     if (out) {
       const usage = j.timings ? ` | ${(j.timings.predicted_per_second || 0).toFixed(1)} tok/s` : '';
-      console.log('[milmmt] OK:', text.slice(0, 30), '→', out.slice(0, 30), `| QE=${_lastMilmmtQE.toFixed(2)}`, usage);
+      console.log('[milmmt] OK:', text.slice(0, 30), '→', out.slice(0, 30), `| QE=${qe.toFixed(2)}`, usage);
     }
     return out || null;
   } catch (e) {
@@ -720,11 +724,12 @@ async function _translateUncached(text) {
 
   if (state.provider === 'local') {
     // Local = MiLMMT-46 (model dịch JP→VI chuyên dụng, duy nhất). /completion greedy + QE.
-    const lResult = await translateLocalMiLMMT(text, state.targetLang);
+    const _qeRef = {};   // nhận QE per-request (không dùng biến module → an toàn khi concurrency=2)
+    const lResult = await translateLocalMiLMMT(text, state.targetLang, _qeRef);
     const lOk = lResult && lResult !== text && !isLLMRefusal(lResult, text)
       && !hasUntranslatedCJK(lResult);
     // #QE: chỉ tin MiLMMT khi độ ngờ thấp; ngờ cao (vd bịa tên / lệch nghĩa) → để Google xử lý
-    const suspicious = _lastMilmmtQE >= QE_THRESHOLD;
+    const suspicious = (_qeRef.qe == null ? 0 : _qeRef.qe) >= QE_THRESHOLD;
     if (lOk && !suspicious) return lResult;
     // MiLMMT ngờ hoặc lỗi → thử Google (thường chuẩn hơn cho tên/kanji)
     const gResult = await translateGoogleFree(text, state.targetLang);

@@ -1,0 +1,50 @@
+{
+   "version": "1.2.7",
+   "name": "application-loopback",
+   "author": {
+      "email": "matin.tat85@gmail.com",
+      "name": "Matin Tat",
+      "url": "https://github.com/WerdoxDev/application-loopback"
+   },
+   "repository": {
+      "type": "git",
+      "url": "https://github.com/WerdoxDev/application-loopback"
+   },
+   "license": "MIT",
+   "scripts": {
+      "build": "tsdown",
+      "prepublish": "bun run build"
+   },
+   "devDependencies": {
+      "@biomejs/biome": "2.0.2",
+      "@types/bun": "latest",
+      "chalk": "^5.4.1",
+      "tsdown": "^0.12.9"
+   },
+   "type": "module",
+   "main": "dist/index.cjs",
+   "module": "dist/index.js",
+   "types": "dist/index.d.ts",
+   "files": [
+      "bin/**/*",
+      "dist/**/*"
+   ],
+   "peerDependencies": {
+      "typescript": "^5"
+   },
+   "keywords": [
+      "audio",
+      "audio-capture",
+      "loopback",
+      "wasapi",
+      "windows",
+      "windows-audio",
+      "pcm",
+      "per-process",
+      "nodejs",
+      "native",
+      "sound",
+      "child-process",
+      "low-level"
+   ]
+}

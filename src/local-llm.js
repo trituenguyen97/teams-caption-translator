@@ -525,6 +525,19 @@ function detectPCores() {
   return Math.max(2, total - 1); // Small CPU
 }
 
+// Diệt llama-server.exe MỒ CÔI (phiên trước crash/kill-9: parent chết, process còn sống giữ ~1GB RAM). Khớp ĐÚNG
+// model của app qua basename trong CommandLine → KHÔNG giết llama-server khác user đang chạy. Chỉ dùng nháy ĐƠN bên
+// trong -Command để khỏi escape nháy kép lồng. Gọi TRƯỚC spawn (startServer đã return sớm nếu server ta còn sống →
+// tới đây mà thấy process khớp = orphan thật).
+function reapOrphans(modelPath) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32' || !modelPath) return resolve();
+    const name = path.basename(modelPath).replace(/'/g, "''");
+    const cmd = `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'llama-server.exe' -and $_.CommandLine -like '*${name}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`;
+    exec(cmd, { windowsHide: true, timeout: 6000 }, () => { resolve(); });
+  });
+}
+
 async function startServer({ port = 8080, ctxSize, threads, ngl } = {}) {
   if (state.localServerProc) return { ok: true, alreadyRunning: true, pid: state.localServerProc.pid };
   const st = serverStatus();
@@ -569,6 +582,8 @@ async function startServer({ port = 8080, ctxSize, threads, ngl } = {}) {
   args.push('--poll', '0', '--mlock');
   if (onGpu) args.push('-fa', 'auto');   // chỉ bật fa khi offload GPU (iGPU Vulkan / CUDA)
   console.log(`[local-llm] spawn (MiLMMT: variant=${variant}, -ngl=${gpuLayers}, -t=${t}, -c=${ctx}, --poll 0 --mlock, fa=${onGpu ? 'auto' : 'off'}):`, exe);
+
+  await reapOrphans(st.modelPath);   // B3: dọn llama-server mồ côi (crash phiên trước) khớp model này TRƯỚC khi spawn
 
   return new Promise((resolve) => {
     const proc = spawn(exe, args, {

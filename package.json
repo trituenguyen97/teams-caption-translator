@@ -7,11 +7,13 @@
     "start": "electron .",
     "fetch-binaries": "node scripts/fetch-binaries.js",
     "fetch-stt-model": "node scripts/fetch-stt-model.js",
-    "prebuild": "node scripts/fetch-binaries.js && node scripts/fetch-stt-model.js",
+    "fetch-tts-model": "node scripts/fetch-tts-model.js",
+    "prebuild": "node scripts/fetch-binaries.js && node scripts/fetch-stt-model.js && node scripts/fetch-tts-model.js",
     "build": "electron-builder"
   },
   "dependencies": {
     "@geolonia/japanese-numeral": "^1.0.2",
+    "application-loopback": "1.2.7",
     "onnxruntime-node": "^1.26.0",
     "puppeteer-core": "^24.42.0",
     "sherpa-onnx-node": "^1.13.2"
@@ -42,19 +44,25 @@
       "!node_modules/zod/src/**",
       "!node_modules/**/*.{ts,map,md,markdown}",
       "!node_modules/**/*.d.ts",
-      "!node_modules/**/{test,tests,__tests__,example,examples,.github,docs,doc}/**"
+      "!node_modules/**/{test,tests,__tests__,example,examples,.github,docs,doc}/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"
     ],
     "asarUnpack": [
       "node_modules/sherpa-onnx-node/**",
       "node_modules/sherpa-onnx-*/**",
-      "node_modules/onnxruntime-node/**"
+      "node_modules/onnxruntime-node/**",
+      "node_modules/application-loopback/**"
     ],
     "extraResources": [
       {
         "from": "bin",
         "to": "bin",
         "filter": [
-          "**/*"
+          "**/*",
+          "!llama-server/cuda/**",
+          "!**/.cache/**"
         ]
       },
       {

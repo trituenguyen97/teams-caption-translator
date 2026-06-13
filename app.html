@@ -354,7 +354,8 @@
     #s-apikey,
     #s-provider,
     #s-capture,
-    #s-mic-device {
+    #s-mic-device,
+    #s-process {
       width: 100%;
       padding: 9px 11px !important;
       font-size: 12.5px !important;
@@ -372,10 +373,10 @@
     #s-apikey { font-family: var(--m3-mono); }
     .modal input::placeholder { color: var(--m3-on-4); }
     .modal input:hover,
-    #s-provider:hover, #s-capture:hover, #s-mic-device:hover { background: var(--m3-surf-4) !important; }
+    #s-provider:hover, #s-capture:hover, #s-mic-device:hover, #s-process:hover { background: var(--m3-surf-4) !important; }
     /* Khôi phục chevron ▾ cho select trong modal (bị 'background' shorthand !important ở trên xoá background-image) */
-    #s-provider, #s-capture, #s-mic-device,
-    #s-provider:hover, #s-capture:hover, #s-mic-device:hover {
+    #s-provider, #s-capture, #s-mic-device, #s-process,
+    #s-provider:hover, #s-capture:hover, #s-mic-device:hover, #s-process:hover {
       background-image:
         linear-gradient(45deg, transparent 50%, var(--m3-on-3) 50%),
         linear-gradient(135deg, var(--m3-on-3) 50%, transparent 50%) !important;
@@ -388,7 +389,8 @@
     #s-apikey:focus,
     #s-provider:focus,
     #s-capture:focus,
-    #s-mic-device:focus {
+    #s-mic-device:focus,
+    #s-process:focus {
       border-color: var(--m3-accent) !important;
       box-shadow: 0 0 0 2px var(--m3-ring-edge), 0 0 0 5px var(--m3-ring-glow);
     }
@@ -913,6 +915,25 @@
     .lq-flag.lq-disabled { opacity:.55; cursor:default; }
     .lq-flag .fl.auto { align-items:center; justify-content:center; font-size:12px; }
 
+    /* ── Nút loa: đọc to bản dịch (luôn hiện). Bấm → popup chọn giọng (có "Tắt"). TẮT = xám mờ, BẬT = nền accent ── */
+    .lq-tts { width:26px; height:20px; padding:0 !important; margin-left:2px; border-radius:6px !important;
+      border:1px solid var(--m3-line-2) !important; background:var(--m3-surf-3) !important;
+      display:inline-flex; align-items:center; justify-content:center; font-size:12px; line-height:1; cursor:pointer;
+      opacity:.55; filter:grayscale(1);
+      transition:opacity var(--m3-t), background var(--m3-t), box-shadow var(--m3-t), transform var(--m3-dur) var(--m3-ease); }
+    .lq-tts:hover { opacity:.9; filter:none; box-shadow:0 0 0 2px var(--m3-line-2); }
+    .lq-tts:active { transform:scale(.92); }
+    .lq-tts.active { opacity:1; filter:none; background:var(--m3-accent-ctr) !important; border-color:transparent !important; box-shadow:0 0 0 1px var(--m3-accent); }
+    .lq-tts.speaking { animation:blink 1s infinite; }
+    /* popup chọn giọng — list dọc, neo phải dưới nút loa */
+    .lq-tts-pop { left:auto !important; right:0; flex-direction:column !important; flex-wrap:nowrap !important; gap:2px !important; max-width:none !important; min-width:128px; max-height:260px; overflow-y:auto; }
+    .lq-tts-opt { display:flex; align-items:center; gap:7px; width:100%; text-align:left; background:transparent !important; border:none !important;
+      color:var(--m3-on-2) !important; padding:7px 10px; border-radius:8px !important; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap;
+      transition:background var(--m3-t), color var(--m3-t); }
+    .lq-tts-opt:hover { background:var(--m3-hover) !important; color:var(--m3-on) !important; }
+    .lq-tts-opt.sel { background:var(--m3-accent-ctr) !important; color:var(--m3-accent-on) !important; }
+    .lq-tts-opt .tk { width:14px; display:inline-flex; justify-content:center; flex-shrink:0; }
+
     /* ── Theme switch (☀️ ⟷ 🌙) — bên nào đang chọn thì sáng + núm trượt sang đó ── */
     .theme-switch { position:relative; width:52px; height:26px; flex-shrink:0; padding:0 !important; border-radius:999px !important; border:1px solid var(--m3-line-2) !important; background:var(--m3-surf-3) !important; display:inline-flex; align-items:center; cursor:pointer; }
     .theme-switch .theme-ic { position:relative; z-index:1; width:26px; height:26px; display:inline-flex; align-items:center; justify-content:center; font-size:13px; line-height:1; opacity:.4; transition:opacity .18s var(--m3-ease); }
@@ -1127,6 +1148,8 @@
       <button class="lq-flag" id="lq-src" title="Ngôn ngữ nguồn"></button>
       <span class="lq-arrow" aria-hidden="true">→</span>
       <button class="lq-flag" id="lq-tgt" data-i18n-title="header.langTitle" title="Ngôn ngữ dịch"></button>
+      <button class="lq-tts" id="lq-tts" title="Đọc to bản dịch — chọn giọng" aria-haspopup="true" aria-expanded="false">🔊</button>
+      <div class="lq-pop lq-tts-pop" id="lq-tts-pop"></div>
       <div class="lq-pop" id="lq-src-pop"></div>
       <div class="lq-pop" id="lq-tgt-pop"></div>
     </div>
@@ -1153,6 +1176,10 @@
       <div class="menu-row" id="s-mic-row" style="display:none">
         <span data-i18n="settings.chooseMic">Chọn Microphone</span>
         <select id="s-mic-device"></select>
+      </div>
+      <div class="menu-row" id="s-process-row" style="display:none">
+        <span data-i18n="settings.audioProcess">Thu từ tiến trình</span>
+        <select id="s-process"><option value="">Toàn hệ thống</option></select>
       </div>
       <div class="menu-sep"></div>
 
@@ -1250,6 +1277,17 @@
     let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
     let _currentProvider = 'online';  // theo dõi provider hiện tại
     let _srcLang = 'ja';           // ngôn ngữ nguồn đã chọn (system/mic); Teams thì auto theo Teams
+    let _tgtLang = 'vi';           // ngôn ngữ đích hiện tại (đồng bộ với cờ lq-tgt)
+    // ── TTS đọc to bản dịch (Supertonic-3 đa ngữ) ── bật + giọng (sid 0-9) + có model + hàng đợi phát nối tiếp
+    let _ttsOn = false, _ttsAvail = false, _ttsVoice = 0;
+    let _ttsQueue = [], _ttsBusy = false, _ttsPlayCtx = null, _ttsCurSrc = null, _ttsCurEnd = null, _ttsResolvePlay = null;
+    const _ttsSpoken = new Set();  // id câu đã đọc → không đọc lại khi entry cập nhật/đổi
+    // M1: chặn TTS trôi (họp dày → dịch ra nhanh hơn Piper đọc → audio tụt hậu vô hạn). Giữ tổng audio CHỜ ≤ budget,
+    //     bỏ câu CŨ nhất (chưa đọc) khi vượt — người nghe theo kịp hội thoại trực tiếp thay vì đọc câu cách đó vài phút.
+    const _TTS_BUDGET_S = 6;        // tổng audio chờ tối đa (giây) → vượt thì bỏ câu cũ nhất
+    const _TTS_HARD_S = 12;         // trần cứng → chỉ giữ câu mới nhất
+    const _TTS_SPLIT_CHARS = 80;    // M2: câu dài hơn → tách theo dấu câu (≈3.5s) để đọc MỆNH ĐỀ ĐẦU sớm hơn (giảm lag)
+    const _ttsEstSec = (t) => (t ? t.length : 0) * 0.045;   // ước lượng thời lượng phát (đo: 34ch→1.32s, 261ch→12.64s)
     const PROVIDER_NAMES = {
       online: 'Online (auto)', local: 'LOCAL TRANSLATE',
       // legacy — store cũ chưa migrate vẫn hiển đúng tên
@@ -1301,14 +1339,19 @@
       try { setFlagActive(uilangRow, s.uiLang || 'vi'); } catch (e) {}
       // Khôi phục ngôn ngữ ĐÍCH (quick selector cạnh ▶) + báo backend.
       const _lang = s.lang || 'vi';
+      _tgtLang = _lang;
       try { setQuickFlag(lqTgt, _lang); setFlagActive(lqTgtPop, _lang); } catch (e) {}
       api.setLang(_lang);
+      _ttsOn = !!s.ttsEnabled;
+      _ttsVoice = Math.max(0, Math.min(9, parseInt(s.ttsVoice, 10) || 0));
       // Ngôn ngữ NGUỒN (system/mic): mặc định 'ja' (app JP→VI) nếu chưa lưu → lưu để feed Whisper.
       // (Hiển thị cờ/auto do applyCaptureUI quyết theo nguồn — Teams = auto.)
       _srcLang = s.srcLang || 'ja';
       try { setFlagActive(lqSrcPop, _srcLang); } catch (e) {}
       if (!s.srcLang) api.saveSettings({ srcLang: _srcLang });
       _currentSource = s.captureSource || 'teams';
+      _audioProcessPid = s.audioProcessPid || '';
+      _audioProcessTitle = s.audioProcessTitle || '';
       try { renderEmpty(); } catch (e) {}
       const prov = s.provider || 'online';
       _currentProvider = prov;
@@ -1316,6 +1359,12 @@
         setProviderRadio(prov);
         if (sCapture)  { sCapture.value = _currentSource; applyCaptureUI(_currentSource); }
         if (_currentSource === 'mic') loadMicDevices(s.micDeviceId || '');
+        if (_currentSource === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle);
+      } catch (e) {}
+      // TTS: hỏi main đã có model Piper vi chưa → quyết hiện nút loa (applyCaptureUI ở trên đã gọi refreshTtsBtn,
+      // nhưng lúc đó _ttsAvail còn false; query xong refresh lại). Bật sẵn từ lần trước → nạp model nền.
+      try {
+        api.ttsAvailable().then(ok => { _ttsAvail = !!ok; refreshTtsBtn(); if (_ttsOn && _ttsAvail) { try { api.ttsWarm(); } catch (e) {} } });
       } catch (e) {}
     });
 
@@ -1398,6 +1447,25 @@
       });
     }
 
+    // ── A1: hiện DẦN text nguồn của PARTIAL (mọc đơn điệu) → "chảy" mượt thay vì nhảy cục mỗi chunk ~560ms.
+    //   Chỉ smooth partial (preview nguồn streaming); câu CHỐT hiện đủ ngay. 0 CPU inference (thuần render, rAF).
+    const _revealing = new Set();   // entry el đang lộ dần (_origShown < _origFull.length)
+    let _revealRAF = 0;
+    function _startReveal() { if (!_revealRAF) _revealRAF = requestAnimationFrame(_revealTick); }
+    function _revealTick() {
+      _revealRAF = 0;
+      for (const el of [..._revealing]) {
+        const full = el._origFull || '';
+        let shown = el._origShown || 0;
+        if (shown >= full.length) { _revealing.delete(el); el._origShown = full.length; continue; }
+        // ease-out: đuổi ~10% khoảng cách mỗi frame (min 1 ký tự) → lộ hết ~350-450ms, liền mạch khi chunk mới tới.
+        shown = Math.min(full.length, shown + Math.max(1, Math.ceil((full.length - shown) * 0.10)));
+        el._origShown = shown;
+        el._orig.textContent = full.slice(0, shown);
+      }
+      if (_revealing.size) _startReveal();
+    }
+
     // ── Caption: hiển/cập nhật entry (pending rồi được dịch) ──
     api.onCaptionLive(({ id, author, original, translated, ts, tsMs, isPartial }) => {
       listEl.querySelector('.empty, .hint-banner')?.remove();
@@ -1417,6 +1485,8 @@
           tsMs: prev?.tsMs || tsMs || Date.now(),
         });
         exportOrigBtn.disabled = false;   // có nội dung → bật nút export
+        // Đọc to bản dịch (nếu bật loa) — chỉ câu CHỐT, không pending/partial/lỗi, mỗi id 1 lần.
+        if (_ttsOn && !isFailed && translated) ttsEnqueue(id, translated);
       }
 
       // Entry đã bị evict khỏi DOM (họp dài) → chỉ giữ data ở trên, KHÔNG tái tạo node
@@ -1448,7 +1518,16 @@
       // textContent tự escape nên không cần esc().
       if (el._author.textContent !== (author || '')) el._author.textContent = author || '';
       if (el._ts.textContent !== (ts || '')) el._ts.textContent = ts || '';
-      if (el._orig.textContent !== (original || '')) el._orig.textContent = original || '';
+      // A1: PARTIAL → lộ dần phần nguồn mới (chảy mượt); CHỐT/không-partial → hiện đủ ngay (snap).
+      const _origStr = original || '';
+      if (isPartial) {
+        el._origFull = _origStr;
+        if ((el._origShown || 0) < _origStr.length) { _revealing.add(el); _startReveal(); }
+        else if ((el._origShown || 0) > _origStr.length) { el._origShown = _origStr.length; el._orig.textContent = _origStr; }   // partial mới ngắn hơn (reset câu) → snap
+      } else {
+        el._origFull = _origStr; el._origShown = _origStr.length; _revealing.delete(el);
+        if (el._orig.textContent !== _origStr) el._orig.textContent = _origStr;
+      }
       if (isPending) {
         el._tr.innerHTML = '<span style="color:var(--m3-on-2);font-style:italic">đang dịch…</span>';
       } else if (isFailed) {
@@ -1469,6 +1548,8 @@
     const sCapture      = document.getElementById('s-capture');
     const sMicRow       = document.getElementById('s-mic-row');
     const sMicDevice    = document.getElementById('s-mic-device');
+    const sProcessRow   = document.getElementById('s-process-row');
+    const sProcess      = document.getElementById('s-process');
     const providerRadio = document.getElementById('provider-radio');
 
     // Nguồn = mic → hiện ô chọn microphone. Ngôn ngữ nguồn (lq-src cạnh ▶):
@@ -1477,6 +1558,8 @@
     //  - system/mic: chọn tay → hiện cờ _srcLang, bấm mở picker.
     function applyCaptureUI(source) {
       sMicRow.style.display = source === 'mic' ? '' : 'none';
+      // "Thu từ tiến trình" chỉ áp cho Audio hệ thống (Teams dùng UIA, mic là thiết bị vào — không loopback tiến trình).
+      if (sProcessRow) sProcessRow.style.display = source === 'system' ? '' : 'none';
       const lqSrcEl = document.getElementById('lq-src');
       if (lqSrcEl) {
         const teams = source === 'teams';
@@ -1485,6 +1568,7 @@
         lqSrcEl.title = teams ? t('srcLang.auto') : t('settings.srcLang');
         if (teams) { const p = document.getElementById('lq-src-pop'); if (p) p.classList.remove('open'); }
       }
+      try { refreshTtsBtn(); } catch (e) {}   // đổi nguồn → cập nhật hiện/ẩn nút loa (en→vi)
     }
 
     // provider radio (Online / Offline) → lưu ngay. Đồng bộ class .active (fallback nếu :has() không hỗ trợ).
@@ -1522,12 +1606,40 @@
     sCapture.addEventListener('change', () => {
       applyCaptureUI(sCapture.value);
       if (sCapture.value === 'mic') loadMicDevices(sMicDevice.value);
+      if (sCapture.value === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle);
       api.saveSettings({ captureSource: sCapture.value, micDeviceId: sMicDevice.value });
     });
 
     sMicDevice.addEventListener('change', () => {
       api.saveSettings({ micDeviceId: sMicDevice.value });
     });
+
+    // ── Thu theo TIẾN TRÌNH (Audio hệ thống): "Toàn hệ thống" + danh sách tiến trình có cửa sổ ──
+    // Chọn 1 tiến trình → main thu chỉ tiến trình đó (Process Loopback) → KHÔNG thu tiếng TTS của app → hết feedback.
+    let _audioProcessPid = '', _audioProcessTitle = '';
+    async function loadAudioProcesses(curPid, curTitle) {
+      if (!sProcess) return;
+      let procs = [];
+      try { procs = await api.listAudioProcesses() || []; } catch (e) {}
+      // Giữ "Toàn hệ thống" + lựa chọn đã lưu (kể cả khi tiến trình đó không còn trong danh sách cửa sổ hiện tại).
+      const opts = ['<option value="">Toàn hệ thống</option>'];
+      const has = procs.some(p => p.pid === curPid);
+      if (curPid && !has) opts.push(`<option value="${esc(curPid)}">${esc(curTitle || ('PID ' + curPid))} (đã lưu)</option>`);
+      for (const p of procs) opts.push(`<option value="${esc(p.pid)}">${esc(p.title)} — ${esc(p.pid)}</option>`);
+      sProcess.innerHTML = opts.join('');
+      sProcess.value = curPid || '';
+    }
+    if (sProcess) sProcess.addEventListener('change', () => {
+      _audioProcessPid = sProcess.value || '';
+      const sel = sProcess.options[sProcess.selectedIndex];
+      _audioProcessTitle = (_audioProcessPid && sel) ? sel.textContent.replace(/\s+—\s+\d+$/, '') : '';
+      api.saveSettings({ audioProcessPid: _audioProcessPid, audioProcessTitle: _audioProcessTitle });
+    });
+    // Mở menu ⋮ khi đang ở System → refresh danh sách tiến trình (app mới mở/đóng từ lần trước).
+    if (sProcess) {
+      const _mb = document.getElementById('menu-btn');
+      _mb && _mb.addEventListener('click', () => { if (sCapture && sCapture.value === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle); });
+    }
 
     // ── Header: đổi ngôn ngữ giao diện (🌐) + chế độ sáng/tối (🌙/☀️) — áp dụng + lưu NGAY (toggle trực tiếp) ──
     // ── Header menu (⋮): gộp ngôn ngữ dịch / ngôn ngữ app / theme / export / settings ──
@@ -1577,10 +1689,10 @@
     function setQuickFlag(btn, code) { if (btn) btn.innerHTML = flagInner(code); }
     // Source: ép chọn tay (system/mic) → lưu srcLang (main feed thẳng vào Whisper). Teams thì auto (disable).
     buildFlagRow(lqSrcPop, LANG_FLAG_ORDER, (code) => {
-      _srcLang = code; setQuickFlag(lqSrc, code); lqSrcPop.classList.remove('open'); api.saveSettings({ srcLang: code });
+      _srcLang = code; setQuickFlag(lqSrc, code); lqSrcPop.classList.remove('open'); api.saveSettings({ srcLang: code }); refreshTtsBtn();
     });
     buildFlagRow(lqTgtPop, LANG_FLAG_ORDER, (code) => {
-      setQuickFlag(lqTgt, code); lqTgtPop.classList.remove('open'); api.setLang(code);
+      _tgtLang = code; setQuickFlag(lqTgt, code); lqTgtPop.classList.remove('open'); api.setLang(code); refreshTtsBtn();
     });
     lqSrc.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1590,7 +1702,133 @@
     lqTgt.addEventListener('click', (e) => { e.stopPropagation(); lqSrcPop.classList.remove('open'); lqTgtPop.classList.toggle('open'); });
     lqSrcPop.addEventListener('click', (e) => e.stopPropagation());
     lqTgtPop.addEventListener('click', (e) => e.stopPropagation());
-    document.addEventListener('click', () => { lqSrcPop.classList.remove('open'); lqTgtPop.classList.remove('open'); });
+    document.addEventListener('click', () => { lqSrcPop.classList.remove('open'); lqTgtPop.classList.remove('open'); if (lqTtsPop) { lqTtsPop.classList.remove('open'); refreshTtsBtn(); } });
+
+    // ── TTS đọc to bản dịch (Supertonic-3 đa ngữ) ────────────────────────────────────────────────
+    // Nút loa LUÔN hiện (đọc MỌI ngôn ngữ đích). Bấm → popup chọn GIỌNG (Tắt + Giọng 1..10). Chọn giọng = bật;
+    // chọn "Tắt" = tắt. Ngôn ngữ đọc = ngôn ngữ ĐÍCH hiện tại (main tự map theo state.langCode).
+    const lqTts = document.getElementById('lq-tts');
+    const lqTtsPop = document.getElementById('lq-tts-pop');
+    const TTS_VOICES = 10;
+    function refreshTtsBtn() {
+      if (!lqTts) return;
+      lqTts.style.display = '';   // luôn hiện
+      lqTts.classList.toggle('active', _ttsOn);
+      lqTts.setAttribute('aria-expanded', lqTtsPop && lqTtsPop.classList.contains('open') ? 'true' : 'false');
+      lqTts.title = _ttsOn ? ('Đọc to bản dịch — Giọng ' + (_ttsVoice + 1) + ' (bấm đổi/tắt)') : 'Đọc to bản dịch — đang tắt (bấm chọn giọng)';
+    }
+    function buildTtsPop() {
+      if (!lqTtsPop) return;
+      let h = '<button type="button" class="lq-tts-opt' + (!_ttsOn ? ' sel' : '') + '" data-v="off"><span class="tk">' + (!_ttsOn ? '✓' : '') + '</span>🔇 Tắt</button>';
+      for (let i = 0; i < TTS_VOICES; i++) {
+        const sel = _ttsOn && _ttsVoice === i;
+        h += '<button type="button" class="lq-tts-opt' + (sel ? ' sel' : '') + '" data-v="' + i + '"><span class="tk">' + (sel ? '✓' : '') + '</span>Giọng ' + (i + 1) + '</button>';
+      }
+      lqTtsPop.innerHTML = h;
+    }
+    function _ttsUnlockAudio() {   // mở khoá AudioContext phát trong cú click (user gesture) → tránh autoplay-policy chặn câu đầu
+      try {
+        if (!_ttsPlayCtx || _ttsPlayCtx.state === 'closed') _ttsPlayCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (_ttsPlayCtx.state === 'suspended') _ttsPlayCtx.resume().catch(() => {});
+      } catch (e) {}
+    }
+    if (lqTts) lqTts.addEventListener('click', (e) => {
+      e.stopPropagation();
+      lqSrcPop.classList.remove('open'); lqTgtPop.classList.remove('open');
+      buildTtsPop();
+      lqTtsPop.classList.toggle('open');
+      refreshTtsBtn();
+    });
+    if (lqTtsPop) lqTtsPop.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const b = e.target.closest('.lq-tts-opt'); if (!b) return;
+      if (b.dataset.v === 'off') {
+        _ttsOn = false; api.saveSettings({ ttsEnabled: false }); ttsStop();
+      } else {
+        _ttsVoice = parseInt(b.dataset.v, 10) || 0; _ttsOn = true;
+        api.saveSettings({ ttsEnabled: true, ttsVoice: _ttsVoice });
+        try { api.ttsWarm(); } catch (e) {}
+        _ttsUnlockAudio();
+      }
+      lqTtsPop.classList.remove('open');
+      refreshTtsBtn();
+    });
+
+    // Phát PCM nối tiếp (FIFO) — synth ở main, phát ở renderer qua AudioContext riêng (tách context thu 16k).
+    function ttsPlayPcm(samples, sampleRate) {
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = () => { if (done) return; done = true; if (_ttsResolvePlay === finish) _ttsResolvePlay = null; resolve(); };
+        _ttsResolvePlay = finish;   // để ttsStop ép resolve (chống pump kẹt nếu onended không bắn)
+        try {
+          if (!_ttsPlayCtx || _ttsPlayCtx.state === 'closed')
+            _ttsPlayCtx = new (window.AudioContext || window.webkitAudioContext)();
+          if (_ttsPlayCtx.state === 'suspended') { _ttsPlayCtx.resume().catch(() => {}); }
+          const f32 = (samples instanceof Float32Array) ? samples : new Float32Array(samples);
+          const buf = _ttsPlayCtx.createBuffer(1, f32.length, sampleRate);
+          buf.getChannelData(0).set(f32);
+          const node = _ttsPlayCtx.createBufferSource();
+          node.buffer = buf; node.connect(_ttsPlayCtx.destination);
+          _ttsCurSrc = node;
+          _ttsCurEnd = _ttsPlayCtx.currentTime + buf.duration;   // M1: mốc kết thúc clip đang phát (tính pending)
+          node.onended = () => { if (_ttsCurSrc === node) { _ttsCurSrc = null; _ttsCurEnd = null; } finish(); };
+          node.start(0);
+        } catch (e) { finish(); }
+      });
+    }
+    async function ttsPump() {
+      if (_ttsBusy) return;
+      _ttsBusy = true;
+      try {
+        while (_ttsOn && _ttsQueue.length) {
+          const text = _ttsQueue.shift();
+          let res = null;
+          try { res = await api.ttsSpeak(text); } catch (e) { res = null; }
+          if (!_ttsOn) break;
+          if (!res || !res.samples || !res.samples.length) continue;
+          if (lqTts) lqTts.classList.add('speaking');
+          await ttsPlayPcm(res.samples, res.sampleRate);
+          if (lqTts && !_ttsQueue.length) lqTts.classList.remove('speaking');
+          if (_ttsOn && _ttsQueue.length) await new Promise(r => setTimeout(r, 160));  // nghỉ ngắn giữa 2 câu → đỡ dính liền
+        }
+      } finally { _ttsBusy = false; if (lqTts) lqTts.classList.remove('speaking'); }
+    }
+    function ttsStop() {
+      _ttsQueue = [];
+      try { if (_ttsCurSrc) { _ttsCurSrc.onended = null; _ttsCurSrc.stop(); } } catch (e) {}
+      _ttsCurSrc = null; _ttsCurEnd = null;
+      if (_ttsResolvePlay) _ttsResolvePlay();   // ép resolve promise ttsPlayPcm đang chờ → pump thoát await, _ttsBusy nhả (FIX: trước n:set onended=null làm promise treo vĩnh viễn → đổi giọng/tắt-bật là chết)
+      if (lqTts) lqTts.classList.remove('speaking');
+    }
+    // Tổng audio CHỜ phát (giây) = phần còn lại của clip đang phát + ước lượng mọi câu trong hàng đợi.
+    function _ttsPendingSec() {
+      let s = 0;
+      if (_ttsCurSrc && _ttsCurEnd != null && _ttsPlayCtx) s += Math.max(0, _ttsCurEnd - _ttsPlayCtx.currentTime);
+      for (const t of _ttsQueue) s += _ttsEstSec(t);
+      return s;
+    }
+    // M2: tách câu DÀI theo dấu câu/mệnh đề (gom tới ≲_TTS_SPLIT_CHARS) → đọc sớm + drop-oldest theo hạt mịn.
+    function _ttsSplit(text) {
+      const raw = text.split(/(?<=[,.;:!?])\s+/);
+      const out = []; let cur = '';
+      for (const seg of raw) {
+        if (cur && (cur + ' ' + seg).length > _TTS_SPLIT_CHARS) { out.push(cur.trim()); cur = seg; }
+        else cur = cur ? cur + ' ' + seg : seg;
+      }
+      if (cur.trim()) out.push(cur.trim());
+      return out.length ? out : [text];
+    }
+    function ttsEnqueue(id, text) {
+      if (!_ttsOn || !text) return;
+      if (id != null) { if (_ttsSpoken.has(id)) return; _ttsSpoken.add(id); }
+      // M2: câu dài → tách (budget không bị 1 blob dài phá; bắt đầu đọc mệnh đề đầu sớm hơn).
+      for (const p of (text.length > _TTS_SPLIT_CHARS ? _ttsSplit(text) : [text])) _ttsQueue.push(p);
+      // M1: vượt trần cứng → chỉ giữ câu MỚI nhất; còn lại bỏ câu CŨ nhất (chưa đọc) tới khi tổng ≤ budget.
+      if (_ttsPendingSec() > _TTS_HARD_S) _ttsQueue.splice(0, _ttsQueue.length - 1);
+      else while (_ttsQueue.length > 1 && _ttsPendingSec() > _TTS_BUDGET_S) _ttsQueue.shift();
+      if (_ttsSpoken.size > 1000) { const it = _ttsSpoken.values(); for (let i = 0; i < 300; i++) _ttsSpoken.delete(it.next().value); }
+      ttsPump();
+    }
 
     function updateThemeIcon() {
       const dark = document.documentElement.getAttribute('data-theme') !== 'light';
