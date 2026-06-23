@@ -371,6 +371,8 @@
     .modal input[type="password"],
     .modal input[type="text"],
     #s-apikey { font-family: var(--m3-mono); }
+    #lq-src, .lq-arrow { display: none !important; }   /* nguồn auto-detect (Gemini live-translate) → ẩn picker nguồn */
+    #s-apikey-status.ok { color: #4ec9b0; } #s-apikey-status.bad { color: #e57373; }
     .modal input::placeholder { color: var(--m3-on-4); }
     .modal input:hover,
     #s-provider:hover, #s-capture:hover, #s-mic-device:hover, #s-process:hover { background: var(--m3-surf-4) !important; }
@@ -527,6 +529,36 @@
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
 
     /* ── Caption list ── */
+    /* Vùng nội dung: list (dịch) + summary-panel chia 2 cột khi panel mở */
+    .content-row { flex: 1; min-height: 0; display: flex; overflow: hidden; position: relative; }
+    .content-row > .list { min-width: 0; }
+    .summary-panel { flex: 0 0 var(--sum-w, 360px); display: none; flex-direction: column; min-height: 0;
+      border-left: 1px solid var(--m3-line-2); background: var(--m3-surf-2); }
+    .summary-panel.open { display: flex; }
+    /* Thanh kéo chỉnh rộng 2 cột — overlay tuyệt đối (KHÔNG chiếm layout) nên đường viền liền mạch với footer */
+    .col-resizer { display: none; position: absolute; top: 0; bottom: 0; right: calc(var(--sum-w, 360px) - 4px);
+      width: 9px; cursor: col-resize; z-index: 5; touch-action: none; }
+    .summary-panel.open ~ .col-resizer { display: block; }
+    .col-resizer::after { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px; background: var(--m3-line-2); transition: background var(--m3-t); }
+    .col-resizer:hover::after, .col-resizer:active::after { background: var(--m3-accent); width: 2px; left: 3.5px; }
+    .summary-panel .sp-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; flex-shrink: 0;
+      border-bottom: 1px solid var(--m3-line-2); }
+    .summary-panel .sp-title { font-weight: 600; font-size: 12.5px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .summary-panel .sp-mini { padding: 3px 7px !important; font-size: 12px; background: transparent !important; border-color: transparent !important; }
+    .summary-panel .sp-mini:hover { background: var(--m3-hover) !important; }
+    .summary-panel .sp-body { flex: 1; overflow-y: auto; padding: 10px 12px; font-size: 12.5px; line-height: 1.55;
+      scrollbar-width: thin; scrollbar-color: var(--m3-surf-4) transparent; }
+    .summary-panel .sp-body h1, .summary-panel .sp-body h2, .summary-panel .sp-body h3, .summary-panel .sp-body h4 { margin: 10px 0 5px; font-size: 13px; }
+    .summary-panel .sp-body ul, .summary-panel .sp-body ol { margin: 4px 0 8px; padding-left: 18px; }
+    .summary-panel .sp-body li { margin: 2px 0; }
+    .summary-panel .sp-body table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 11.5px; }
+    .summary-panel .sp-body th, .summary-panel .sp-body td { border: 1px solid var(--m3-line-2); padding: 3px 6px; text-align: left; }
+    .summary-panel .sp-placeholder, .summary-panel .sp-error { color: var(--m3-on-3); padding: 16px 8px; text-align: center; font-size: 12px; line-height: 1.5; }
+    .summary-panel .sp-error { color: #e57373; }
+    .summary-panel .sp-foot { padding: 5px 10px; font-size: 10.5px; color: var(--m3-on-3); flex-shrink: 0;
+      border-top: 1px solid var(--m3-line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-height: 2.4em; }
+
     .list {
       flex: 1;
       overflow-y: auto;
@@ -691,14 +723,18 @@
     .footer {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 10px;
+      gap: 0;
+      padding: 0;
       background: var(--m3-surf);
       border-top: 1px solid var(--m3-line);
       box-shadow: 0 -1px 2px rgba(0,0,0,.22);
       flex-shrink: 0;
     }
     .footer button { font-size: 12px; padding: 6px 12px; }
+    .footer-trans { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+    .footer-sum { display: none; align-items: center; gap: 6px; flex: 0 0 var(--sum-w, 360px); padding: 8px 10px; border-left: 1px solid var(--m3-line-2); }
+    .footer-sum.open { display: flex; }
+    .footer-sum button { font-size: 12px; padding: 6px 10px; }
     .footer-count {
       font-size: 11.5px;
       color: var(--m3-on-3);
@@ -835,7 +871,8 @@
       background-image: var(--m3-grad-h) !important;
       box-shadow: 0 4px 16px rgba(70,110,240,.42);
     }
-    #sum-status { font-size: 11.5px !important; color: var(--m3-on-3) !important; }
+    #sum-status { font-size: 11.5px !important; color: var(--m3-on-3) !important;
+      max-height: 3.2em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 
     /* ── Reduced motion (cross-cutting a11y fix none of the candidates
        addressed). At meeting cadence the per-caption entrance fires
@@ -926,7 +963,7 @@
     .lq-tts.active { opacity:1; filter:none; background:var(--m3-accent-ctr) !important; border-color:transparent !important; box-shadow:0 0 0 1px var(--m3-accent); }
     .lq-tts.speaking { animation:blink 1s infinite; }
     /* popup chọn giọng — list dọc, neo phải dưới nút loa */
-    .lq-tts-pop { left:auto !important; right:0; flex-direction:column !important; flex-wrap:nowrap !important; gap:2px !important; max-width:none !important; min-width:128px; max-height:260px; overflow-y:auto; }
+    .lq-tts-pop { left:0; right:auto !important; flex-direction:column !important; flex-wrap:nowrap !important; gap:2px !important; max-width:none !important; min-width:148px; max-height:260px; overflow-y:auto; }
     .lq-tts-opt { display:flex; align-items:center; gap:7px; width:100%; text-align:left; background:transparent !important; border:none !important;
       color:var(--m3-on-2) !important; padding:7px 10px; border-radius:8px !important; font-size:12px; font-weight:600; cursor:pointer; white-space:nowrap;
       transition:background var(--m3-t), color var(--m3-t); }
@@ -1148,7 +1185,7 @@
       <button class="lq-flag" id="lq-src" title="Ngôn ngữ nguồn"></button>
       <span class="lq-arrow" aria-hidden="true">→</span>
       <button class="lq-flag" id="lq-tgt" data-i18n-title="header.langTitle" title="Ngôn ngữ dịch"></button>
-      <button class="lq-tts" id="lq-tts" title="Đọc to bản dịch — chọn giọng" aria-haspopup="true" aria-expanded="false">🔊</button>
+      <button class="lq-tts" id="lq-tts" title="Giọng dịch (Gemini)" style="display:none">🔊</button>
       <div class="lq-pop lq-tts-pop" id="lq-tts-pop"></div>
       <div class="lq-pop" id="lq-src-pop"></div>
       <div class="lq-pop" id="lq-tgt-pop"></div>
@@ -1168,9 +1205,9 @@
       <div class="menu-row">
         <span data-i18n="settings.audioSource">Nguồn âm thanh</span>
         <select id="s-capture">
-          <option value="teams" data-i18n="capture.teams">📹 Teams (Live Captions)</option>
+          <option value="teams" data-i18n="capture.teams">💬 Teams Live Caption</option>
           <option value="system" data-i18n="capture.system">🔊 Audio hệ thống</option>
-          <!-- <option value="mic" data-i18n="capture.mic">🎤 Microphone</option> -->
+          <option value="mic" data-i18n="capture.mic">🎤 Microphone</option>
         </select>
       </div>
       <div class="menu-row" id="s-mic-row" style="display:none">
@@ -1183,14 +1220,12 @@
       </div>
       <div class="menu-sep"></div>
 
-      <!-- Nhóm: Dịch thuật (dịch vụ) — ngôn ngữ nguồn/đích đã ra status bar cạnh ▶ -->
+      <!-- Nhóm: Dịch thuật — chỉ cần Gemini API key (live-translate tự STT + dịch + TTS) -->
       <div class="menu-group-label" data-i18n="group.translate">Dịch thuật</div>
-      <div class="menu-row">
-        <span data-i18n="settings.service">Dịch vụ</span>
-        <div class="radio-row" id="provider-radio">
-          <label class="radio-opt"><input type="radio" name="provider" value="online">🌐 Online</label>
-          <label class="radio-opt"><input type="radio" name="provider" value="local">🖥️ Offline</label>
-        </div>
+      <div class="menu-row" id="s-apikey-row">
+        <span data-i18n="settings.apiKey">Gemini API key</span>
+        <input type="password" id="s-apikey" placeholder="AIza…" autocomplete="off" spellcheck="false">
+        <span id="s-apikey-status" style="font-size:11px;min-height:14px"></span>
       </div>
 
       <div class="menu-sep"></div>
@@ -1202,29 +1237,51 @@
     </div>
   </div>
 
-  <!-- Caption list -->
-  <div class="list" id="list">
-    <div class="empty">
-      <span data-i18n="list.emptyTitle">Chờ captions từ Teams…</span><br>
-      <span class="empty-hint" data-i18n="list.emptyHint">Vào meeting → bật Live Captions</span>
+  <!-- Caption list + Summary panel (chia 2 cột khi panel mở) -->
+  <div class="content-row" id="content-row">
+    <div class="list" id="list">
+      <div class="empty">
+        <span data-i18n="list.emptyTitle">Chờ captions từ Teams…</span><br>
+        <span class="empty-hint" data-i18n="list.emptyHint">Vào meeting → bật Live Captions</span>
+      </div>
     </div>
+    <aside class="summary-panel" id="summary-panel">
+      <div class="sp-head">
+        <span class="sp-spinner" id="sp-spinner" style="display:none"><span class="m3-spinner-sm"></span></span>
+        <span class="sp-title">📋 Tóm tắt trực tiếp</span>
+        <button id="sp-close-btn" class="sp-mini" title="Đóng panel">✕</button>
+      </div>
+      <div class="sp-body" id="sp-body">
+        <div class="sp-placeholder">Tự động tóm tắt khi có đủ câu mới…</div>
+      </div>
+      <div class="sp-foot" id="sp-foot"></div>
+    </aside>
+    <div class="col-resizer" id="col-resizer" title="Kéo để chỉnh rộng"></div>
   </div>
 
   <!-- Footer -->
   <div class="footer">
-    <span class="footer-count" id="count">0 câu</span>
-    <div class="spacer"></div>
-    <button id="scroll-btn" class="active" data-i18n-title="footer.autoScrollTitle" title="Tự cuộn xuống">↓ <span data-i18n="footer.auto">Auto</span></button>
-    <button id="sum-btn" data-i18n-title="footer.summarizeTitle" title="Tóm tắt cuộc họp">📋 <span data-i18n="footer.summarize">Tóm tắt</span></button>
-    <span class="export-wrap">
-      <button id="export-orig-btn" data-i18n-title="status.exportOrigTitle" title="Xuất nội dung" disabled>💾 <span data-i18n="footer.export">Xuất</span></button>
-      <div id="export-menu" class="export-menu">
-        <button class="export-opt" data-mode="orig">📄 <span data-i18n="export.orig">Bản gốc</span></button>
-        <button class="export-opt" data-mode="both">🔁 <span data-i18n="export.both">Cả hai (gốc + dịch)</span></button>
-        <button class="export-opt" data-mode="trans">🌐 <span data-i18n="export.trans">Bản dịch</span></button>
-      </div>
-    </span>
-    <button id="clear-btn" data-i18n="footer.clear">Xóa</button>
+    <div class="footer-trans" id="footer-trans">
+      <span class="footer-count" id="count">0 câu</span>
+      <div class="spacer"></div>
+      <button id="scroll-btn" class="active" data-i18n-title="footer.autoScrollTitle" title="Tự cuộn xuống">↓ <span data-i18n="footer.auto">Auto</span></button>
+      <button id="sum-btn" data-i18n-title="footer.summarizeTitle" title="Tóm tắt cuộc họp">📋 <span data-i18n="footer.summarize">Tóm tắt</span></button>
+      <span class="export-wrap">
+        <button id="export-orig-btn" data-i18n-title="status.exportOrigTitle" title="Xuất nội dung" disabled>💾 <span data-i18n="footer.export">Xuất</span></button>
+        <div id="export-menu" class="export-menu">
+          <button class="export-opt" data-mode="orig">📄 <span data-i18n="export.orig">Bản gốc</span></button>
+          <button class="export-opt" data-mode="both">🔁 <span data-i18n="export.both">Cả hai (gốc + dịch)</span></button>
+          <button class="export-opt" data-mode="trans">🌐 <span data-i18n="export.trans">Bản dịch</span></button>
+        </div>
+      </span>
+      <button id="clear-btn" data-i18n="footer.clear">Xóa</button>
+    </div>
+    <div class="footer-sum" id="footer-sum">
+      <div class="spacer"></div>
+      <button id="sp-export-btn" title="Xuất .md" disabled>⬇ .md</button>
+      <button id="sp-copy-btn" title="Copy" disabled>⎘</button>
+      <button id="sp-clear-btn" title="Xóa tóm tắt">🗑</button>
+    </div>
   </div>
 
   <script src="src/i18n.js"></script>
@@ -1279,7 +1336,7 @@
     let _srcLang = 'ja';           // ngôn ngữ nguồn đã chọn (system/mic); Teams thì auto theo Teams
     let _tgtLang = 'vi';           // ngôn ngữ đích hiện tại (đồng bộ với cờ lq-tgt)
     // ── TTS đọc to bản dịch (Supertonic-3 đa ngữ) ── bật + giọng (sid 0-9) + có model + hàng đợi phát nối tiếp
-    let _ttsOn = false, _ttsAvail = false, _ttsVoice = 0;
+    let _ttsOn = false, _ttsAvail = false, _ttsVoice = 0, _gemAudioOn = true, _gemVoice = 'Achernar';
     let _ttsQueue = [], _ttsBusy = false, _ttsPlayCtx = null, _ttsCurSrc = null, _ttsCurEnd = null, _ttsResolvePlay = null;
     const _ttsSpoken = new Set();  // id câu đã đọc → không đọc lại khi entry cập nhật/đổi
     // M1: chặn TTS trôi (họp dày → dịch ra nhanh hơn Piper đọc → audio tụt hậu vô hạn). Giữ tổng audio CHỜ ≤ budget,
@@ -1342,29 +1399,27 @@
       _tgtLang = _lang;
       try { setQuickFlag(lqTgt, _lang); setFlagActive(lqTgtPop, _lang); } catch (e) {}
       api.setLang(_lang);
-      _ttsOn = !!s.ttsEnabled;
+      _ttsOn = false;   // TTS local (Supertonic) vẫn tắt — không đọc to dù settings cũ ttsEnabled=true
+      _gemAudioOn = s.geminiAudioOn !== false;   // phát giọng dịch Gemini (mặc định bật); nút loa hiện khi provider=gemini-live
+      _gemVoice = s.geminiVoice || 'Achernar';
       _ttsVoice = Math.max(0, Math.min(9, parseInt(s.ttsVoice, 10) || 0));
       // Ngôn ngữ NGUỒN (system/mic): mặc định 'ja' (app JP→VI) nếu chưa lưu → lưu để feed Whisper.
       // (Hiển thị cờ/auto do applyCaptureUI quyết theo nguồn — Teams = auto.)
       _srcLang = s.srcLang || 'ja';
       try { setFlagActive(lqSrcPop, _srcLang); } catch (e) {}
       if (!s.srcLang) api.saveSettings({ srcLang: _srcLang });
-      _currentSource = s.captureSource || 'teams';
+      _currentSource = s.captureSource || 'system';
       _audioProcessPid = s.audioProcessPid || '';
       _audioProcessTitle = s.audioProcessTitle || '';
       try { renderEmpty(); } catch (e) {}
-      const prov = s.provider || 'online';
-      _currentProvider = prov;
+      _currentProvider = 'gemini-live';   // engine duy nhất giờ là Gemini Live Translate
       try {
-        setProviderRadio(prov);
+        const apk = document.getElementById('s-apikey');
+        if (apk) { apk.value = s.apiKey || ''; if (apk.value) _validateApiKey(apk.value); }
         if (sCapture)  { sCapture.value = _currentSource; applyCaptureUI(_currentSource); }
         if (_currentSource === 'mic') loadMicDevices(s.micDeviceId || '');
         if (_currentSource === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle);
-      } catch (e) {}
-      // TTS: hỏi main đã có model Piper vi chưa → quyết hiện nút loa (applyCaptureUI ở trên đã gọi refreshTtsBtn,
-      // nhưng lúc đó _ttsAvail còn false; query xong refresh lại). Bật sẵn từ lần trước → nạp model nền.
-      try {
-        api.ttsAvailable().then(ok => { _ttsAvail = !!ok; refreshTtsBtn(); if (_ttsOn && _ttsAvail) { try { api.ttsWarm(); } catch (e) {} } });
+        refreshTtsBtn();
       } catch (e) {}
     });
 
@@ -1542,6 +1597,7 @@
     // ── CC state từ main process (5s check + sau toggle) ──
     api.onCcState(({ active }) => {
       setCaptionsState(active);
+      try { updateSpGptBtn(); } catch (e) {}   // dừng ghi + còn nội dung → hiện nút "Tổng (GPT)"
     });
 
     // ── Settings (đã gộp hết vào dropdown ⋮ — apply + lưu NGAY khi đổi) ──
@@ -1584,10 +1640,32 @@
       if (r) r.checked = true;
       syncProviderActive();
     }
-    providerRadio.addEventListener('change', (e) => {
+    // Ô API key LUÔN hiện: key dùng cho cả dịch (gemini-live) lẫn tóm tắt trực tiếp (gemini-3-flash).
+    function applyProviderUI(prov) {
+      const row = document.getElementById('s-apikey-row');
+      if (row) row.style.display = '';
+    }
+    if (providerRadio) providerRadio.addEventListener('change', (e) => {   // (provider radio đã gỡ — guard)
       syncProviderActive();
       if (e.target && e.target.value) api.saveSettings({ provider: e.target.value });
     });
+    // Gemini API key → lưu (debounce gõ) + VALIDATE khi rời ô (on-blur).
+    async function _validateApiKey(key) {
+      const st = document.getElementById('s-apikey-status'); if (!st) return;
+      const k = (key || '').trim();
+      if (!k) { st.textContent = ''; st.className = ''; return; }
+      st.textContent = '⏳ đang kiểm tra…'; st.className = '';
+      let r = null; try { r = await api.validateGeminiKey(k); } catch (e) { r = { ok: false, error: e.message }; }
+      if (r && r.ok) { st.textContent = '✓ Key hợp lệ'; st.className = 'ok'; }
+      else { st.textContent = '✕ Key không hợp lệ' + (r && r.error && r.error !== 'invalid' ? ' (' + r.error + ')' : ''); st.className = 'bad'; }
+    }
+    (function () {
+      const apk = document.getElementById('s-apikey');
+      if (!apk) return;
+      let _t = null;
+      apk.addEventListener('input', () => { clearTimeout(_t); _t = setTimeout(() => api.saveSettings({ apiKey: apk.value.trim() }), 500); const st = document.getElementById('s-apikey-status'); if (st) { st.textContent = ''; st.className = ''; } });
+      apk.addEventListener('blur',  () => { clearTimeout(_t); const k = apk.value.trim(); api.saveSettings({ apiKey: k }); _validateApiKey(k); });
+    })();
 
     async function loadMicDevices(currentId) {
       try {
@@ -1709,20 +1787,30 @@
     // chọn "Tắt" = tắt. Ngôn ngữ đọc = ngôn ngữ ĐÍCH hiện tại (main tự map theo state.langCode).
     const lqTts = document.getElementById('lq-tts');
     const lqTtsPop = document.getElementById('lq-tts-pop');
-    const TTS_VOICES = 10;
+    // Giọng Gemini Live (prebuilt). Đổi giọng → lưu geminiVoice → main recycle phiên áp giọng mới.
+    const GEM_VOICES = [
+      ['Achernar','Dịu êm'],['Aoede','Nhẹ nhàng'],['Sulafat','Ấm'],['Vindemiatrix','Dịu dàng'],['Achird','Thân thiện'],
+      ['Kore','Chắc'],['Charon','Nhiều thông tin'],['Puck','Rộn ràng'],['Zephyr','Tươi sáng'],['Leda','Trẻ trung'],
+      ['Fenrir','Sôi nổi'],['Orus','Chắc'],['Callirrhoe','Dễ chịu'],['Autonoe','Sáng'],['Umbriel','Dễ tính'],
+      ['Despina','Mượt'],['Algieba','Mượt'],['Erinome','Trong'],['Iapetus','Rõ ràng'],['Laomedeia','Rộn ràng'],
+      ['Schedar','Đều'],['Gacrux','Trưởng thành'],['Sadachbia','Sống động'],['Sadaltager','Hiểu biết'],['Alnilam','Chắc'],
+      ['Enceladus','Thì thầm'],['Algenib','Khàn'],['Rasalgethi','Nhiều thông tin'],['Pulcherrima','Chuyển tiếp'],['Zubenelgenubi','Bình thường'],
+    ];
+    // Nút loa: CHỈ hiện khi provider = gemini-live → bật/tắt phát GIỌNG DỊCH do Gemini sinh kèm (text dịch vẫn hiện).
     function refreshTtsBtn() {
       if (!lqTts) return;
-      lqTts.style.display = '';   // luôn hiện
-      lqTts.classList.toggle('active', _ttsOn);
+      lqTts.style.display = (_currentProvider === 'gemini-live') ? '' : 'none';
+      lqTts.textContent = _gemAudioOn ? '🔊' : '🔇';
+      lqTts.classList.toggle('active', _gemAudioOn);
       lqTts.setAttribute('aria-expanded', lqTtsPop && lqTtsPop.classList.contains('open') ? 'true' : 'false');
-      lqTts.title = _ttsOn ? ('Đọc to bản dịch — Giọng ' + (_ttsVoice + 1) + ' (bấm đổi/tắt)') : 'Đọc to bản dịch — đang tắt (bấm chọn giọng)';
+      lqTts.title = _gemAudioOn ? ('Giọng: ' + _gemVoice + ' — bấm đổi / tắt') : 'Đọc to: tắt — bấm chọn giọng';
     }
     function buildTtsPop() {
       if (!lqTtsPop) return;
-      let h = '<button type="button" class="lq-tts-opt' + (!_ttsOn ? ' sel' : '') + '" data-v="off"><span class="tk">' + (!_ttsOn ? '✓' : '') + '</span>🔇 Tắt</button>';
-      for (let i = 0; i < TTS_VOICES; i++) {
-        const sel = _ttsOn && _ttsVoice === i;
-        h += '<button type="button" class="lq-tts-opt' + (sel ? ' sel' : '') + '" data-v="' + i + '"><span class="tk">' + (sel ? '✓' : '') + '</span>Giọng ' + (i + 1) + '</button>';
+      let h = '<button type="button" class="lq-tts-opt' + (!_gemAudioOn ? ' sel' : '') + '" data-v="off"><span class="tk">' + (!_gemAudioOn ? '✓' : '') + '</span>🔇 Tắt đọc</button>';
+      for (const [name, desc] of GEM_VOICES) {
+        const sel = _gemAudioOn && _gemVoice === name;
+        h += '<button type="button" class="lq-tts-opt' + (sel ? ' sel' : '') + '" data-v="' + name + '"><span class="tk">' + (sel ? '✓' : '') + '</span>' + name + ' · <span style="color:var(--m3-on-3);font-size:11px">' + desc + '</span></button>';
       }
       lqTtsPop.innerHTML = h;
     }
@@ -1743,12 +1831,13 @@
       e.stopPropagation();
       const b = e.target.closest('.lq-tts-opt'); if (!b) return;
       if (b.dataset.v === 'off') {
-        _ttsOn = false; api.saveSettings({ ttsEnabled: false }); ttsStop();
+        _gemAudioOn = false;
+        api.saveSettings({ geminiAudioOn: false });
+        try { _gemClearAudio(); } catch (e2) {}
       } else {
-        _ttsVoice = parseInt(b.dataset.v, 10) || 0; _ttsOn = true;
-        api.saveSettings({ ttsEnabled: true, ttsVoice: _ttsVoice });
-        try { api.ttsWarm(); } catch (e) {}
-        _ttsUnlockAudio();
+        _gemVoice = b.dataset.v; _gemAudioOn = true;
+        api.saveSettings({ geminiAudioOn: true, geminiVoice: _gemVoice });
+        try { _gemEnsureCtx(); } catch (e2) {}   // mở khoá AudioContext trong user-gesture
       }
       lqTtsPop.classList.remove('open');
       refreshTtsBtn();
@@ -1865,8 +1954,8 @@
     api.onSettingsSaved(({ ok }) => {
       if (!ok) return;
       _currentSource = sCapture.value;
-      const _pr = providerRadio.querySelector('input:checked');
-      if (_pr) _currentProvider = _pr.value;
+      _currentProvider = 'gemini-live';
+      try { refreshTtsBtn(); } catch (e) {}
       try { renderEmpty(); } catch (e) {}
     });
 
@@ -1880,6 +1969,7 @@
 
     // ── Nút ▶: toggle Live Captions (Teams) hoặc ghi âm (audio/mic) ──
     ccBtn.addEventListener('click', () => {
+      try { _gemEnsureCtx(); } catch (e) {}   // mở khoá AudioContext trong user-gesture (autoplay policy) cho Gemini TTS
       ccBtn.disabled = true;
       ccBtn.classList.add('loading');
       const prevText = ccBtn.textContent;
@@ -1977,6 +2067,87 @@
 
     api.onStartAudioCapture(({ source }) => startAudioCapture(source));
     api.onStopAudioCapture(() => stopAudioCapture());
+
+    // ── Gemini Live: phát audio dịch (TTS) — STREAM liên tục theo playhead (gapless) ──
+    let _gemCtx = null, _gemPlayhead = 0, _gemSpeed = 1.0, _gemNodes = [];   // _gemSpeed=1.0: KHÔNG nén thời gian (1.05 rút cạn hàng đợi realtime → underrun cà giật); nhịp nghỉ câu do pauseMs lo
+    const _GEM_LEAD = 0.18;   // jitter buffer 180ms: độ trễ mục tiêu, hấp thụ nhiễu IPC main→renderer (chỉ trả 1 lần mỗi lượt nói)
+    function _gemEnsureCtx() {
+      if (!_gemCtx || _gemCtx.state === 'closed') { _gemCtx = new (window.AudioContext || window.webkitAudioContext)(); _gemPlayhead = 0; _gemNodes = []; }
+      if (_gemCtx.state === 'suspended') _gemCtx.resume().catch(() => {});
+      return _gemCtx;
+    }
+    function _gemClearAudio() {
+      for (const n of _gemNodes) { try { n.onended = null; n.stop(); } catch (e) {} }
+      _gemNodes = []; _gemPlayhead = 0;
+      if (lqTts) lqTts.classList.remove('speaking');
+    }
+    api.onGeminiAudio(({ b64, sampleRate, pauseMs, softCut }) => {
+      try {
+        if (!_gemAudioOn) return;
+        if (softCut) {   // model bỏ dở lượt → để node ĐANG phát nói nốt, chỉ bỏ phần đuôi xếp ở TƯƠNG LAI rồi cho lượt mới nối ngay sau
+          if (!_gemCtx) return;
+          const now = _gemCtx.currentTime;
+          let resumeAt = now;
+          for (const n of _gemNodes.slice()) {
+            if ((n._gemStartAt || 0) > now + 0.005) { try { n.onended = null; n.stop(); } catch (e) {} const i = _gemNodes.indexOf(n); if (i >= 0) _gemNodes.splice(i, 1); }
+            else if ((n._gemEndAt || 0) > resumeAt) resumeAt = n._gemEndAt;   // node đang phát: nói nốt, lượt mới nối sau đuôi nó
+          }
+          _gemPlayhead = resumeAt;
+          if (lqTts && !_gemNodes.length) lqTts.classList.remove('speaking');
+          return;
+        }
+        if (pauseMs) {   // ranh giới câu/turn → chèn khoảng lặng để NGHỈ giữa các câu (chống đọc nối liền)
+          const ctx = _gemEnsureCtx();
+          _gemPlayhead = Math.max(_gemPlayhead, ctx.currentTime) + pauseMs / 1000;   // luôn chèn nghỉ giữa câu, kể cả khi hàng đợi đã cạn (không bị bỏ rơi)
+          return;
+        }
+        if (!b64) return;
+        const bin = atob(b64); const n = bin.length >> 1; if (!n) return;
+        const f32 = new Float32Array(n);
+        for (let i = 0; i < n; i++) { let s = (bin.charCodeAt(i * 2 + 1) << 8) | bin.charCodeAt(i * 2); if (s >= 32768) s -= 65536; f32[i] = s / 32768; }
+        const ctx = _gemEnsureCtx();
+        const buf = ctx.createBuffer(1, n, sampleRate || 24000);
+        buf.getChannelData(0).set(f32);
+        const node = ctx.createBufferSource();
+        node.buffer = buf; node.playbackRate.value = _gemSpeed; node.connect(ctx.destination);
+        // Underrun / lần đầu sau im lặng → RE-PRIME một lần: nhảy playhead tới trọn LEAD phía trước,
+        // rồi các chunk kế tiếp nối gapless theo lead đã khôi phục (thay vì mỗi chunk bám currentTime+0.08 → giật).
+        if (_gemPlayhead < ctx.currentTime + 0.02) _gemPlayhead = ctx.currentTime + _GEM_LEAD;
+        const startAt = _gemPlayhead;
+        node.start(startAt);
+        _gemPlayhead = startAt + buf.duration / _gemSpeed;
+        node._gemStartAt = startAt; node._gemEndAt = _gemPlayhead;   // softCut dùng để phân biệt node đang phát vs đã xếp tương lai
+        _gemNodes.push(node);
+        node.onended = () => { const i = _gemNodes.indexOf(node); if (i >= 0) _gemNodes.splice(i, 1); if (lqTts && !_gemNodes.length) lqTts.classList.remove('speaking'); };
+        if (lqTts) lqTts.classList.add('speaking');
+        if (!window._gemLogged) { window._gemLogged = 1; if (statusMsg) statusMsg.textContent = '🔊 Đang phát giọng dịch'; }
+      } catch (e) { console.warn('[gemini-audio] play lỗi:', e && e.message); }
+    });
+    api.onGeminiClear(() => _gemClearAudio());
+    api.onGeminiStatus(({ error }) => {
+      if (error === 'no-key') statusMsg.textContent = '⚠ Chưa nhập Gemini API key (⋮ → Dịch thuật)';
+      else if (error) statusMsg.textContent = '⚠ Gemini: ' + error;
+    });
+
+    // ── Kéo chỉnh rộng 2 cột (dịch | tóm tắt) — clamp 2 min để không co quá bé ──
+    (function () {
+      const cr = document.getElementById('content-row');
+      const rz = document.getElementById('col-resizer');
+      if (!cr || !rz) return;
+      const SUM_MIN = 260, LIST_MIN = 240;
+      let dragging = false;
+      rz.addEventListener('pointerdown', (e) => { dragging = true; try { rz.setPointerCapture(e.pointerId); } catch (_) {} document.body.style.cursor = 'col-resize'; e.preventDefault(); });
+      rz.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const rect = cr.getBoundingClientRect();
+        let w = rect.right - e.clientX;
+        w = Math.max(SUM_MIN, Math.min(rect.width - LIST_MIN, w));
+        document.documentElement.style.setProperty('--sum-w', w + 'px');
+      });
+      const end = (e) => { if (!dragging) return; dragging = false; try { rz.releasePointerCapture(e.pointerId); } catch (_) {} document.body.style.cursor = ''; };
+      rz.addEventListener('pointerup', end);
+      rz.addEventListener('pointercancel', end);
+    })();
 
     // ── Controls ──
     // (Ngôn ngữ nguồn/đích đổi qua quick selector cạnh nút ▶ — xem lang-quick phía trên)
@@ -2105,12 +2276,122 @@
     }
 
     document.getElementById('sum-btn').addEventListener('click', () => {
-      summaryModal.classList.add('open');
+      toggleSummaryPanel();   // mở/đóng panel tóm tắt trực tiếp (thay vì popup)
     });
     document.getElementById('sum-close-btn').addEventListener('click', () => {
       summaryModal.classList.remove('open');
     });
     // (Bỏ đóng khi click nền: popup chỉ đóng bằng nút ✕)
+
+    // ── Summary PANEL (tóm tắt TRỰC TIẾP, auto mỗi 1' qua Gemini gemini-3-flash) ──
+    const summaryPanel = document.getElementById('summary-panel');
+    const spBody    = document.getElementById('sp-body');
+    const spFoot    = document.getElementById('sp-foot');
+    const spSpinner = document.getElementById('sp-spinner');
+    const SP_HINT   = 'Tự động tóm tắt khi có đủ câu mới…';
+    // Tóm tắt theo SỐ CÂU MỚI (không phí request lúc im lặng): đủ ≥SUM_MIN_NEW câu mới → tóm tắt; HOẶC
+    // có ≥1 câu mới mà đã chờ ≥SUM_MAX_WAIT_MS (họp chậm) → vẫn tóm; 0 câu mới → bỏ qua. Kiểm mỗi SUM_TICK_MS.
+    // TPM: ở chế độ Teams, summary DÙNG CHUNG model gemini-3.1-flash-live với bản dịch → giãn nhịp để giảm token/phút.
+    const SUM_TICK_MS = 45000, SUM_MIN_NEW = 16, SUM_MAX_WAIT_MS = 240000;
+    let _sumPanelOpen = false, _sumTimer = null, _sumPrevCount = 0, _sumLastTime = 0, _sumBusy = false, _sumStopped = false;
+
+    function openSummaryPanel() {
+      if (_sumPanelOpen) return;
+      _sumPanelOpen = true; _sumStopped = false; _sumPrevCount = 0; _sumLastTime = 0;
+      summaryPanel.classList.add('open');
+      document.getElementById('footer-sum').classList.add('open');
+      try { updateSpGptBtn(); } catch (e) {}
+      try { api.setSummaryPanel(true); } catch (e) {}   // nới rộng cửa sổ (chia 2 cột)
+      summarizeTick();                                   // tóm tắt ngay nếu đã có nội dung
+      clearInterval(_sumTimer);
+      _sumTimer = setInterval(summarizeTick, SUM_TICK_MS);   // kiểm định kỳ; chỉ gọi API khi đủ câu mới
+    }
+    function closeSummaryPanel() {
+      if (!_sumPanelOpen) return;
+      _sumPanelOpen = false;
+      summaryPanel.classList.remove('open');
+      document.getElementById('footer-sum').classList.remove('open');
+      try { api.setSummaryPanel(false); } catch (e) {}   // co cửa sổ lại
+      clearInterval(_sumTimer); _sumTimer = null;
+      if (spSpinner) spSpinner.style.display = 'none';
+    }
+    function toggleSummaryPanel() { _sumPanelOpen ? closeSummaryPanel() : openSummaryPanel(); }
+
+    async function summarizeTick() {
+      if (!_sumPanelOpen || _sumBusy || _sumStopped) return;
+      const caps = [...captionData.values()];
+      if (!caps.length) { spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT + '</div>'; return; }
+      if (caps.length < _sumPrevCount) _sumPrevCount = 0;   // đã bấm Xóa → coi như mới
+      const newCount = caps.length - _sumPrevCount;
+      const elapsed = _sumLastTime ? (Date.now() - _sumLastTime) : Infinity;
+      // tóm tắt khi: đủ câu mới, HOẶC có câu mới + chờ đã lâu (họp chậm), HOẶC lần đầu mở mà đã có nội dung
+      const should = (newCount >= SUM_MIN_NEW) || (newCount > 0 && elapsed >= SUM_MAX_WAIT_MS) || (_sumLastTime === 0);
+      if (!should) {
+        if (newCount > 0 && spFoot) spFoot.textContent = '⏳ ' + newCount + '/' + SUM_MIN_NEW + ' câu mới · cập nhật khi đủ';
+        return;
+      }
+      _sumBusy = true; if (spSpinner) spSpinner.style.display = '';   // loading
+      // rolling: chỉ gửi câu MỚI kể từ lần tóm trước. Trần 40 câu/lần (kể cả lần đầu mở có sẵn backlog lớn)
+      // → tránh 1 request khổng lồ đập vào TPM của model dùng-chung (chế độ Teams).
+      let newCaps = caps.slice(_sumPrevCount);
+      const SUM_MAX_CAPS_PER_CALL = 40;
+      if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
+      let res = null;
+      try { res = await api.summarizeGemini({ prevSummary: _spMarkdown, captions: newCaps }); } catch (e) { res = { ok: false, error: e.message }; }
+      _sumBusy = false; if (spSpinner) spSpinner.style.display = 'none';
+      if (!_sumPanelOpen) return;   // đã đóng giữa lúc chờ
+      if (!res || !res.ok) {
+        if (res && res.error === 'no-key') {   // không key → báo lỗi + DỪNG (yêu cầu đổi setting)
+          _sumStopped = true; clearInterval(_sumTimer); _sumTimer = null;
+          spBody.innerHTML = '<div class="sp-error">⚠ Cần Gemini API key.<br>Mở ⋮ → Dịch vụ → nhập key rồi mở lại panel.</div>';
+        } else if (res && (res.error === 'empty' || res.error === 'empty-response')) {
+          spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT + '</div>';
+        } else {
+          spFoot.textContent = '❌ ' + shortErr(res && res.error) + ' · thử lại sau 1′';
+        }
+        return;
+      }
+      _sumPrevCount = caps.length; _sumLastTime = Date.now();
+      spRender(res.markdown);
+      const d = new Date(), p = n => (n < 10 ? '0' : '') + n;
+      spFoot.textContent = '✅ ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ' · ' + caps.length + ' câu';
+    }
+
+    document.getElementById('sp-close-btn').addEventListener('click', closeSummaryPanel);
+
+    // ── Footer panel tóm tắt: Tổng (GPT) + xuất .md + copy + xóa ──
+    const spGptBtn    = document.getElementById('sp-gpt-btn');
+    const spExportBtn = document.getElementById('sp-export-btn');
+    const spCopyBtn   = document.getElementById('sp-copy-btn');
+    const spClearBtn  = document.getElementById('sp-clear-btn');
+    let _spMarkdown = '';
+    function _spSetExportable(on) { if (spExportBtn) spExportBtn.disabled = !on; if (spCopyBtn) spCopyBtn.disabled = !on; }
+    function spRender(md) { _spMarkdown = md || ''; spBody.innerHTML = md2html(_spMarkdown); _spSetExportable(!!_spMarkdown); }
+    // Nút "Tổng (GPT)": chỉ hiện khi ĐÃ DỪNG ghi (play kết thúc) + còn nội dung STT.
+    function updateSpGptBtn() {
+      if (!spGptBtn) return;
+      spGptBtn.style.display = (!captionsOn && captionData.size > 0) ? '' : 'none';
+    }
+    if (spGptBtn) spGptBtn.addEventListener('click', async () => {
+      if (!captionData.size) return;
+      _sumStopped = true;   // dừng auto-live để không ghi đè bản tổng
+      spGptBtn.disabled = true;
+      spBody.innerHTML = '<div class="sp-placeholder"><span class="m3-spinner-sm"></span> Đang tổng hợp bằng ChatGPT…</div>';
+      let res = null;
+      try { res = await api.summarizeMeeting([...captionData.values()]); } catch (e) { res = { ok: false, error: e.message }; }
+      spGptBtn.disabled = false;
+      if (!res || !res.ok) { spBody.innerHTML = '<div class="sp-error">❌ ' + esc(shortErr(res && res.error)) + '</div>'; return; }
+      spRender(res.markdown);
+      spFoot.textContent = '✅ Bản tổng (ChatGPT) · ' + captionData.size + ' câu';
+    });
+    if (spExportBtn) spExportBtn.addEventListener('click', () => {
+      if (_spMarkdown) api.exportSummary({ markdown: _spMarkdown, defaultName: 'summary-' + new Date().toISOString().slice(0, 10) + '.md' });
+    });
+    if (spCopyBtn) spCopyBtn.addEventListener('click', () => { if (_spMarkdown) api.copyToClipboard(_spMarkdown); });
+    if (spClearBtn) spClearBtn.addEventListener('click', () => {
+      _spMarkdown = ''; _spSetExportable(false); _sumPrevCount = 0; _sumLastTime = 0; _sumStopped = false;
+      spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT + '</div>'; spFoot.textContent = '';
+    });
 
     sumGenerateBtn.addEventListener('click', async () => {
       if (!captionData.size) {
@@ -2131,8 +2412,8 @@
       sumGenerateBtn.innerHTML = '✨ <span data-i18n="summary.generate">' + t('summary.generate') + '</span>';
 
       if (!result.ok) {
-        sumStatus.textContent = '❌ ' + result.error;
-        sumBody.innerHTML = `<div style="color:#f88;padding:20px;text-align:center">${esc(result.error)}</div>`;
+        sumStatus.textContent = '❌ ' + shortErr(result.error);
+        sumBody.innerHTML = `<div style="color:#f88;padding:20px;text-align:center">${esc(shortErr(result.error))}</div>`;
         return;
       }
 
@@ -2199,6 +2480,19 @@
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+    }
+
+    // Rút gọn lỗi từ Gemini: map 429/quota/rate-limit sang câu ngắn tiếng Việt; lỗi lạ cắt còn ~100 ký tự để KHÔNG vỡ layout.
+    function shortErr(e) {
+      const s = String(e ?? 'lỗi').replace(/\s+/g, ' ').trim();
+      if (!s) return 'lỗi';
+      if (/\b429\b|resource[_ ]?exhausted|too many requests|quota|rate[ _-]?limit|tokens? per minute|\bTPM\b|requests? per (minute|day)|\bRPM\b|\bRPD\b/i.test(s))
+        return 'Đã chạm giới hạn TPM, thử lại sau';
+      if (/\b50[0-9]\b|unavailable|overloaded|internal error|deadline exceeded|timeout/i.test(s))
+        return 'Máy chủ Gemini bận, thử lại sau';
+      if (/api[_ ]?key|unauthenticated|permission denied|\b401\b|\b403\b/i.test(s))
+        return 'Lỗi xác thực API key';
+      return s.length > 100 ? s.slice(0, 100) + '…' : s;
     }
   </script>
 </body>

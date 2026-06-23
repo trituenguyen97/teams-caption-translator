@@ -42,3 +42,6 @@ models/
 # Generated test output (sinh bởi scripts/test-translate.js)
 scripts/_translate-results.json
 
+# Audio test output (sinh bởi scripts/test-gemini-live.cjs)
+*.wav
+

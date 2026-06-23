@@ -1,52 +1,41 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('__caption', {
-  onStatus:        cb => ipcRenderer.on('status',                (_, d) => cb(d)),
-  onBusy:          cb => ipcRenderer.on('busy',                  (_, d) => cb(d)),
-  onCaptionLive:   cb => ipcRenderer.on('caption-live',          (_, d) => cb(d)),
-  onCaptionCommit: cb => ipcRenderer.on('caption-commit',        (_, d) => cb(d)),
-  onCcState:       cb => ipcRenderer.on('cc-state',              (_, d) => cb(d)),
-  onSttLang:       cb => ipcRenderer.on('stt-lang',              (_, d) => cb(d)),
-  onSettingsSaved: cb => ipcRenderer.on('settings-saved',        (_, d) => cb(d)),
+  // main → renderer
+  onStatus:        cb => ipcRenderer.on('status',         (_, d) => cb(d)),
+  onBusy:          cb => ipcRenderer.on('busy',           (_, d) => cb(d)),
+  onCaptionLive:   cb => ipcRenderer.on('caption-live',   (_, d) => cb(d)),
+  onCcState:       cb => ipcRenderer.on('cc-state',       (_, d) => cb(d)),
+  onSettingsSaved: cb => ipcRenderer.on('settings-saved', (_, d) => cb(d)),
   onStartAudioCapture: cb => ipcRenderer.on('start-audio-capture', (_, d) => cb(d)),
   onStopAudioCapture:  cb => ipcRenderer.on('stop-audio-capture',  ()    => cb()),
-  sendAudioChunk:  data => ipcRenderer.send('audio-chunk', data),
-  sendAudioPcm:    buf  => ipcRenderer.send('audio-pcm', buf),
-  setLang:        lang => ipcRenderer.send('set-lang',     lang),
-  setSttLang:     lang => ipcRenderer.send('set-stt-lang', lang),
+  onMaxState:     cb   => ipcRenderer.on('window-max-state', (_, d) => cb(d)),
 
-  // TTS (đọc to bản dịch — Piper VITS tiếng Việt)
-  ttsAvailable:   ()   => ipcRenderer.invoke('tts-available'),
-  ttsWarm:        ()   => ipcRenderer.invoke('tts-warm'),
-  ttsSpeak:       text => ipcRenderer.invoke('tts-speak', text),
-  getSttLang:     ()   => ipcRenderer.invoke('get-stt-lang'),
-  listAudioProcesses: () => ipcRenderer.invoke('list-audio-processes'),
+  // Gemini Live: audio dịch 24kHz + clear + trạng thái
+  onGeminiAudio:  cb => ipcRenderer.on('gemini-audio',  (_, d) => cb(d)),
+  onGeminiClear:  cb => ipcRenderer.on('gemini-clear',  ()    => cb()),
+  onGeminiStatus: cb => ipcRenderer.on('gemini-status', (_, d) => cb(d)),
+
+  // renderer → main
+  sendAudioPcm:   buf  => ipcRenderer.send('audio-pcm', buf),
+  setLang:        lang => ipcRenderer.send('set-lang', lang),
   getSettings:    ()   => ipcRenderer.invoke('get-settings'),
   saveSettings:   s    => ipcRenderer.send('save-settings', s),
-  getOpenWindows:     ()       => ipcRenderer.invoke('get-open-windows'),
-  launchDebugBrowser: (opts)   => ipcRenderer.invoke('launch-debug-browser', opts || {}),
-  scanAllTabs:        ()       => ipcRenderer.invoke('scan-all-tabs'),
-  setWebTab:          t        => ipcRenderer.invoke('set-web-tab', t),
-  setAlwaysOnTop: v    => ipcRenderer.send('set-always-on-top', v),
-  focusWindow:    ()   => ipcRenderer.send('focus-window'),
-  windowMinimize: ()   => ipcRenderer.send('window-minimize'),
-  windowMaximize: ()   => ipcRenderer.send('window-maximize'),
-  windowClose:    ()   => ipcRenderer.send('window-close'),
-  onMaxState:     cb   => ipcRenderer.on('window-max-state', (_, d) => cb(d)),
+  validateGeminiKey: key => ipcRenderer.invoke('validate-gemini-key', key),
+  listAudioProcesses: () => ipcRenderer.invoke('list-audio-processes'),
   toggleCaptions: (desired) => ipcRenderer.send('toggle-captions', desired),
-  openExternal:   url  => ipcRenderer.send('open-external', url),
-  copyToClipboard: text => ipcRenderer.invoke('copy-to-clipboard', text),
-  summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),
-  exportSummary:    (data)     => ipcRenderer.invoke('export-summary', data),
 
-  // Local LLM
-  checkLocalLLM:       ()        => ipcRenderer.invoke('check-local-llm'),
-  localStatus:         ()        => ipcRenderer.invoke('local-llm-status'),
-  detectGpu:           ()        => ipcRenderer.invoke('local-llm-detect-gpu'),
-  downloadLlamaBinary: (variant) => ipcRenderer.invoke('local-llm-download-binary', { variant }),
-  downloadModel:       (opts)    => ipcRenderer.invoke('local-llm-download-model',  opts),
-  cancelDownload:      (task)    => ipcRenderer.invoke('local-llm-cancel-download', { task }),
-  startLocalServer:    (opts)    => ipcRenderer.invoke('local-llm-start', opts || {}),
-  stopLocalServer:     ()        => ipcRenderer.invoke('local-llm-stop'),
-  onLocalProgress:     cb        => ipcRenderer.on('local-llm-progress', (_, d) => cb(d)),
+  // window
+  setAlwaysOnTop: v   => ipcRenderer.send('set-always-on-top', v),
+  focusWindow:    ()  => ipcRenderer.send('focus-window'),
+  windowMinimize: ()  => ipcRenderer.send('window-minimize'),
+  windowMaximize: ()  => ipcRenderer.send('window-maximize'),
+  windowClose:    ()  => ipcRenderer.send('window-close'),
+  openExternal:   url => ipcRenderer.send('open-external', url),
+  copyToClipboard: text => ipcRenderer.invoke('copy-to-clipboard', text),
+
+  // summary (panel Gemini)
+  summarizeGemini: (payload) => ipcRenderer.invoke('summarize-gemini', payload),
+  setSummaryPanel: (open)    => ipcRenderer.send('summary-panel', open),
+  exportSummary:   (data)    => ipcRenderer.invoke('export-summary', data),
 });

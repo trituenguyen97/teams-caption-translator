@@ -1,22 +1,15 @@
 {
   "name": "teams-caption-translator",
   "version": "1.0.0",
-  "description": "Đọc Live Captions từ Microsoft Teams qua CDP và dịch sang ngôn ngữ tùy chọn",
+  "description": "Dịch caption cuộc họp realtime qua Gemini 3.5 Live Translate (audio → STT + dịch + TTS)",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "fetch-binaries": "node scripts/fetch-binaries.js",
-    "fetch-stt-model": "node scripts/fetch-stt-model.js",
-    "fetch-tts-model": "node scripts/fetch-tts-model.js",
-    "prebuild": "node scripts/fetch-binaries.js && node scripts/fetch-stt-model.js && node scripts/fetch-tts-model.js",
     "build": "electron-builder"
   },
   "dependencies": {
-    "@geolonia/japanese-numeral": "^1.0.2",
-    "application-loopback": "1.2.7",
-    "onnxruntime-node": "^1.26.0",
-    "puppeteer-core": "^24.42.0",
-    "sherpa-onnx-node": "^1.13.2"
+    "@google/genai": "^2.9.0",
+    "application-loopback": "1.2.7"
   },
   "devDependencies": {
     "electron": "^33.4.11",
@@ -35,43 +28,15 @@
       "src/**",
       "preload.js",
       "app.html",
-      "overlay.html",
-      "overlay-preload.js",
       "scripts/*.ps1",
       "node_modules/**/*",
-      "!node_modules/puppeteer-core/lib/{esm,es5-iife}/**",
-      "!node_modules/chromium-bidi/**",
-      "!node_modules/zod/src/**",
       "!node_modules/**/*.{ts,map,md,markdown}",
       "!node_modules/**/*.d.ts",
-      "!node_modules/**/{test,tests,__tests__,example,examples,.github,docs,doc}/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**",
-      "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**"
+      "!node_modules/**/{test,tests,__tests__,example,examples,.github,docs,doc}/**"
     ],
     "asarUnpack": [
-      "node_modules/sherpa-onnx-node/**",
-      "node_modules/sherpa-onnx-*/**",
-      "node_modules/onnxruntime-node/**",
-      "node_modules/application-loopback/**"
-    ],
-    "extraResources": [
-      {
-        "from": "bin",
-        "to": "bin",
-        "filter": [
-          "**/*",
-          "!llama-server/cuda/**",
-          "!**/.cache/**"
-        ]
-      },
-      {
-        "from": "models",
-        "to": "models",
-        "filter": [
-          "**/*.gguf"
-        ]
-      }
+      "node_modules/application-loopback/**",
+      "node_modules/@google/genai/**"
     ]
   }
 }

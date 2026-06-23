@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const state = require('./state');
-const { enqueueTranslate, preprocessText, PROV_NAMES, hasUntranslatedCJK } = require('./translation');
+const geminiTextLive = require('./gemini-text-live');   // Teams caption (text) → dịch + TTS qua gemini-3.1-flash-live
 const overlay = require('./caption-overlay');
 
 const HELPER_POLL_MS = 40;    // nhịp helper đọc UIA (thấp hết cỡ → overlay bám sát + scroll mượt)
@@ -41,6 +41,7 @@ let _pending = new Set();     // author::normText ĐÃ commit + đang chờ dị
 let _lastMsgTs = 0;
 let _buf = '';
 let _spawnGuard = 0;
+let _uiaEntryId = 0;   // id caption Teams - TĂNG ĐƠN ĐIỆU xuyên các lần chạy runUiaService (không reset khi đổi nguồn)
 
 // Vẽ overlay NGAY từ snapshot mới nhất (gọi khi helper báo đổi vị trí HOẶC khi có bản dịch mới)
 // → overlay bám sát caption gốc, không chờ vòng lặp dịch.
@@ -218,7 +219,7 @@ async function runUiaService() {
   const committed = new Map();
   _transByKey = new Map();   // reset bản dịch overlay cho phiên mới
   _pending = new Set();
-  let entryId = 0, isInit = true;
+  let isInit = true;   // entryId nay la bien module (_uiaEntryId) -> tang don dieu xuyen cac lan chay service
   let _lastRowKey = '', _lastRowSince = 0;
   const LAST_ROW_SETTLE_MS = 10000;
   const SENTENCE_END_RE = /[。．.！!？?]\s*$/;
@@ -260,7 +261,7 @@ async function runUiaService() {
     }
     waitCapSent = false;
     if (!runningSent) {
-      const provLabel = PROV_NAMES[state.provider] || state.provider;
+      const provLabel = 'Gemini';
       send('status', { type: 'running', key: 'status.translating', vars: { lang: state.langCode, prov: provLabel } });
       send('cc-state', { active: true });
       runningSent = true;
@@ -311,19 +312,18 @@ async function runUiaService() {
           }
         }
       }
-      const id = reuseId !== null ? reuseId : ++entryId;
+      const id = reuseId !== null ? reuseId : ++_uiaEntryId;
       committed.set(k, { id, ts: Date.now() });
       const ts = timestamp();
       const tsMs = Date.now();
-      const cleaned = preprocessText(text);
+      const cleaned = (text || '').trim();
       const author2 = author || 'Speaker';
       send('caption-live', { id, author: author2, original: text, translated: '…', ts, tsMs });
       _pending.add(k); renderOverlay();   // hiện placeholder (text gốc) NGAY → chờ dịch không bị "pop"
-      enqueueTranslate(cleaned).then(translated => {
+      geminiTextLive.translate(cleaned).then(translated => {
         _pending.delete(k);
         if (!state.userActive) return;
-        const stillSource = hasUntranslatedCJK(translated);
-        const isTranslated = translated !== cleaned && translated !== text && !stillSource;
+        const isTranslated = !!translated && translated !== cleaned && translated !== text;
         send('caption-live', { id, author: author2, original: text, translated: isTranslated ? translated : null, ts: timestamp(), tsMs });
         if (isTranslated) _transByKey.set(k, translated);
         renderOverlay();   // swap placeholder→bản dịch (hoặc bỏ nếu dịch fail) — không nháy layout
