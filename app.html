@@ -558,6 +558,7 @@
     .summary-panel .sp-foot { padding: 5px 10px; font-size: 10.5px; color: var(--m3-on-3); flex-shrink: 0;
       border-top: 1px solid var(--m3-line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       max-height: 2.4em; }
+    #sp-live { display: flex; justify-content: center; padding: 8px 0 4px; }   /* spinner "đang nghe" ở cuối panel tóm tắt */
 
     .list {
       flex: 1;
@@ -625,6 +626,7 @@
       font-variant-numeric: tabular-nums;
     }
     .entry-original {
+      display: none;   /* ẩn transcribe nguồn (tiếng Nhật) — chỉ hiển thị ngôn ngữ đích */
       font-size: 12px;
       color: var(--m3-on-3);
       line-height: 1.5;
@@ -635,6 +637,7 @@
       color: var(--m3-on);
       line-height: 1.55;
       letter-spacing: .1px;
+      white-space: pre-wrap;   /* tôn trọng \n chèn để xuống dòng tại . ? ! */
     }
 
     /* ── Live entry (currently being spoken) — FOCAL POINT ──
@@ -1265,19 +1268,20 @@
       <span class="footer-count" id="count">0 câu</span>
       <div class="spacer"></div>
       <button id="scroll-btn" class="active" data-i18n-title="footer.autoScrollTitle" title="Tự cuộn xuống">↓ <span data-i18n="footer.auto">Auto</span></button>
-      <button id="sum-btn" data-i18n-title="footer.summarizeTitle" title="Tóm tắt cuộc họp">📋 <span data-i18n="footer.summarize">Tóm tắt</span></button>
       <span class="export-wrap">
-        <button id="export-orig-btn" data-i18n-title="status.exportOrigTitle" title="Xuất nội dung" disabled>💾 <span data-i18n="footer.export">Xuất</span></button>
+        <button id="export-orig-btn" data-i18n-title="status.exportOrigTitle" title="Xuất nội dung" disabled>💾</button>
         <div id="export-menu" class="export-menu">
           <button class="export-opt" data-mode="orig">📄 <span data-i18n="export.orig">Bản gốc</span></button>
           <button class="export-opt" data-mode="both">🔁 <span data-i18n="export.both">Cả hai (gốc + dịch)</span></button>
           <button class="export-opt" data-mode="trans">🌐 <span data-i18n="export.trans">Bản dịch</span></button>
         </div>
       </span>
-      <button id="clear-btn" data-i18n="footer.clear">Xóa</button>
+      <button id="clear-btn">🗑</button>
+      <button id="sum-btn" data-i18n-title="footer.summarizeTitle" title="Tóm tắt cuộc họp">📋 <span data-i18n="footer.summarize">Tóm tắt</span></button>
     </div>
     <div class="footer-sum" id="footer-sum">
       <div class="spacer"></div>
+      <button id="sp-gpt-btn" title="Tổng hợp báo cáo chi tiết toàn cuộc họp (gemma-4-31b)" style="display:none;background:#1a4a78;border-color:#3794ff;color:#fff">📊 Tổng thể</button>
       <button id="sp-export-btn" title="Xuất .md" disabled>⬇ .md</button>
       <button id="sp-copy-btn" title="Copy" disabled>⎘</button>
       <button id="sp-clear-btn" title="Xóa tóm tắt">🗑</button>
@@ -1534,6 +1538,8 @@
         exportOrigBtn.disabled = false;   // có nội dung → bật nút export
         // Đọc to bản dịch (nếu bật loa) — chỉ câu CHỐT, không pending/partial/lỗi, mỗi id 1 lần.
         if (_ttsOn && !isFailed && translated) ttsEnqueue(id, translated);
+        // Tóm tắt theo SỐ CÂU: đủ ~2 phút câu dịch mới → gọi tóm tắt NGAY (panel mở, không bận).
+        if (_sumPanelOpen && !_sumBusy && (captionData.size - _sumPrevCount) >= SUM_MIN_NEW) { try { summarizeTick(); } catch (e) {} }
       }
 
       // Entry đã bị evict khỏi DOM (họp dài) → chỉ giữ data ở trên, KHÔNG tái tạo node
@@ -1580,7 +1586,7 @@
       } else if (isFailed) {
         el._tr.innerHTML = '<span style="color:var(--m3-on-4);font-style:italic">—</span>';
       } else {
-        el._tr.textContent = translated;
+        el._tr.textContent = translated || '';   // mỗi entry = 1 câu dịch (main đã tách tại . ? !)
       }
 
       scheduleScroll();
@@ -1589,7 +1595,9 @@
     // ── CC state từ main process (5s check + sau toggle) ──
     api.onCcState(({ active }) => {
       setCaptionsState(active);
-      try { updateSpGptBtn(); } catch (e) {}   // dừng ghi + còn nội dung → hiện nút "Tổng (GPT)"
+      _isPlaying = !!active;                     // đang play dịch → spinner "live" ở cuối panel tóm tắt
+      try { summaryLive(); } catch (e) {}
+      try { updateSpGptBtn(); } catch (e) {}   // dừng ghi + còn nội dung → hiện nút "Tổng thể"
     });
 
     // ── Settings (đã gộp hết vào dropdown ⋮ — apply + lưu NGAY khi đổi) ──
@@ -2194,9 +2202,10 @@
                      `Tổng số dòng: ${sorted.length}\n` +
                      `${'='.repeat(60)}\n\n`;
       let lines;
+      // App chỉ còn lưu bản DỊCH (không còn transcribe gốc per-entry) → orig/both fallback sang bản dịch.
       if (mode === 'trans')     lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.translated || ''}`).join('\n');
-      else if (mode === 'both') lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}:\n  • ${c.original || ''}\n  → ${c.translated || ''}`).join('\n\n');
-      else                      lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.original || ''}`).join('\n');
+      else if (mode === 'both') lines = sorted.map(c => c.original ? `[${c.ts || ''}] ${c.author || 'Unknown'}:\n  • ${c.original}\n  → ${c.translated || ''}` : `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.translated || ''}`).join('\n\n');
+      else                      lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.original || c.translated || ''}`).join('\n');
       const content = header + lines + '\n';
       const date = new Date().toISOString().slice(0, 10);
       const r = await api.exportSummary({ markdown: content, defaultName: `${NAME[mode] || NAME.orig}-${date}.txt` });
@@ -2268,7 +2277,7 @@
     }
 
     document.getElementById('sum-btn').addEventListener('click', () => {
-      toggleSummaryPanel();   // mở/đóng panel tóm tắt trực tiếp (thay vì popup)
+      openSummaryPanel();   // mở panel + ẩn nút này (hiện lại khi bấm ✕ đóng panel)
     });
     document.getElementById('sum-close-btn').addEventListener('click', () => {
       summaryModal.classList.remove('open');
@@ -2281,29 +2290,31 @@
     const spFoot    = document.getElementById('sp-foot');
     const spSpinner = document.getElementById('sp-spinner');
     const SP_HINT   = 'Tự động tóm tắt khi có đủ câu mới…';
-    // Tóm tắt theo SỐ CÂU MỚI (không phí request lúc im lặng): đủ ≥SUM_MIN_NEW câu mới → tóm tắt; HOẶC
-    // có ≥1 câu mới mà đã chờ ≥SUM_MAX_WAIT_MS (họp chậm) → vẫn tóm; 0 câu mới → bỏ qua. Kiểm mỗi SUM_TICK_MS.
-    // Quota: summary đi qua generateContent (3.1-flash-lite → gemma-4-31b/26b), TÁCH quota với bản dịch.
-    // Giãn nhịp để mỗi cuộc 2h ăn ít request/ngày (RPD chính 500) → fallback gemma gánh nốt khi hết.
-    const SUM_TICK_MS = 45000, SUM_MIN_NEW = 16, SUM_MAX_WAIT_MS = 240000;
-    let _sumPanelOpen = false, _sumTimer = null, _sumPrevCount = 0, _sumLastTime = 0, _sumBusy = false, _sumStopped = false;
+    // Tóm tắt theo SỐ CÂU mới (~2 phút hội thoại), KHÔNG theo thời gian: đủ ≥SUM_MIN_NEW câu dịch mới → gọi API
+    // tóm tắt NGAY (kích hoạt khi caption mới tới). 0 câu mới → không gọi. Quota: generateContent (3.1-flash-lite
+    // → gemma-4-31b/26b), TÁCH với bản dịch. ~2 phút/lần → cuộc 2h ~60 request (RPD chính 500 dư).
+    const SUM_MIN_NEW = 24;       // ~2 phút hội thoại (ước lượng ~12 câu/phút) — chỉnh nếu thấy thưa/dày
+    const SUM_POLL_MS = 12000;    // backstop: quét lại mỗi 12s phòng khi kích hoạt theo caption bị bỏ lỡ (đang busy)
+    let _sumPanelOpen = false, _sumTimer = null, _sumPrevCount = 0, _sumLastTime = 0, _sumBusy = false, _sumStopped = false, _isPlaying = false;
 
     function openSummaryPanel() {
       if (_sumPanelOpen) return;
       _sumPanelOpen = true; _sumStopped = false; _sumPrevCount = 0; _sumLastTime = 0;
       summaryPanel.classList.add('open');
       document.getElementById('footer-sum').classList.add('open');
+      document.getElementById('sum-btn').style.display = 'none';   // ẩn nút Tóm tắt khi panel mở
       try { updateSpGptBtn(); } catch (e) {}
       try { api.setSummaryPanel(true); } catch (e) {}   // nới rộng cửa sổ (chia 2 cột)
       summarizeTick();                                   // tóm tắt ngay nếu đã có nội dung
       clearInterval(_sumTimer);
-      _sumTimer = setInterval(summarizeTick, SUM_TICK_MS);   // kiểm định kỳ; chỉ gọi API khi đủ câu mới
+      _sumTimer = setInterval(summarizeTick, SUM_POLL_MS);   // backstop; chính yếu là kích hoạt theo số câu (onCaptionLive)
     }
     function closeSummaryPanel() {
       if (!_sumPanelOpen) return;
       _sumPanelOpen = false;
       summaryPanel.classList.remove('open');
       document.getElementById('footer-sum').classList.remove('open');
+      document.getElementById('sum-btn').style.display = '';   // hiện lại nút Tóm tắt
       try { api.setSummaryPanel(false); } catch (e) {}   // co cửa sổ lại
       clearInterval(_sumTimer); _sumTimer = null;
       if (spSpinner) spSpinner.style.display = 'none';
@@ -2316,11 +2327,10 @@
       if (!caps.length) { spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT + '</div>'; return; }
       if (caps.length < _sumPrevCount) _sumPrevCount = 0;   // đã bấm Xóa → coi như mới
       const newCount = caps.length - _sumPrevCount;
-      const elapsed = _sumLastTime ? (Date.now() - _sumLastTime) : Infinity;
-      // tóm tắt khi: đủ câu mới, HOẶC có câu mới + chờ đã lâu (họp chậm), HOẶC lần đầu mở mà đã có nội dung
-      const should = (newCount >= SUM_MIN_NEW) || (newCount > 0 && elapsed >= SUM_MAX_WAIT_MS) || (_sumLastTime === 0);
+      // tóm tắt khi: đủ ≥SUM_MIN_NEW câu dịch mới (~2 phút), HOẶC lần đầu mở mà đã có nội dung.
+      const should = (newCount >= SUM_MIN_NEW) || (_sumLastTime === 0);
       if (!should) {
-        if (newCount > 0 && spFoot) spFoot.textContent = '⏳ ' + newCount + '/' + SUM_MIN_NEW + ' câu mới · cập nhật khi đủ';
+        if (newCount > 0 && spFoot) spFoot.textContent = '⏳ ' + newCount + '/' + SUM_MIN_NEW + ' câu mới · tự cập nhật';
         return;
       }
       _sumBusy = true; if (spSpinner) spSpinner.style.display = '';   // loading
@@ -2352,30 +2362,44 @@
 
     document.getElementById('sp-close-btn').addEventListener('click', closeSummaryPanel);
 
-    // ── Footer panel tóm tắt: Tổng (GPT) + xuất .md + copy + xóa ──
+    // ── Footer panel tóm tắt: Tổng thể + xuất .md + copy + xóa ──
     const spGptBtn    = document.getElementById('sp-gpt-btn');
     const spExportBtn = document.getElementById('sp-export-btn');
     const spCopyBtn   = document.getElementById('sp-copy-btn');
     const spClearBtn  = document.getElementById('sp-clear-btn');
     let _spMarkdown = '';
     function _spSetExportable(on) { if (spExportBtn) spExportBtn.disabled = !on; if (spCopyBtn) spCopyBtn.disabled = !on; }
-    function spRender(md) { _spMarkdown = md || ''; spBody.innerHTML = md2html(_spMarkdown); _spSetExportable(!!_spMarkdown); }
-    // Nút "Tổng (GPT)": chỉ hiện khi ĐÃ DỪNG ghi (play kết thúc) + còn nội dung STT.
+    function spRender(md) {
+      _spMarkdown = md || ''; spBody.innerHTML = md2html(_spMarkdown); _spSetExportable(!!_spMarkdown);
+      summaryLive();                            // gắn lại spinner "đang nghe" ở cuối (nếu đang play)
+      spBody.scrollTop = spBody.scrollHeight;   // có nội dung mới → tự cuộn xuống cuối
+    }
+    // Spinner xoay ở CUỐI panel khi ĐANG play dịch (báo "còn nội dung tới"). innerHTML của spRender đã xoá nó → gắn lại.
+    function summaryLive() {
+      if (!_sumPanelOpen) return;
+      let sp = document.getElementById('sp-live');
+      if (_isPlaying && _spMarkdown) {
+        if (!sp) { sp = document.createElement('div'); sp.id = 'sp-live'; sp.innerHTML = '<span class="m3-spinner-sm"></span>'; }
+        spBody.appendChild(sp);                 // luôn ở cuối
+        spBody.scrollTop = spBody.scrollHeight;
+      } else if (sp) { sp.remove(); }
+    }
+    // Nút "Tổng thể": chỉ hiện khi ĐÃ DỪNG ghi (play kết thúc) + còn nội dung STT → tóm tắt toàn cuộc họp (gemma-4-31b).
     function updateSpGptBtn() {
       if (!spGptBtn) return;
       spGptBtn.style.display = (!captionsOn && captionData.size > 0) ? '' : 'none';
     }
     if (spGptBtn) spGptBtn.addEventListener('click', async () => {
       if (!captionData.size) return;
-      _sumStopped = true;   // dừng auto-live để không ghi đè bản tổng
+      _sumStopped = true;   // dừng auto-rolling để không ghi đè bản tổng thể
       spGptBtn.disabled = true;
-      spBody.innerHTML = '<div class="sp-placeholder"><span class="m3-spinner-sm"></span> Đang tổng hợp bằng ChatGPT…</div>';
+      spBody.innerHTML = '<div class="sp-placeholder"><span class="m3-spinner-sm"></span> Đang tổng hợp báo cáo tổng thể…</div>';
       let res = null;
       try { res = await api.summarizeMeeting([...captionData.values()]); } catch (e) { res = { ok: false, error: e.message }; }
       spGptBtn.disabled = false;
       if (!res || !res.ok) { spBody.innerHTML = '<div class="sp-error">❌ ' + esc(shortErr(res && res.error)) + '</div>'; return; }
       spRender(res.markdown);
-      spFoot.textContent = '✅ Bản tổng (ChatGPT) · ' + captionData.size + ' câu';
+      spFoot.textContent = '✅ · ' + captionData.size + ' câu';
     });
     if (spExportBtn) spExportBtn.addEventListener('click', () => {
       if (_spMarkdown) api.exportSummary({ markdown: _spMarkdown, defaultName: 'summary-' + new Date().toISOString().slice(0, 10) + '.md' });

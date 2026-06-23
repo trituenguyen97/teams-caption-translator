@@ -155,6 +155,11 @@ function registerAll(app) {
     try { return await geminiText.summarize(payload); }
     catch (e) { return { ok: false, error: e.message }; }
   });
+  // Tóm tắt TỔNG THỂ (bấm khi họp xong) → báo cáo chi tiết qua gemma-4-31b (→ 26b). Nhận mảng caption toàn cuộc họp.
+  ipcMain.handle('summarize-meeting', async (_, captions) => {
+    try { return await geminiText.summarizeFull(captions); }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
   ipcMain.handle('export-summary', async (_, opts = {}) => {
     try {
       const { filePath, canceled } = await dialog.showSaveDialog(state.win, {

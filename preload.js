@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('__caption', {
 
   // summary (panel Gemini)
   summarizeGemini: (payload) => ipcRenderer.invoke('summarize-gemini', payload),
+  summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),   // tổng thể → gemma-4-31b
   setSummaryPanel: (open)    => ipcRenderer.send('summary-panel', open),
   exportSummary:   (data)    => ipcRenderer.invoke('export-summary', data),
 });
