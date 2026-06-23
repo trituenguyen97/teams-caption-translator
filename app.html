@@ -1468,14 +1468,6 @@
           listEl.appendChild(banner);
         }
       }
-      // Banner hướng dẫn CDP CHỈ cho lỗi kết nối Teams (không phải mọi lỗi như STT/LLM)
-      if (type === 'error' && (key === 'status.cdpFailed' || key === 'status.teamsNotFound')) {
-        listEl.innerHTML = '';
-        const banner = document.createElement('div');
-        banner.className = 'error-banner';
-        banner.innerHTML = t('banner.cdpHelp');
-        listEl.appendChild(banner);
-      }
     });
 
     // Tạo cấu trúc DOM của 1 entry MỘT LẦN; lưu ref các text-node con để cập nhật in-place
@@ -2291,7 +2283,8 @@
     const SP_HINT   = 'Tự động tóm tắt khi có đủ câu mới…';
     // Tóm tắt theo SỐ CÂU MỚI (không phí request lúc im lặng): đủ ≥SUM_MIN_NEW câu mới → tóm tắt; HOẶC
     // có ≥1 câu mới mà đã chờ ≥SUM_MAX_WAIT_MS (họp chậm) → vẫn tóm; 0 câu mới → bỏ qua. Kiểm mỗi SUM_TICK_MS.
-    // TPM: ở chế độ Teams, summary DÙNG CHUNG model gemini-3.1-flash-live với bản dịch → giãn nhịp để giảm token/phút.
+    // Quota: summary đi qua generateContent (3.1-flash-lite → gemma-4-31b/26b), TÁCH quota với bản dịch.
+    // Giãn nhịp để mỗi cuộc 2h ăn ít request/ngày (RPD chính 500) → fallback gemma gánh nốt khi hết.
     const SUM_TICK_MS = 45000, SUM_MIN_NEW = 16, SUM_MAX_WAIT_MS = 240000;
     let _sumPanelOpen = false, _sumTimer = null, _sumPrevCount = 0, _sumLastTime = 0, _sumBusy = false, _sumStopped = false;
 
@@ -2331,10 +2324,10 @@
         return;
       }
       _sumBusy = true; if (spSpinner) spSpinner.style.display = '';   // loading
-      // rolling: chỉ gửi câu MỚI kể từ lần tóm trước. Trần 40 câu/lần (kể cả lần đầu mở có sẵn backlog lớn)
-      // → tránh 1 request khổng lồ đập vào TPM của model dùng-chung (chế độ Teams).
+      // rolling: chỉ gửi câu MỚI kể từ lần tóm trước. Trần 25 câu/lần (kể cả lần đầu mở có sẵn backlog lớn)
+      // → mỗi request nhỏ, súc tích, nhẹ TPM (3.1-flash-lite 250K; gemma TPM không giới hạn).
       let newCaps = caps.slice(_sumPrevCount);
-      const SUM_MAX_CAPS_PER_CALL = 40;
+      const SUM_MAX_CAPS_PER_CALL = 25;
       if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
       let res = null;
       try { res = await api.summarizeGemini({ prevSummary: _spMarkdown, captions: newCaps }); } catch (e) { res = { ok: false, error: e.message }; }

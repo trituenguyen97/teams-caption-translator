@@ -16,6 +16,12 @@ const { bcp47 } = require('./langs');
 const MODEL = 'gemini-3.5-live-translate-preview';
 const RECONNECT_MS = 1500;
 const PARTIAL_DEBOUNCE_MS = 120;
+// 1 DÒNG = trọn ĐOẠN (gốc + dịch cùng nhịp) → không lệch. CHỐT khi cả nguồn & dịch kết câu; tách câu nếu số câu khớp.
+const SRC_SENT_END = /[。．！？!?]\s*$/;   // nguồn kết câu 。？！ (+half-width) — KHÔNG tính '.' ASCII (thập phân)
+const TR_SENT_END  = /[.!?。．！？]\s*$/;  // bản dịch kết câu . ! ? (+ full-width)
+const SETTLE_MS     = 450;   // cả nguồn & dịch ĐỀU kết câu + ngừng ~0.45s → chốt nhanh (đúng cặp gốc↔dịch)
+const WAIT_TRANS_MS = 900;   // nguồn kết câu nhưng dịch CHƯA xong → chờ thêm cho dịch theo kịp
+const LONG_IDLE_MS  = 2500;  // còn dở giữa câu → chỉ chốt khi ngừng HẲN (không cắt mảnh giữa câu)
 
 const send = (ch, data) => state.win && state.win.webContents && state.win.webContents.send(ch, data);
 let _genaiMod = null;
@@ -23,8 +29,12 @@ async function _sdk() { return _genaiMod || (_genaiMod = await import('@google/g
 
 let _started = false, _session = null, _connecting = null, _gen = 0;
 let _handle = null;                 // sessionResumption handle (để reconnect xuyên suốt)
-let _reconnectTimer = null, _emitTimer = null;
+let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
 let _lineBase = 1, _origAcc = '', _transAcc = '';
+// Audio TTS: gom thành BLOCK ~0.4s rồi phát (đủ liền mạch nhưng độ trễ thấp — KHÔNG giữ cả câu nên không trễ 3-4 dòng).
+let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null;
+const AUDIO_FLUSH_SAMPLES = (24000 * 0.4) | 0;   // đủ ~0.4s → phát ngay (block liền mạch, trễ thấp)
+const AUDIO_IDLE_MS = 200;                       // hoặc hết khúc ~0.2s → phát nốt đuôi block
 
 function isConfigured() { return !!(state.apiKey && String(state.apiKey).trim()); }
 function isActive() { return _started; }
@@ -78,30 +88,52 @@ function _scheduleReconnect() { if (!_started) return; clearTimeout(_reconnectTi
 function _closeSession() { const s = _session; _session = null; _gen++; if (s) { try { s.close(); } catch {} } }
 function _reconnectWithHandle() { _closeSession(); if (_started) _ensure().catch(() => {}); }   // dùng _handle hiện có
 
-// Cắt câu tại 。．.！？ (bỏ qua dấu chấm thập phân) → mỗi câu 1 entry caption riêng (hết "nối liền").
+// Cắt câu theo dấu kết 。．！？ (bỏ '.' giữa 2 chữ số = thập phân) → mỗi câu NGUỒN 1 dòng.
 function _splitSents(s) {
   s = s || ''; const out = []; let start = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
-    const end = (c === '。' || c === '！' || c === '？' || c === '．' || (c === '.' && !(/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || ''))));
+    const end = (c === '。' || c === '！' || c === '？' || c === '．' || c === '!' || c === '?' || (c === '.' && !(/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || ''))));
     if (end) { const seg = s.slice(start, i + 1).trim(); if (seg) out.push(seg); start = i + 1; }
   }
   const tail = s.slice(start).trim(); if (tail) out.push(tail);
   return out;
 }
-// Mỗi câu = 1 entry (ghép gốc↔dịch theo chỉ số). turnDone=false → câu cuối là partial (đang nói).
-function _emitSplit(turnDone) {
-  const o = _splitSents(_origAcc), tr = _splitSents(_transAcc);
-  const n = Math.max(o.length, tr.length);
-  for (let i = 0; i < n; i++) {
-    const isPartial = !turnDone && (i === n - 1);
-    const orig = o[i] || '';
-    const trans = (i < tr.length) ? tr[i] : '…';   // chưa có bản dịch câu này → '…' (đang dịch)
-    if (!orig && i >= tr.length) continue;
-    send('caption-live', { id: _lineBase + i, author: 'STT', original: orig, translated: trans, isPartial, ts: _ts(), tsMs: Date.now() });
-  }
-  return n;
+// PARTIAL: hiển thị trọn ĐOẠN hiện hành trên 1 dòng (gốc + dịch CÙNG NHỊP) → không lệch gốc↔dịch.
+function _emit(turnDone) {
+  const orig = (_origAcc || '').trim(), trans = (_transAcc || '').trim();
+  if (!orig && !trans) return;
+  send('caption-live', { id: _lineBase, author: 'STT', original: orig, translated: trans || '…', isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
 }
+// CHỐT: nếu số câu GỐC == số câu DỊCH → tách mỗi câu 1 dòng (đúng cặp 1-1); lệch → giữ 1 dòng gộp (vẫn aligned). Sang id mới.
+function _flush() {
+  clearTimeout(_emitTimer); clearTimeout(_flushTimer);
+  const o = _splitSents(_origAcc), tr = _splitSents(_transAcc);
+  if (o.length >= 1 && o.length === tr.length) {
+    for (let i = 0; i < o.length; i++) send('caption-live', { id: _lineBase + i, author: 'STT', original: o[i], translated: tr[i], isPartial: false, ts: _ts(), tsMs: Date.now() });
+    _lineBase += o.length;
+  } else if ((_origAcc || '').trim() || (_transAcc || '').trim()) {
+    _emit(true); _lineBase += 1;
+  }
+  _origAcc = ''; _transAcc = '';
+}
+
+// ── Audio: gom khúc TTS theo câu, phát TRỌN một lần khi câu đọc xong (audio ngừng về ~0.28s) ──
+function _flushAudio() {
+  clearTimeout(_audioIdleTimer); _audioIdleTimer = null;
+  if (!_audioBuf.length) return;
+  const b64 = Buffer.concat(_audioBuf).toString('base64');   // nối PCM16 24kHz → 1 buffer phát liền mạch
+  _audioBuf = []; _audioSamples = 0;
+  send('gemini-audio', { b64, sampleRate: 24000 });
+}
+function _bufAudio(b64) {
+  const b = Buffer.from(b64, 'base64');
+  _audioBuf.push(b); _audioSamples += b.length >> 1;   // PCM16 = 2 byte/sample
+  clearTimeout(_audioIdleTimer);
+  if (_audioSamples >= AUDIO_FLUSH_SAMPLES) { _flushAudio(); return; }   // đủ ~0.4s → phát ngay (trễ thấp)
+  _audioIdleTimer = setTimeout(_flushAudio, AUDIO_IDLE_MS);              // hết khúc → phát nốt đuôi
+}
+function _resetAudio() { clearTimeout(_audioIdleTimer); _audioIdleTimer = null; _audioBuf = []; _audioSamples = 0; }
 
 function _onMessage(gen, m) {
   if (gen !== _gen) return;
@@ -110,19 +142,25 @@ function _onMessage(gen, m) {
     if (m.goAway) { console.log('[live-translate] goAway → reconnect (resume)'); _reconnectWithHandle(); return; }
     const sc = m.serverContent;
     if (!sc) return;
-    // 'interrupted' = model BỎ DỞ lượt TTS hiện hành rồi bắn lượt MỚI. KHÔNG xoá sạch (gemini-clear) vì cắt mất âm
-    // đang phát = mất đuôi câu. Thay vào: 'softCut' — node ĐANG phát nói nốt, chỉ BỎ phần đuôi đã xếp ở TƯƠNG LAI
-    // (thuộc lượt bị bỏ dở) rồi cho lượt mới nối ngay sau → hết đuôi-cũ dính câu-mới mà KHÔNG cụt âm đang nghe.
-    if (sc.interrupted && state.geminiAudioOn !== false) send('gemini-audio', { softCut: true });
+    // 'interrupted' = model tự bỏ dở lượt TTS (audio cuộc họp liên tục → tự-ngắt nhiều). KHÔNG cắt audio đang
+    // phát/đã gom → tránh đứt-đuôi/méo; cứ gom đến khi câu đọc xong rồi phát trọn (xem _bufAudio bên dưới).
     let changed = false;
     const it = sc.inputTranscription && sc.inputTranscription.text;
     if (typeof it === 'string' && it) { _origAcc += it; changed = true; }
     const ot = sc.outputTranscription && sc.outputTranscription.text;
     if (typeof ot === 'string' && ot) { _transAcc += ot; changed = true; }
+    // Audio TTS: GOM khúc, phát TRỌN một lần khi câu đọc xong (không phát mảnh → hết vụn/đọc-đuổi/méo đuôi).
     const parts = (sc.modelTurn && sc.modelTurn.parts) || sc.parts;
-    if (parts && state.geminiAudioOn !== false) for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) send('gemini-audio', { b64: d, sampleRate: 24000 }); }
-    if (changed) { clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emitSplit(false), PARTIAL_DEBOUNCE_MS); }
-    if (sc.turnComplete) { clearTimeout(_emitTimer); _lineBase += _emitSplit(true); _origAcc = ''; _transAcc = ''; if (state.geminiAudioOn !== false) send('gemini-audio', { pauseMs: 260 }); }   // ranh giới câu → renderer chèn khoảng lặng (nghỉ giữa câu)
+    if (parts && state.geminiAudioOn !== false) for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
+    if (changed) {
+      clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);   // hiện trọn đoạn (gốc+dịch) lớn dần
+      // CHỐT khi cả NGUỒN & DỊCH cùng kết câu (đúng cặp) → nhanh; nguồn xong-dịch chưa → chờ dịch theo kịp;
+      // còn dở giữa câu → chỉ chốt khi ngừng HẲN (không cắt mảnh + không lệch gốc↔dịch).
+      const srcEnd = SRC_SENT_END.test(_origAcc || ''), trEnd = TR_SENT_END.test(_transAcc || '');
+      const delay = (srcEnd && trEnd) ? SETTLE_MS : (srcEnd ? WAIT_TRANS_MS : LONG_IDLE_MS);
+      clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, delay);
+    }
+    if (sc.turnComplete) _flush();
   } catch (e) { console.warn('[live-translate] msg lỗi:', e && e.message); }
 }
 
@@ -141,21 +179,21 @@ function start() {
   if (!isConfigured()) { send('gemini-status', { error: 'no-key' }); return; }
   // KHÔNG reset _lineBase: id phải TĂNG ĐƠN ĐIỆU xuyên start/stop (renderer chỉ xoá list khi bấm Clear; reset về 1
   // sẽ trùng id cũ → cập-nhật-tại-chỗ entry CŨ). _lineBase đã được turnComplete/stop() đẩy qua mọi id đã dùng.
-  _started = true; _handle = null; _origAcc = ''; _transAcc = '';
+  _started = true; _handle = null; _origAcc = ''; _transAcc = ''; _resetAudio();
   _ensure().catch(() => {});
   console.log('[live-translate] start');
 }
 function stop() {
   _started = false;
-  clearTimeout(_reconnectTimer); clearTimeout(_emitTimer);
-  if (_origAcc || _transAcc) { _lineBase += _emitSplit(true); }   // chốt nốt câu dở
-  _origAcc = ''; _transAcc = ''; _handle = null;
+  clearTimeout(_reconnectTimer); clearTimeout(_emitTimer); clearTimeout(_flushTimer);
+  if (_origAcc || _transAcc) _flush();   // chốt nốt đoạn dở
+  _origAcc = ''; _transAcc = ''; _handle = null; _resetAudio();
   _closeSession();
   send('gemini-clear');
   console.log('[live-translate] stop');
 }
-function onTargetLangChanged() { if (_started) { _handle = null; _closeSession(); _ensure().catch(() => {}); } }   // đổi đích → phiên mới
-function setAudioOn(on) { state.geminiAudioOn = !!on; if (!on) send('gemini-clear'); }
+function onTargetLangChanged() { if (_started) { _handle = null; _origAcc = ''; _transAcc = ''; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }   // đổi đích → phiên mới (bỏ nhóm dở để không trộn ngôn ngữ)
+function setAudioOn(on) { state.geminiAudioOn = !!on; if (!on) { _resetAudio(); send('gemini-clear'); } }
 
 // Validate API key (zero-cost: ListModels). Trả { ok } | { ok:false, error }.
 async function validateKey(key) {
