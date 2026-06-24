@@ -17,13 +17,13 @@ function save(patch) { Object.assign(S, patch); chrome.storage.local.set(patch);
 // ── DOM ─────────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const el = {
-  settingsBtn: $('settings-btn'), popoutBtn: $('popout-btn'), settings: $('settings'),
+  settingsBtn: $('settings-btn'), popoutBtn: $('popout-btn'), pipBtn: $('pip-btn'), settings: $('settings'),
   langBtn: $('lang-btn'), langMenu: $('lang-menu'),
   apikey: $('apikey'), keyStatus: $('key-status'), source: $('source'),
   targetBtn: $('target-btn'), targetMenu: $('target-menu'),
   voice: $('voice'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
   autoscroll: $('autoscroll'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
-  summaryWrap: $('summary-wrap'), summary: $('summary'),
+  summaryWrap: $('summary-wrap'), summary: $('summary'), sumSpin: $('sum-spin'),
   sumEdit: $('sum-edit'), sumEditBox: $('sum-edit-box'), summaryExtra: $('summary-extra'), sumExtraSave: $('sum-extra-save'),
   sumFull: $('sum-full'), sumCopy: $('sum-copy'), sumExport: $('sum-export'),
   vResizer: $('v-resizer'), dl: $('dl'),
@@ -36,7 +36,7 @@ function st(key, vars, cls) { _lastStatus = { key, vars, cls }; el.status.textCo
 
 // ── Engines ──────────────────────────────────────────────────────────────────────
 const live = createLiveTranslator({
-  getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, transcribeMode: S.transcribeMode, geminiAudioOn: S.geminiAudioOn }),
+  getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, transcribeMode: S.transcribeMode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
   onCaption: addCaption,
   onAudio: playAudio,
   onClear: clearAudio,
@@ -165,7 +165,7 @@ async function start() {
     ensureGemCtx();                 // mở khoá AudioContext phát trong user-gesture
     live.start();
     await startCapture();
-    running = true; refreshStartBtn();
+    running = true; refreshStartBtn(); refreshSpin();
     st(S.source === 'mic' ? 'status.listeningMic' : 'status.listeningAudio', null, 'run');
   } catch (e) {
     console.error(e); live.stop(); stopCapture();
@@ -177,7 +177,7 @@ function stop() {
   if (!running) return;
   running = false;
   live.stop(); stopCapture(); clearAudio();
-  refreshStartBtn();
+  refreshStartBtn(); refreshSpin();
   st('status.stopped');
 }
 
@@ -190,7 +190,7 @@ async function summarizeTick() {
   const caps = finalized();
   const newCount = caps.length - sumPrevCount;
   if (!((newCount >= SUM_MIN_NEW) || (sumLastTime === 0 && caps.length > 0))) return;
-  sumBusy = true;
+  sumBusy = true; refreshSpin();
   let newCaps = caps.slice(sumPrevCount);
   if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
   try {
@@ -198,14 +198,31 @@ async function summarizeTick() {
     if (res && res.ok) { summaryMd = res.markdown; renderSummary(); sumPrevCount = caps.length; sumLastTime = Date.now(); }
     else if (res && res.error !== 'empty') st('status.summaryErr', { err: res.error }, 'err');
   } catch (e) { st('status.summaryErr', { err: e.message }, 'err'); }
-  finally { sumBusy = false; }
+  finally { sumBusy = false; refreshSpin(); }
+}
+// Spinner = chỉ báo "đang chạy": hiện suốt khi đang dịch (running) và panel mở, hoặc khi có lệnh tóm tắt đang chạy. Stop → ẩn.
+function refreshSpin() { el.sumSpin.classList.toggle('hidden', !((running && sumPanelOpen) || sumBusy)); }
+// Làm lại tóm tắt TỪ ĐẦU với yêu cầu mới (prevSummary rỗng), GIỮ nội dung cũ hiển thị tới khi có bản mới rồi mới đè.
+async function regenerateSummary() {
+  if (sumBusy) return;
+  const caps = finalized();
+  if (!caps.length) return;
+  sumBusy = true; refreshSpin();
+  let newCaps = caps;
+  if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
+  try {
+    const res = await summarizer.summarize({ prevSummary: '', captions: newCaps });
+    if (res && res.ok) { summaryMd = res.markdown; renderSummary(); sumPrevCount = caps.length; sumLastTime = Date.now(); }
+    else if (res && res.error !== 'empty') st('status.summaryErr', { err: res.error }, 'err');
+  } catch (e) { st('status.summaryErr', { err: e.message }, 'err'); }
+  finally { sumBusy = false; refreshSpin(); }
 }
 function openSummary() {
   sumPanelOpen = true; el.summaryWrap.classList.remove('hidden'); el.vResizer.classList.remove('hidden'); el.summaryToggle.classList.add('active');
   if (!el.summaryWrap.style.height) el.summaryWrap.style.height = Math.round(window.innerHeight * 0.35) + 'px';
-  summarizeTick(); clearInterval(sumTimer); sumTimer = setInterval(summarizeTick, SUM_POLL_MS);
+  refreshSpin(); summarizeTick(); clearInterval(sumTimer); sumTimer = setInterval(summarizeTick, SUM_POLL_MS);
 }
-function closeSummary() { sumPanelOpen = false; el.summaryWrap.classList.add('hidden'); el.vResizer.classList.add('hidden'); el.summaryToggle.classList.remove('active'); el.sumEditBox.classList.add('hidden'); clearInterval(sumTimer); sumTimer = null; }
+function closeSummary() { sumPanelOpen = false; el.summaryWrap.classList.add('hidden'); el.vResizer.classList.add('hidden'); el.summaryToggle.classList.remove('active'); el.sumEditBox.classList.add('hidden'); refreshSpin(); clearInterval(sumTimer); sumTimer = null; }
 function renderSummary() { el.summary.innerHTML = summaryMd ? md2html(summaryMd) : `<em class="muted">${t('summary.empty')}</em>`; }
 
 // Markdown → HTML gọn (heading, list, bảng GFM, bold/italic/code, hr).
@@ -329,8 +346,35 @@ async function checkKey() {
   else { el.keyStatus.textContent = r.error === 'invalid' ? t('status.keyBad') : '✕ ' + r.error; el.keyStatus.className = 'key-status err'; }
 }
 
+// Ghim: mở UI trong cửa sổ Document Picture-in-Picture (LUÔN TRÊN CÙNG, nổi trên app khác).
+let _pipHolder = null;
+async function openPip() {
+  if (!('documentPictureInPicture' in window)) { st('status.pipUnsupported', null, 'err'); return; }
+  try {
+    if (window.documentPictureInPicture.window) { window.documentPictureInPicture.window.focus(); return; }
+    const pip = await window.documentPictureInPicture.requestWindow({ width: 460, height: 820 });
+    // chép CSS sang document của PiP
+    for (const sheet of Array.from(document.styleSheets)) {
+      try { const css = Array.from(sheet.cssRules).map(r => r.cssText).join(''); const s = pip.document.createElement('style'); s.textContent = css; pip.document.head.appendChild(s); }
+      catch (_) { if (sheet.href) { const l = pip.document.createElement('link'); l.rel = 'stylesheet'; l.href = sheet.href; pip.document.head.appendChild(l); } }
+    }
+    // chuyển toàn bộ UI sang PiP (JS/AudioContext vẫn sống ở context này = opener)
+    const moved = [];
+    while (document.body.firstChild) { const n = document.body.firstChild; moved.push(n); pip.document.body.appendChild(n); }
+    const prevPip = el.pipBtn.style.display, prevPop = el.popoutBtn.style.display;
+    el.pipBtn.style.display = 'none'; el.popoutBtn.style.display = 'none';   // tránh mở chồng / popout đóng opener
+    _pipHolder = document.createElement('div'); _pipHolder.className = 'pip-holder'; _pipHolder.textContent = t('pip.active'); document.body.appendChild(_pipHolder);
+    pip.addEventListener('pagehide', () => {                                   // đóng PiP → đưa UI về lại side panel
+      if (_pipHolder) { _pipHolder.remove(); _pipHolder = null; }
+      for (const n of moved) document.body.appendChild(n);
+      el.pipBtn.style.display = prevPip; el.popoutBtn.style.display = prevPop;
+    });
+  } catch (e) { st('status.pipErr', { err: e && e.message }, 'err'); }
+}
+
 function wire() {
   el.settingsBtn.addEventListener('click', () => el.settings.classList.toggle('hidden'));
+  el.pipBtn.addEventListener('click', openPip);
   el.popoutBtn.addEventListener('click', async () => {           // mở UI trong cửa sổ popup RỜI rồi ĐÓNG side panel hiện tại
     const page = (location.pathname.split('/').pop() || 'sidepanel.html');
     try {
@@ -349,7 +393,11 @@ function wire() {
   el.voice.addEventListener('change', () => {
     const v = el.voice.value;
     if (v === '__off__') { save({ geminiAudioOn: false }); live.setAudioOn(false); }
-    else { save({ geminiAudioOn: true, geminiVoice: v }); live.setAudioOn(true); }
+    else {
+      const changed = v !== S.geminiVoice;
+      save({ geminiAudioOn: true, geminiVoice: v }); live.setAudioOn(true);
+      if (changed && running) live.onVoiceChanged();   // THỬ: reconnect để đổi giọng ngay (model preview có thể bỏ qua)
+    }
   });
   el.start.addEventListener('click', () => running ? stop() : start());
   el.clear.addEventListener('click', clearList);
@@ -362,8 +410,9 @@ function wire() {
   el.sumFull.addEventListener('click', async () => {
     if (running) { st('status.stopFirst'); return; }
     const caps = finalized(); if (!caps.length) { st('status.noContent'); return; }
-    st('status.makingFull');
+    st('status.makingFull'); sumBusy = true; refreshSpin();
     const r = await summarizer.summarizeFull(caps);
+    sumBusy = false; refreshSpin();
     if (r && r.ok) { summaryMd = r.markdown; renderSummary(); el.summaryWrap.classList.remove('hidden'); st('status.fullDone'); }
     else st('status.fullErr', { err: r && r.error }, 'err');
   });
@@ -377,9 +426,7 @@ function wire() {
   el.sumExtraSave.addEventListener('click', async () => {
     save({ summaryExtra: el.summaryExtra.value.trim() });
     el.sumEditBox.classList.add('hidden');
-    summaryMd = ''; sumPrevCount = 0; sumLastTime = 0; renderSummary();
-    if (!sumPanelOpen) openSummary(); else await summarizeTick();
-    st('status.summaryApplied');
+    await regenerateSummary();                 // GIỮ tóm tắt cũ trên màn hình, có bản mới (theo yêu cầu mới) thì tự đè (không hiện thông báo)
   });
 }
 

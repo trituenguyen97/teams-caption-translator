@@ -20857,7 +20857,7 @@
     const onStatus = opts.onStatus || (() => {
     });
     let _started = false, _session = null, _connecting = null, _gen = 0;
-    let _handle = null;
+    let _handle = null, _voiceCfgFailed = false;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
     let _lineBase = 1, _transAcc = "";
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null;
@@ -20980,6 +20980,9 @@
         contextWindowCompression: { slidingWindow: {} },
         sessionResumption: _handle ? { handle: _handle } : {}
       };
+      if (!st2().transcribeMode && st2().geminiVoice && !_voiceCfgFailed) {
+        config.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: st2().geminiVoice } } };
+      }
       return ai.live.connect({
         model: MODEL,
         config,
@@ -21005,6 +21008,10 @@
           _session = await _connect();
         } catch (e) {
           console.warn("[live] connect l\u1ED7i:", e && e.message);
+          if (!_voiceCfgFailed && !st2().transcribeMode && st2().geminiVoice) {
+            _voiceCfgFailed = true;
+            console.warn("[live] c\xF3 th\u1EC3 do speechConfig \u2192 l\u1EA7n sau k\u1EBFt n\u1ED1i KH\xD4NG k\xE8m voice");
+          }
           _session = null;
           onStatus({ error: e && e.message });
           if (_started) _scheduleReconnect();
@@ -21090,6 +21097,14 @@
     function onTranscribeModeChanged() {
       onTargetLangChanged();
     }
+    function onVoiceChanged() {
+      if (!_started || st2().geminiAudioOn === false) return;
+      _handle = null;
+      _resetAudio();
+      _closeSession();
+      _ensure().catch(() => {
+      });
+    }
     function setAudioOn(on) {
       if (!on) {
         _resetAudio();
@@ -21097,7 +21112,7 @@
       }
     }
     const isActive = () => _started;
-    return { isConfigured, isActive, pushAudio, start: start2, stop: stop2, onTargetLangChanged, onTranscribeModeChanged, setAudioOn };
+    return { isConfigured, isActive, pushAudio, start: start2, stop: stop2, onTargetLangChanged, onTranscribeModeChanged, onVoiceChanged, setAudioOn };
   }
   async function validateKey(key) {
     const k = String(key || "").trim();
@@ -21426,6 +21441,7 @@ ${lines}`;
       "summary.empty": "Ch\u01B0a c\xF3 t\xF3m t\u1EAFt.",
       "summary.extraPh": "VD: t\u1EADp trung v\xE0o quy\u1EBFt \u0111\u1ECBnh & deadline",
       "summary.save": "L\u01B0u",
+      "summary.updating": "\u0110ang c\u1EADp nh\u1EADt t\xF3m t\u1EAFt\u2026",
       count: "{n} c\xE2u",
       "status.ready": "S\u1EB5n s\xE0ng. B\u1EA5m B\u1EAFt \u0111\u1EA7u.",
       "status.readyNoKey": "Nh\u1EADp API key (\u2699\uFE0F) r\u1ED3i b\u1EA5m B\u1EAFt \u0111\u1EA7u.",
@@ -21446,6 +21462,10 @@ ${lines}`;
       "status.summaryErr": "T\xF3m t\u1EAFt: {err}",
       "status.stopFirst": "D\u1EEBng ghi tr\u01B0\u1EDBc khi t\u1EA1o b\xE1o c\xE1o t\u1ED5ng th\u1EC3.",
       "status.popoutErr": "Kh\xF4ng m\u1EDF \u0111\u01B0\u1EE3c c\u1EEDa s\u1ED5 ri\xEAng: {err}",
+      "pip.title": "Ghim c\u1EEDa s\u1ED5 n\u1ED5i (PiP \u2014 lu\xF4n tr\xEAn c\xF9ng)",
+      "pip.active": "\u0110ang hi\u1EC3n th\u1ECB \u1EDF c\u1EEDa s\u1ED5 ghim (PiP). \u0110\xF3ng PiP \u0111\u1EC3 \u0111\u01B0a n\u1ED9i dung v\u1EC1 \u0111\xE2y.",
+      "status.pipUnsupported": "Tr\xECnh duy\u1EC7t kh\xF4ng h\u1ED7 tr\u1EE3 Document Picture-in-Picture.",
+      "status.pipErr": "L\u1ED7i m\u1EDF PiP: {err}",
       "status.summaryApplied": "\u0110\xE3 \xE1p d\u1EE5ng y\xEAu c\u1EA7u & t\xF3m t\u1EAFt l\u1EA1i.",
       "status.noKeyShort": "Thi\u1EBFu API key.",
       "status.geminiErr": "Gemini: {err}"
@@ -21478,6 +21498,7 @@ ${lines}`;
       "summary.empty": "No summary yet.",
       "summary.extraPh": "e.g. focus on decisions & deadlines",
       "summary.save": "Save",
+      "summary.updating": "Updating summary\u2026",
       count: "{n} lines",
       "status.ready": "Ready. Click Start.",
       "status.readyNoKey": "Enter API key (\u2699\uFE0F) then click Start.",
@@ -21498,6 +21519,10 @@ ${lines}`;
       "status.summaryErr": "Summary: {err}",
       "status.stopFirst": "Stop recording before generating the full report.",
       "status.popoutErr": "Could not open separate window: {err}",
+      "pip.title": "Pin floating window (PiP \u2014 always on top)",
+      "pip.active": "Now shown in the pinned (PiP) window. Close PiP to bring it back here.",
+      "status.pipUnsupported": "Browser does not support Document Picture-in-Picture.",
+      "status.pipErr": "PiP error: {err}",
       "status.summaryApplied": "Instructions applied & re-summarized.",
       "status.noKeyShort": "Missing API key.",
       "status.geminiErr": "Gemini: {err}"
@@ -21530,6 +21555,7 @@ ${lines}`;
       "summary.empty": "\u307E\u3060\u8981\u7D04\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
       "summary.extraPh": "\u4F8B\uFF1A\u6C7A\u5B9A\u4E8B\u9805\u3068\u671F\u9650\u3092\u91CD\u8996",
       "summary.save": "\u4FDD\u5B58",
+      "summary.updating": "\u8981\u7D04\u3092\u66F4\u65B0\u4E2D\u2026",
       count: "{n} \u884C",
       "status.ready": "\u6E96\u5099\u5B8C\u4E86\u3002\u958B\u59CB\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "status.readyNoKey": "API \u30AD\u30FC\uFF08\u2699\uFE0F\uFF09\u3092\u5165\u529B\u3057\u3066\u304B\u3089\u958B\u59CB\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
@@ -21550,6 +21576,10 @@ ${lines}`;
       "status.summaryErr": "\u8981\u7D04: {err}",
       "status.stopFirst": "\u5168\u4F53\u30EC\u30DD\u30FC\u30C8\u3092\u4F5C\u6210\u3059\u308B\u524D\u306B\u505C\u6B62\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "status.popoutErr": "\u5225\u30A6\u30A3\u30F3\u30C9\u30A6\u3092\u958B\u3051\u307E\u305B\u3093: {err}",
+      "pip.title": "\u30D5\u30ED\u30FC\u30C6\u30A3\u30F3\u30B0\u56FA\u5B9A\uFF08PiP\u30FB\u5E38\u306B\u6700\u524D\u9762\uFF09",
+      "pip.active": "\u56FA\u5B9A\uFF08PiP\uFF09\u30A6\u30A3\u30F3\u30C9\u30A6\u306B\u8868\u793A\u4E2D\u3002PiP \u3092\u9589\u3058\u308B\u3068\u3053\u3053\u306B\u623B\u308A\u307E\u3059\u3002",
+      "status.pipUnsupported": "\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u306F Document Picture-in-Picture \u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
+      "status.pipErr": "PiP \u30A8\u30E9\u30FC: {err}",
       "status.summaryApplied": "\u6307\u793A\u3092\u9069\u7528\u3057\u3066\u518D\u8981\u7D04\u3057\u307E\u3057\u305F\u3002",
       "status.noKeyShort": "API \u30AD\u30FC\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
       "status.geminiErr": "Gemini: {err}"
@@ -21582,6 +21612,7 @@ ${lines}`;
       "summary.empty": "\uC544\uC9C1 \uC694\uC57D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
       "summary.extraPh": "\uC608: \uACB0\uC815 \uC0AC\uD56D\uACFC \uB9C8\uAC10\uC77C \uC911\uC2EC",
       "summary.save": "\uC800\uC7A5",
+      "summary.updating": "\uC694\uC57D \uC5C5\uB370\uC774\uD2B8 \uC911\u2026",
       count: "{n}\uC904",
       "status.ready": "\uC900\uBE44\uB428. \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.",
       "status.readyNoKey": "API \uD0A4(\u2699\uFE0F)\uB97C \uC785\uB825\uD55C \uD6C4 \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.",
@@ -21602,6 +21633,10 @@ ${lines}`;
       "status.summaryErr": "\uC694\uC57D: {err}",
       "status.stopFirst": "\uC804\uCCB4 \uBCF4\uACE0\uC11C\uB97C \uB9CC\uB4E4\uAE30 \uC804\uC5D0 \uB179\uC74C\uC744 \uC911\uC9C0\uD558\uC138\uC694.",
       "status.popoutErr": "\uBCC4\uB3C4 \uCC3D\uC744 \uC5F4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4: {err}",
+      "pip.title": "\uD50C\uB85C\uD305 \uACE0\uC815 (PiP \u2014 \uD56D\uC0C1 \uC704)",
+      "pip.active": "\uACE0\uC815(PiP) \uCC3D\uC5D0 \uD45C\uC2DC \uC911\uC785\uB2C8\uB2E4. PiP\uB97C \uB2EB\uC73C\uBA74 \uC5EC\uAE30\uB85C \uB3CC\uC544\uC635\uB2C8\uB2E4.",
+      "status.pipUnsupported": "\uC774 \uBE0C\uB77C\uC6B0\uC800\uB294 Document Picture-in-Picture\uB97C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.",
+      "status.pipErr": "PiP \uC624\uB958: {err}",
       "status.summaryApplied": "\uC9C0\uC2DC\uB97C \uC801\uC6A9\uD558\uACE0 \uB2E4\uC2DC \uC694\uC57D\uD588\uC2B5\uB2C8\uB2E4.",
       "status.noKeyShort": "API \uD0A4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.",
       "status.geminiErr": "Gemini: {err}"
@@ -21634,6 +21669,7 @@ ${lines}`;
       "summary.empty": "\u6682\u65E0\u6458\u8981\u3002",
       "summary.extraPh": "\u4F8B\u5982\uFF1A\u805A\u7126\u51B3\u7B56\u4E0E\u622A\u6B62\u65E5\u671F",
       "summary.save": "\u4FDD\u5B58",
+      "summary.updating": "\u6B63\u5728\u66F4\u65B0\u6458\u8981\u2026",
       count: "{n} \u884C",
       "status.ready": "\u5C31\u7EEA\u3002\u70B9\u51FB\u5F00\u59CB\u3002",
       "status.readyNoKey": "\u8F93\u5165 API \u5BC6\u94A5\uFF08\u2699\uFE0F\uFF09\u540E\u70B9\u51FB\u5F00\u59CB\u3002",
@@ -21654,6 +21690,10 @@ ${lines}`;
       "status.summaryErr": "\u6458\u8981\uFF1A{err}",
       "status.stopFirst": "\u751F\u6210\u5B8C\u6574\u62A5\u544A\u524D\u8BF7\u5148\u505C\u6B62\u5F55\u5236\u3002",
       "status.popoutErr": "\u65E0\u6CD5\u6253\u5F00\u5355\u72EC\u7A97\u53E3\uFF1A{err}",
+      "pip.title": "\u60AC\u6D6E\u7F6E\u9876\uFF08PiP \u2014 \u59CB\u7EC8\u5728\u6700\u524D\uFF09",
+      "pip.active": "\u5DF2\u5728\u60AC\u6D6E(PiP)\u7A97\u53E3\u663E\u793A\u3002\u5173\u95ED PiP \u53EF\u6062\u590D\u5230\u6B64\u5904\u3002",
+      "status.pipUnsupported": "\u6D4F\u89C8\u5668\u4E0D\u652F\u6301 Document Picture-in-Picture\u3002",
+      "status.pipErr": "PiP \u9519\u8BEF\uFF1A{err}",
       "status.summaryApplied": "\u5DF2\u5E94\u7528\u8981\u6C42\u5E76\u91CD\u65B0\u6458\u8981\u3002",
       "status.noKeyShort": "\u7F3A\u5C11 API \u5BC6\u94A5\u3002",
       "status.geminiErr": "Gemini\uFF1A{err}"
@@ -21708,6 +21748,7 @@ ${lines}`;
   var el = {
     settingsBtn: $("settings-btn"),
     popoutBtn: $("popout-btn"),
+    pipBtn: $("pip-btn"),
     settings: $("settings"),
     langBtn: $("lang-btn"),
     langMenu: $("lang-menu"),
@@ -21727,6 +21768,7 @@ ${lines}`;
     clear: $("clear"),
     summaryWrap: $("summary-wrap"),
     summary: $("summary"),
+    sumSpin: $("sum-spin"),
     sumEdit: $("sum-edit"),
     sumEditBox: $("sum-edit-box"),
     summaryExtra: $("summary-extra"),
@@ -21745,7 +21787,7 @@ ${lines}`;
     el.status.className = "status" + (cls ? " " + cls : "");
   }
   var live = createLiveTranslator({
-    getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, transcribeMode: S.transcribeMode, geminiAudioOn: S.geminiAudioOn }),
+    getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, transcribeMode: S.transcribeMode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
     onCaption: addCaption,
     onAudio: playAudio,
     onClear: clearAudio,
@@ -21986,6 +22028,7 @@ ${lines}`;
       await startCapture();
       running = true;
       refreshStartBtn();
+      refreshSpin();
       st(S.source === "mic" ? "status.listeningMic" : "status.listeningAudio", null, "run");
     } catch (e) {
       console.error(e);
@@ -22002,6 +22045,7 @@ ${lines}`;
     stopCapture();
     clearAudio();
     refreshStartBtn();
+    refreshSpin();
     st("status.stopped");
   }
   var summaryMd = "";
@@ -22020,6 +22064,7 @@ ${lines}`;
     const newCount = caps.length - sumPrevCount;
     if (!(newCount >= SUM_MIN_NEW || sumLastTime === 0 && caps.length > 0)) return;
     sumBusy = true;
+    refreshSpin();
     let newCaps = caps.slice(sumPrevCount);
     if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
     try {
@@ -22034,6 +22079,33 @@ ${lines}`;
       st("status.summaryErr", { err: e.message }, "err");
     } finally {
       sumBusy = false;
+      refreshSpin();
+    }
+  }
+  function refreshSpin() {
+    el.sumSpin.classList.toggle("hidden", !(running && sumPanelOpen || sumBusy));
+  }
+  async function regenerateSummary() {
+    if (sumBusy) return;
+    const caps = finalized();
+    if (!caps.length) return;
+    sumBusy = true;
+    refreshSpin();
+    let newCaps = caps;
+    if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
+    try {
+      const res = await summarizer.summarize({ prevSummary: "", captions: newCaps });
+      if (res && res.ok) {
+        summaryMd = res.markdown;
+        renderSummary();
+        sumPrevCount = caps.length;
+        sumLastTime = Date.now();
+      } else if (res && res.error !== "empty") st("status.summaryErr", { err: res.error }, "err");
+    } catch (e) {
+      st("status.summaryErr", { err: e.message }, "err");
+    } finally {
+      sumBusy = false;
+      refreshSpin();
     }
   }
   function openSummary() {
@@ -22042,6 +22114,7 @@ ${lines}`;
     el.vResizer.classList.remove("hidden");
     el.summaryToggle.classList.add("active");
     if (!el.summaryWrap.style.height) el.summaryWrap.style.height = Math.round(window.innerHeight * 0.35) + "px";
+    refreshSpin();
     summarizeTick();
     clearInterval(sumTimer);
     sumTimer = setInterval(summarizeTick, SUM_POLL_MS);
@@ -22052,6 +22125,7 @@ ${lines}`;
     el.vResizer.classList.add("hidden");
     el.summaryToggle.classList.remove("active");
     el.sumEditBox.classList.add("hidden");
+    refreshSpin();
     clearInterval(sumTimer);
     sumTimer = null;
   }
@@ -22269,8 +22343,62 @@ ${lines}`;
       el.keyStatus.className = "key-status err";
     }
   }
+  var _pipHolder = null;
+  async function openPip() {
+    if (!("documentPictureInPicture" in window)) {
+      st("status.pipUnsupported", null, "err");
+      return;
+    }
+    try {
+      if (window.documentPictureInPicture.window) {
+        window.documentPictureInPicture.window.focus();
+        return;
+      }
+      const pip = await window.documentPictureInPicture.requestWindow({ width: 460, height: 820 });
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          const css = Array.from(sheet.cssRules).map((r) => r.cssText).join("");
+          const s = pip.document.createElement("style");
+          s.textContent = css;
+          pip.document.head.appendChild(s);
+        } catch (_) {
+          if (sheet.href) {
+            const l = pip.document.createElement("link");
+            l.rel = "stylesheet";
+            l.href = sheet.href;
+            pip.document.head.appendChild(l);
+          }
+        }
+      }
+      const moved = [];
+      while (document.body.firstChild) {
+        const n = document.body.firstChild;
+        moved.push(n);
+        pip.document.body.appendChild(n);
+      }
+      const prevPip = el.pipBtn.style.display, prevPop = el.popoutBtn.style.display;
+      el.pipBtn.style.display = "none";
+      el.popoutBtn.style.display = "none";
+      _pipHolder = document.createElement("div");
+      _pipHolder.className = "pip-holder";
+      _pipHolder.textContent = t("pip.active");
+      document.body.appendChild(_pipHolder);
+      pip.addEventListener("pagehide", () => {
+        if (_pipHolder) {
+          _pipHolder.remove();
+          _pipHolder = null;
+        }
+        for (const n of moved) document.body.appendChild(n);
+        el.pipBtn.style.display = prevPip;
+        el.popoutBtn.style.display = prevPop;
+      });
+    } catch (e) {
+      st("status.pipErr", { err: e && e.message }, "err");
+    }
+  }
   function wire() {
     el.settingsBtn.addEventListener("click", () => el.settings.classList.toggle("hidden"));
+    el.pipBtn.addEventListener("click", openPip);
     el.popoutBtn.addEventListener("click", async () => {
       const page = location.pathname.split("/").pop() || "sidepanel.html";
       try {
@@ -22314,8 +22442,10 @@ ${lines}`;
         save({ geminiAudioOn: false });
         live.setAudioOn(false);
       } else {
+        const changed = v !== S.geminiVoice;
         save({ geminiAudioOn: true, geminiVoice: v });
         live.setAudioOn(true);
+        if (changed && running) live.onVoiceChanged();
       }
     });
     el.start.addEventListener("click", () => running ? stop() : start());
@@ -22353,7 +22483,11 @@ ${lines}`;
         return;
       }
       st("status.makingFull");
+      sumBusy = true;
+      refreshSpin();
       const r = await summarizer.summarizeFull(caps);
+      sumBusy = false;
+      refreshSpin();
       if (r && r.ok) {
         summaryMd = r.markdown;
         renderSummary();
@@ -22372,13 +22506,7 @@ ${lines}`;
     el.sumExtraSave.addEventListener("click", async () => {
       save({ summaryExtra: el.summaryExtra.value.trim() });
       el.sumEditBox.classList.add("hidden");
-      summaryMd = "";
-      sumPrevCount = 0;
-      sumLastTime = 0;
-      renderSummary();
-      if (!sumPanelOpen) openSummary();
-      else await summarizeTick();
-      st("status.summaryApplied");
+      await regenerateSummary();
     });
   }
   (async function init() {

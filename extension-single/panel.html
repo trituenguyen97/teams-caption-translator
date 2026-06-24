@@ -88,6 +88,11 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .row-end { display: flex; justify-content: flex-end; }
 .primary-mini { background: var(--accent2); border-color: var(--accent2); color: #fff; font-weight: 600; }
 
+.pip-holder { padding: 24px 16px; text-align: center; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.sum-spin { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--bd); flex: 0 0 auto; }
+.spin { width: 12px; height: 12px; border: 2px solid var(--bd); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-top: 1px solid var(--bd); }
 .count { font-size: 11px; color: var(--muted); }
 button.mini { background: var(--bg3); border: 1px solid var(--bd); color: var(--fg); border-radius: 7px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
@@ -105,6 +110,7 @@ button.mini.active { border-color: var(--accent2); color: var(--accent); }
       <button id="lang-btn" class="icon-btn flag-btn" data-i18n-title="uilang.title" type="button"></button>
       <div id="lang-menu" class="menu hidden"></div>
     </div>
+    <button id="pip-btn" class="icon-btn" data-i18n-title="pip.title" type="button">📌</button>
     <button id="popout-btn" class="icon-btn" data-i18n-title="popout.title" type="button">⧉</button>
     <button id="settings-btn" class="icon-btn" data-i18n-title="settings" type="button">⚙️</button>
   </header>
@@ -161,6 +167,7 @@ button.mini.active { border-color: var(--accent2); color: var(--accent); }
       <div class="row-end"><button id="sum-extra-save" class="mini primary-mini" data-i18n="summary.save" type="button">Lưu</button></div>
     </div>
     <div id="summary" class="summary-body"></div>
+    <div id="sum-spin" class="sum-spin hidden"><span class="spin"></span><span data-i18n="summary.updating">Đang cập nhật tóm tắt…</span></div>
   </section>
 
   <!-- Footer -->

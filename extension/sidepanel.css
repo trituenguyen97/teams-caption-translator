@@ -81,6 +81,11 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .row-end { display: flex; justify-content: flex-end; }
 .primary-mini { background: var(--accent2); border-color: var(--accent2); color: #fff; font-weight: 600; }
 
+.pip-holder { padding: 24px 16px; text-align: center; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.sum-spin { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--bd); flex: 0 0 auto; }
+.spin { width: 12px; height: 12px; border: 2px solid var(--bd); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-top: 1px solid var(--bd); }
 .count { font-size: 11px; color: var(--muted); }
 button.mini { background: var(--bg3); border: 1px solid var(--bd); color: var(--fg); border-radius: 7px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
