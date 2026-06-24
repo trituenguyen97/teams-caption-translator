@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Caption Translator (Gemini Live)",
+  "version": "0.1.0",
+  "description": "Dịch hội thoại realtime qua Google Gemini Live — nguồn: micro hoặc audio của tab. STT + dịch + đọc to (TTS) + tóm tắt. (Bản extension, không có Teams Live Caption.)",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "sidePanel",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Caption Translator — mở panel"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}

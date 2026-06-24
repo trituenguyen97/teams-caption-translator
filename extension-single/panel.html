@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Caption Translator</title>
+  <style>
+:root {
+  --bg: #131314; --bg2: #1e1f20; --bg3: #2a2b2d; --fg: #e3e3e3; --muted: #9aa0a6;
+  --accent: #8ab4f8; --accent2: #3794ff; --ok: #81c995; --err: #f28b82; --bd: #3c4043;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex; flex-direction: column; min-height: 100vh;
+  background: var(--bg); color: var(--fg);
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+}
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.spacer { flex: 1; }
+
+.top { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg2); border-bottom: 1px solid var(--bd); }
+.logo { font-size: 16px; }
+.title { font-weight: 600; }
+.icon-btn { background: transparent; border: none; color: var(--fg); cursor: pointer; font-size: 15px; padding: 4px 6px; border-radius: 6px; }
+.icon-btn:hover { background: var(--bg3); }
+
+.settings { padding: 10px; background: var(--bg2); border-bottom: 1px solid var(--bd); display: flex; flex-direction: column; gap: 8px; }
+.fld { display: flex; flex-direction: column; gap: 4px; }
+.fld > span { font-size: 11px; color: var(--muted); }
+input, select, textarea {
+  background: var(--bg3); color: var(--fg); border: 1px solid var(--bd);
+  border-radius: 8px; padding: 7px 9px; font: inherit; outline: none;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent2); }
+textarea { resize: vertical; }
+.key-status { font-size: 11px; min-height: 14px; }
+.key-status.ok { color: var(--ok); }
+.key-status.err { color: var(--err); }
+
+.controls { padding: 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--bd); }
+.row { display: flex; gap: 8px; }
+.row > select { flex: 1; min-width: 0; }
+.chk { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.chk input { width: auto; }
+button.primary { background: var(--accent2); border: 1px solid var(--accent2); color: #fff; border-radius: 8px; padding: 7px 12px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+button.primary.on { background: #5f1d1d; border-color: #f28b82; }
+button.primary:disabled { opacity: .5; cursor: default; }
+.status { font-size: 11px; color: var(--muted); min-height: 14px; }
+.status.err { color: var(--err); }
+.status.run { color: var(--ok); }
+
+.list { flex: 1; overflow-y: auto; padding: 8px 10px; min-height: 120px; }
+.entry { padding: 6px 0; border-bottom: 1px solid #2a2b2d55; }
+.entry-head { display: flex; gap: 8px; font-size: 11px; color: var(--muted); }
+.entry-head .who { color: var(--accent); font-weight: 600; }
+.entry-text { margin-top: 2px; white-space: pre-wrap; }
+.entry.partial .entry-text { opacity: .65; font-style: italic; }
+
+.v-resizer { height: 7px; flex: 0 0 auto; cursor: row-resize; background: var(--bd); }
+.v-resizer:hover { background: var(--accent2); }
+.summary-wrap { border-top: 1px solid var(--bd); background: var(--bg2); flex: 0 0 auto; height: 35vh; overflow: hidden; display: flex; flex-direction: column; }
+.summary-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--bd); flex: 0 0 auto; }
+.summary-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; font-size: 12px; }
+.summary-body h1, .summary-body h2, .summary-body h3 { margin: 8px 0 4px; font-size: 13px; color: var(--accent); }
+.summary-body ul, .summary-body ol { margin: 4px 0 4px 18px; padding: 0; }
+.summary-body table { border-collapse: collapse; margin: 6px 0; width: 100%; }
+.summary-body th, .summary-body td { border: 1px solid var(--bd); padding: 3px 6px; text-align: left; }
+.summary-body code { background: var(--bg3); padding: 1px 4px; border-radius: 4px; }
+
+.bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-top: 1px solid var(--bd); }
+.count { font-size: 11px; color: var(--muted); }
+button.mini { background: var(--bg3); border: 1px solid var(--bd); color: var(--fg); border-radius: 7px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+button.mini:hover { background: #34353799; }
+button.mini.active { border-color: var(--accent2); color: var(--accent); }
+
+</style>
+</head>
+<body>
+  <header class="top">
+    <span class="logo">💬</span>
+    <span class="title">Caption Translator</span>
+    <span class="spacer"></span>
+    <button id="popout-btn" class="icon-btn" title="Tách ra cửa sổ riêng (pop-out)">⧉</button>
+    <button id="settings-btn" class="icon-btn" title="Cài đặt">⚙️</button>
+  </header>
+
+  <!-- Cài đặt (ẩn/hiện) -->
+  <section id="settings" class="settings hidden">
+    <label class="fld">
+      <span>Gemini API key</span>
+      <input id="apikey" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" />
+    </label>
+    <div class="key-status" id="key-status"></div>
+    <label class="fld">
+      <span>Yêu cầu tóm tắt riêng (tuỳ chọn)</span>
+      <textarea id="summary-extra" rows="2" placeholder="VD: tập trung vào quyết định & deadline"></textarea>
+    </label>
+  </section>
+
+  <!-- Thanh điều khiển -->
+  <section class="controls">
+    <div class="row">
+      <select id="source" title="Nguồn âm thanh">
+        <option value="mic">🎤 Micro</option>
+        <option value="screen">🔊 Âm thanh (tab / màn hình / cửa sổ)</option>
+      </select>
+      <select id="lang" title="Ngôn ngữ đích"></select>
+    </div>
+
+    <div class="row">
+      <select id="voice" title="Giọng đọc TTS"></select>
+      <button id="start" class="primary">▶ Bắt đầu</button>
+    </div>
+    <div class="status" id="status">Sẵn sàng. Nhập API key rồi bấm Bắt đầu.</div>
+  </section>
+
+  <!-- Danh sách caption -->
+  <main id="list" class="list" aria-live="polite"></main>
+
+  <div id="v-resizer" class="v-resizer hidden" title="Kéo để chỉnh chiều cao tóm tắt"></div>
+
+  <!-- Tóm tắt -->
+  <section id="summary-wrap" class="summary-wrap hidden">
+    <div class="summary-bar">
+      <strong>Tóm tắt</strong>
+      <span class="spacer"></span>
+      <button id="sum-full" class="mini" title="Báo cáo tổng thể (khi đã dừng)">📊 Tổng thể</button>
+      <button id="sum-copy" class="mini" title="Copy">⎘</button>
+      <button id="sum-export" class="mini" title="Xuất .md">⬇</button>
+    </div>
+    <div id="summary" class="summary-body"><em class="muted">Chưa có tóm tắt.</em></div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bottom">
+    <span class="count" id="count">0 câu</span>
+    <span class="spacer"></span>
+    <button id="autoscroll" class="mini active" title="Tự cuộn">↓ Auto</button>
+    <button id="summary-toggle" class="mini" title="Bật/tắt tóm tắt">📋 Tóm tắt</button>
+    <button id="export" class="mini" title="Xuất transcript">💾</button>
+    <button id="clear" class="mini" title="Xoá">🗑</button>
+  </footer>
+  <a id="dl" hidden></a>
+
+  <script src="app.js"></script>
+</body>
+</html>

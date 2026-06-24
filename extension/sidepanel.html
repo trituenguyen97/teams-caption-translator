@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Caption Translator</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="top">
+    <span class="logo">💬</span>
+    <span class="title">Caption Translator</span>
+    <span class="spacer"></span>
+    <button id="popout-btn" class="icon-btn" title="Tách ra cửa sổ riêng (pop-out)">⧉</button>
+    <button id="settings-btn" class="icon-btn" title="Cài đặt">⚙️</button>
+  </header>
+
+  <!-- Cài đặt (ẩn/hiện) -->
+  <section id="settings" class="settings hidden">
+    <label class="fld">
+      <span>Gemini API key</span>
+      <input id="apikey" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" />
+    </label>
+    <div class="key-status" id="key-status"></div>
+    <label class="fld">
+      <span>Yêu cầu tóm tắt riêng (tuỳ chọn)</span>
+      <textarea id="summary-extra" rows="2" placeholder="VD: tập trung vào quyết định & deadline"></textarea>
+    </label>
+  </section>
+
+  <!-- Thanh điều khiển -->
+  <section class="controls">
+    <div class="row">
+      <select id="source" title="Nguồn âm thanh">
+        <option value="mic">🎤 Micro</option>
+        <option value="screen">🔊 Âm thanh (tab / màn hình / cửa sổ)</option>
+      </select>
+      <select id="lang" title="Ngôn ngữ đích"></select>
+    </div>
+
+    <div class="row">
+      <select id="voice" title="Giọng đọc TTS"></select>
+      <button id="start" class="primary">▶ Bắt đầu</button>
+    </div>
+    <div class="status" id="status">Sẵn sàng. Nhập API key rồi bấm Bắt đầu.</div>
+  </section>
+
+  <!-- Danh sách caption -->
+  <main id="list" class="list" aria-live="polite"></main>
+
+  <div id="v-resizer" class="v-resizer hidden" title="Kéo để chỉnh chiều cao tóm tắt"></div>
+
+  <!-- Tóm tắt -->
+  <section id="summary-wrap" class="summary-wrap hidden">
+    <div class="summary-bar">
+      <strong>Tóm tắt</strong>
+      <span class="spacer"></span>
+      <button id="sum-full" class="mini" title="Báo cáo tổng thể (khi đã dừng)">📊 Tổng thể</button>
+      <button id="sum-copy" class="mini" title="Copy">⎘</button>
+      <button id="sum-export" class="mini" title="Xuất .md">⬇</button>
+    </div>
+    <div id="summary" class="summary-body"><em class="muted">Chưa có tóm tắt.</em></div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bottom">
+    <span class="count" id="count">0 câu</span>
+    <span class="spacer"></span>
+    <button id="autoscroll" class="mini active" title="Tự cuộn">↓ Auto</button>
+    <button id="summary-toggle" class="mini" title="Bật/tắt tóm tắt">📋 Tóm tắt</button>
+    <button id="export" class="mini" title="Xuất transcript">💾</button>
+    <button id="clear" class="mini" title="Xoá">🗑</button>
+  </footer>
+  <a id="dl" hidden></a>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
