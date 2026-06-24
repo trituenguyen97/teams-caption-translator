@@ -163,7 +163,7 @@ function registerAll(app) {
   ipcMain.handle('export-summary', async (_, opts = {}) => {
     try {
       const { filePath, canceled } = await dialog.showSaveDialog(state.win, {
-        title: 'Lưu tóm tắt',
+        title: opts.dialogTitle || 'Lưu tóm tắt',
         defaultPath: opts.defaultName || ('summary-' + new Date().toISOString().slice(0, 10) + '.md'),
         filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }],
       });

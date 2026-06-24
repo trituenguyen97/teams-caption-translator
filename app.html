@@ -41,13 +41,13 @@
       --m3-hover-on:  rgba(138,180,248,.12); /* hover over accent      */
 
       /* one restrained accent */
-      --m3-accent:    #8ab4f8;            /* primary (blue on dark)    */
-      --m3-accent-d:  #aecbfa;
+      --m3-accent:    #9fb6e6;            /* primary (blue on dark)    */
+      --m3-accent-d:  #c2cfee;
       --m3-accent-ctr:#2d3c54;            /* primary container         */
       --m3-accent-on: #d7e3f8;            /* text on container         */
       /* ONE hero gradient — primary affordances only (graft: B, restrained) */
-      --m3-grad:      linear-gradient(135deg, #2b6fe0 0%, #5a6bf0 60%, #7b6bf2 100%);
-      --m3-grad-h:    linear-gradient(135deg, #3b7ef0 0%, #6a7bff 60%, #8b7bff 100%);
+      --m3-grad:      linear-gradient(135deg, #3a5ca8 0%, #46639f 60%, #54699f 100%);
+      --m3-grad-h:    linear-gradient(135deg, #46699f 0%, #5470a8 60%, #6277ab 100%);
 
       /* semantic (kept calm — softest variants of the three) */
       --m3-ok:        #6dd3b3;
@@ -79,7 +79,7 @@
       --m3-dur:       .16s;
       --m3-t:         .18s var(--m3-ease);  /* tidy single token (graft: B) */
 
-      --m3-font: "Roboto", "Inter", system-ui, "Segoe UI", -apple-system,
+      --m3-font: "Segoe UI", "Inter", "Yu Gothic UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Meiryo", system-ui, -apple-system,
                  BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
       --m3-mono: "Roboto Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
     }
@@ -901,7 +901,7 @@
       --m3-canvas:radial-gradient(120% 90% at 50% -10%, #fdfbf6 0%, #f3ece0 60%);
       --m3-sheen:linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0) 46%);
       --m3-hover:rgba(60,48,28,.05); --m3-press:rgba(60,48,28,.10); --m3-hover-on:rgba(26,98,212,.10);
-      --m3-accent:#1a62d4; --m3-accent-d:#1750b8; --m3-accent-ctr:#dce8fb; --m3-accent-on:#0c2c63;
+      --m3-accent:#3a5ca8; --m3-accent-d:#2f4c8c; --m3-accent-ctr:#e2e8f3; --m3-accent-on:#1b2c54;
       --m3-ok:#1f7a5e; --m3-ok-ctr:#cdeadd; --m3-warn:#8a5e10; --m3-err:#b3261e; --m3-err-ctr:#f7d9d6;
       --m3-on:#15120c; --m3-on-2:#322e27; --m3-on-3:#4f493f; --m3-on-4:#6f685b;
       --m3-e1:0 1px 2px rgba(74,58,32,.16), 0 1px 3px 1px rgba(74,58,32,.10);
@@ -1188,7 +1188,7 @@
       <button class="lq-flag" id="lq-src" title="Ngôn ngữ nguồn"></button>
       <span class="lq-arrow" aria-hidden="true">→</span>
       <button class="lq-flag" id="lq-tgt" data-i18n-title="header.langTitle" title="Ngôn ngữ dịch"></button>
-      <button class="lq-tts" id="lq-tts" title="Giọng dịch (Gemini)" style="display:none">🔊</button>
+      <button class="lq-tts" id="lq-tts" data-i18n-title="header.ttsTitle" title="Giọng dịch (Gemini)" style="display:none">🔊</button>
       <div class="lq-pop lq-tts-pop" id="lq-tts-pop"></div>
       <div class="lq-pop" id="lq-src-pop"></div>
       <div class="lq-pop" id="lq-tgt-pop"></div>
@@ -1219,7 +1219,7 @@
       </div>
       <div class="menu-row" id="s-process-row" style="display:none">
         <span data-i18n="settings.audioProcess">Thu từ tiến trình</span>
-        <select id="s-process"><option value="">Toàn hệ thống</option></select>
+        <select id="s-process"><option value="" data-i18n="process.wholeSystem">Toàn hệ thống</option></select>
       </div>
       <div class="menu-sep"></div>
 
@@ -1251,21 +1251,21 @@
     <aside class="summary-panel" id="summary-panel">
       <div class="sp-head">
         <span class="sp-spinner" id="sp-spinner" style="display:none"><span class="m3-spinner-sm"></span></span>
-        <span class="sp-title">📋 Tóm tắt trực tiếp</span>
-        <button id="sp-close-btn" class="sp-mini" title="Đóng panel">✕</button>
+        <span class="sp-title" data-i18n="summary.liveTitle">📋 Tóm tắt trực tiếp</span>
+        <button id="sp-close-btn" class="sp-mini" data-i18n-title="summary.closePanelTitle" title="Đóng panel">✕</button>
       </div>
       <div class="sp-body" id="sp-body">
-        <div class="sp-placeholder">Tự động tóm tắt khi có đủ câu mới…</div>
+        <div class="sp-placeholder" data-i18n="summary.autoHint">Tự động tóm tắt khi có đủ câu mới…</div>
       </div>
       <div class="sp-foot" id="sp-foot"></div>
     </aside>
-    <div class="col-resizer" id="col-resizer" title="Kéo để chỉnh rộng"></div>
+    <div class="col-resizer" id="col-resizer" data-i18n-title="summary.resizerTitle" title="Kéo để chỉnh rộng"></div>
   </div>
 
   <!-- Footer -->
   <div class="footer">
     <div class="footer-trans" id="footer-trans">
-      <span class="footer-count" id="count">0 câu</span>
+      <span class="footer-count" id="count" data-i18n="footer.count">0 câu</span>
       <div class="spacer"></div>
       <button id="scroll-btn" class="active" data-i18n-title="footer.autoScrollTitle" title="Tự cuộn xuống">↓ <span data-i18n="footer.auto">Auto</span></button>
       <span class="export-wrap">
@@ -1281,10 +1281,10 @@
     </div>
     <div class="footer-sum" id="footer-sum">
       <div class="spacer"></div>
-      <button id="sp-gpt-btn" title="Tổng hợp báo cáo chi tiết toàn cuộc họp (gemma-4-31b)" style="display:none;background:#1a4a78;border-color:#3794ff;color:#fff">📊 Tổng thể</button>
-      <button id="sp-export-btn" title="Xuất .md" disabled>⬇ .md</button>
-      <button id="sp-copy-btn" title="Copy" disabled>⎘</button>
-      <button id="sp-clear-btn" title="Xóa tóm tắt">🗑</button>
+      <button id="sp-gpt-btn" data-i18n="summary.fullReport" data-i18n-title="summary.fullReportTitle" title="Tổng hợp báo cáo chi tiết toàn cuộc họp" style="display:none;background:#1a4a78;border-color:#3794ff;color:#fff">📊 Tổng thể</button>
+      <button id="sp-export-btn" data-i18n-title="summary.exportMdTitle" title="Xuất .md" disabled>⬇ .md</button>
+      <button id="sp-copy-btn" data-i18n-title="summary.copyTitle" title="Copy" disabled>⎘</button>
+      <button id="sp-clear-btn" data-i18n-title="summary.clearTitle" title="Xóa tóm tắt">🗑</button>
     </div>
   </div>
 
@@ -1321,6 +1321,7 @@
       try { if (_lastStatus && (_lastStatus.type === 'error' || _lastStatus.type === 'idle') && _lastStatus.key) statusMsg.textContent = t(_lastStatus.key, _statusVars(_lastStatus.vars)); } catch (e) {}
       try { updateThemeIcon(); } catch (e) {}
       try { renderEmpty(); } catch (e) {}
+      try { refreshTtsBtn(); } catch (e) {}
     }
     let _themePref = 'auto';
     const _mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -1582,7 +1583,7 @@
         if (el._orig.textContent !== _origStr) el._orig.textContent = _origStr;
       }
       if (isPending) {
-        el._tr.innerHTML = '<span style="color:var(--m3-on-2);font-style:italic">đang dịch…</span>';
+        el._tr.innerHTML = '<span style="color:var(--m3-on-2);font-style:italic">' + t('caption.translating') + '</span>';
       } else if (isFailed) {
         el._tr.innerHTML = '<span style="color:var(--m3-on-4);font-style:italic">—</span>';
       } else {
@@ -1654,10 +1655,10 @@
       const st = document.getElementById('s-apikey-status'); if (!st) return;
       const k = (key || '').trim();
       if (!k) { st.textContent = ''; st.className = ''; return; }
-      st.textContent = '⏳ đang kiểm tra…'; st.className = '';
+      st.textContent = t('apikey.checking'); st.className = '';
       let r = null; try { r = await api.validateGeminiKey(k); } catch (e) { r = { ok: false, error: e.message }; }
-      if (r && r.ok) { st.textContent = '✓ Key hợp lệ'; st.className = 'ok'; }
-      else { st.textContent = '✕ Key không hợp lệ' + (r && r.error && r.error !== 'invalid' ? ' (' + r.error + ')' : ''); st.className = 'bad'; }
+      if (r && r.ok) { st.textContent = t('apikey.valid'); st.className = 'ok'; }
+      else { st.textContent = t('apikey.invalid') + (r && r.error && r.error !== 'invalid' ? ' (' + r.error + ')' : ''); st.className = 'bad'; }
     }
     (function () {
       const apk = document.getElementById('s-apikey');
@@ -1672,12 +1673,12 @@
         const devices = await navigator.mediaDevices.enumerateDevices();
         const mics = devices.filter(d => d.kind === 'audioinput');
         sMicDevice.innerHTML = mics.length
-          ? mics.map(d => `<option value="${esc(d.deviceId)}">${esc(d.label || 'Microphone ' + d.deviceId.slice(0, 8))}</option>`).join('')
-          : '<option value="">Không tìm thấy microphone</option>';
+          ? mics.map(d => `<option value="${esc(d.deviceId)}">${esc(d.label || t('mic.unnamed', { id: d.deviceId.slice(0, 8) }))}</option>`).join('')
+          : `<option value="">${esc(t('mic.notFound'))}</option>`;
         if (currentId && [...sMicDevice.options].some(o => o.value === currentId))
           sMicDevice.value = currentId;
       } catch {
-        sMicDevice.innerHTML = '<option value="">Không thể liệt kê thiết bị</option>';
+        sMicDevice.innerHTML = `<option value="">${esc(t('mic.enumFailed'))}</option>`;
       }
     }
 
@@ -1700,9 +1701,9 @@
       let procs = [];
       try { procs = await api.listAudioProcesses() || []; } catch (e) {}
       // Giữ "Toàn hệ thống" + lựa chọn đã lưu (kể cả khi tiến trình đó không còn trong danh sách cửa sổ hiện tại).
-      const opts = ['<option value="">Toàn hệ thống</option>'];
+      const opts = [`<option value="">${esc(t('process.wholeSystem'))}</option>`];
       const has = procs.some(p => p.pid === curPid);
-      if (curPid && !has) opts.push(`<option value="${esc(curPid)}">${esc(curTitle || ('PID ' + curPid))} (đã lưu)</option>`);
+      if (curPid && !has) opts.push(`<option value="${esc(curPid)}">${esc(curTitle || ('PID ' + curPid))} ${esc(t('process.savedSuffix'))}</option>`);
       for (const p of procs) opts.push(`<option value="${esc(p.pid)}">${esc(p.title)} — ${esc(p.pid)}</option>`);
       sProcess.innerHTML = opts.join('');
       sProcess.value = curPid || '';
@@ -1789,12 +1790,12 @@
     const lqTtsPop = document.getElementById('lq-tts-pop');
     // Giọng Gemini Live (prebuilt). Đổi giọng → lưu geminiVoice → main recycle phiên áp giọng mới.
     const GEM_VOICES = [
-      ['Achernar','Dịu êm'],['Aoede','Nhẹ nhàng'],['Sulafat','Ấm'],['Vindemiatrix','Dịu dàng'],['Achird','Thân thiện'],
-      ['Kore','Chắc'],['Charon','Nhiều thông tin'],['Puck','Rộn ràng'],['Zephyr','Tươi sáng'],['Leda','Trẻ trung'],
-      ['Fenrir','Sôi nổi'],['Orus','Chắc'],['Callirrhoe','Dễ chịu'],['Autonoe','Sáng'],['Umbriel','Dễ tính'],
-      ['Despina','Mượt'],['Algieba','Mượt'],['Erinome','Trong'],['Iapetus','Rõ ràng'],['Laomedeia','Rộn ràng'],
-      ['Schedar','Đều'],['Gacrux','Trưởng thành'],['Sadachbia','Sống động'],['Sadaltager','Hiểu biết'],['Alnilam','Chắc'],
-      ['Enceladus','Thì thầm'],['Algenib','Khàn'],['Rasalgethi','Nhiều thông tin'],['Pulcherrima','Chuyển tiếp'],['Zubenelgenubi','Bình thường'],
+      ['Achernar','tts.desc.diuEm'],['Aoede','tts.desc.nheNhang'],['Sulafat','tts.desc.am'],['Vindemiatrix','tts.desc.diuDang'],['Achird','tts.desc.thanThien'],
+      ['Kore','tts.desc.chac'],['Charon','tts.desc.nhieuThongTin'],['Puck','tts.desc.ronRang'],['Zephyr','tts.desc.tuoiSang'],['Leda','tts.desc.treTrung'],
+      ['Fenrir','tts.desc.soiNoi'],['Orus','tts.desc.chac'],['Callirrhoe','tts.desc.deChiu'],['Autonoe','tts.desc.sang'],['Umbriel','tts.desc.deTinh'],
+      ['Despina','tts.desc.muot'],['Algieba','tts.desc.muot'],['Erinome','tts.desc.trong'],['Iapetus','tts.desc.roRang'],['Laomedeia','tts.desc.ronRang'],
+      ['Schedar','tts.desc.deu'],['Gacrux','tts.desc.truongThanh'],['Sadachbia','tts.desc.songDong'],['Sadaltager','tts.desc.hieuBiet'],['Alnilam','tts.desc.chac'],
+      ['Enceladus','tts.desc.thiTham'],['Algenib','tts.desc.khan'],['Rasalgethi','tts.desc.nhieuThongTin'],['Pulcherrima','tts.desc.chuyenTiep'],['Zubenelgenubi','tts.desc.binhThuong'],
     ];
     // Nút loa: CHỈ hiện khi provider = gemini-live → bật/tắt phát GIỌNG DỊCH do Gemini sinh kèm (text dịch vẫn hiện).
     function refreshTtsBtn() {
@@ -1803,14 +1804,14 @@
       lqTts.textContent = _gemAudioOn ? '🔊' : '🔇';
       lqTts.classList.toggle('active', _gemAudioOn);
       lqTts.setAttribute('aria-expanded', lqTtsPop && lqTtsPop.classList.contains('open') ? 'true' : 'false');
-      lqTts.title = _gemAudioOn ? ('Giọng: ' + _gemVoice + ' — bấm đổi / tắt') : 'Đọc to: tắt — bấm chọn giọng';
+      lqTts.title = _gemAudioOn ? t('tts.voiceOnTitle', { voice: _gemVoice }) : t('tts.voiceOffTitle');
     }
     function buildTtsPop() {
       if (!lqTtsPop) return;
-      let h = '<button type="button" class="lq-tts-opt' + (!_gemAudioOn ? ' sel' : '') + '" data-v="off"><span class="tk">' + (!_gemAudioOn ? '✓' : '') + '</span>🔇 Tắt đọc</button>';
-      for (const [name, desc] of GEM_VOICES) {
+      let h = '<button type="button" class="lq-tts-opt' + (!_gemAudioOn ? ' sel' : '') + '" data-v="off"><span class="tk">' + (!_gemAudioOn ? '✓' : '') + '</span>' + t('tts.off') + '</button>';
+      for (const [name, descKey] of GEM_VOICES) {
         const sel = _gemAudioOn && _gemVoice === name;
-        h += '<button type="button" class="lq-tts-opt' + (sel ? ' sel' : '') + '" data-v="' + name + '"><span class="tk">' + (sel ? '✓' : '') + '</span>' + name + ' · <span style="color:var(--m3-on-3);font-size:11px">' + desc + '</span></button>';
+        h += '<button type="button" class="lq-tts-opt' + (sel ? ' sel' : '') + '" data-v="' + name + '"><span class="tk">' + (sel ? '✓' : '') + '</span>' + name + ' · <span style="color:var(--m3-on-3);font-size:11px">' + t(descKey) + '</span></button>';
       }
       lqTtsPop.innerHTML = h;
     }
@@ -2003,7 +2004,7 @@
         stream.getVideoTracks().forEach(t => t.stop());
         const audioTracks = stream.getAudioTracks();
         _audioStream = new MediaStream(audioTracks);
-        if (!audioTracks.length) { statusMsg.textContent = '⚠ Không có audio track — thử lại'; return; }
+        if (!audioTracks.length) { statusMsg.textContent = t('audio.noTrack'); return; }
 
         _recordingActive = true;
 
@@ -2043,11 +2044,11 @@
       } catch (err) {
         _recordingActive = false;
         console.error('[audio]', err);
-        const msg = err.name === 'NotAllowedError' ? 'Quyền bị từ chối' :
-                    err.name === 'NotFoundError'    ? 'Không tìm thấy thiết bị âm thanh' :
-                    err.name === 'AbortError'       ? 'Đã hủy' :
-                    (err.message || err.name || 'Lỗi không xác định');
-        statusMsg.textContent = '❌ Thu âm thất bại: ' + msg;
+        const msg = err.name === 'NotAllowedError' ? t('audio.err.denied') :
+                    err.name === 'NotFoundError'    ? t('audio.err.notFound') :
+                    err.name === 'AbortError'       ? t('audio.err.aborted') :
+                    (err.message || err.name || t('audio.err.unknown'));
+        statusMsg.textContent = t('audio.captureFailed', { msg });
       }
     }
 
@@ -2120,13 +2121,13 @@
         _gemNodes.push(node);
         node.onended = () => { const i = _gemNodes.indexOf(node); if (i >= 0) _gemNodes.splice(i, 1); if (lqTts && !_gemNodes.length) lqTts.classList.remove('speaking'); };
         if (lqTts) lqTts.classList.add('speaking');
-        if (!window._gemLogged) { window._gemLogged = 1; if (statusMsg) statusMsg.textContent = '🔊 Đang phát giọng dịch'; }
+        if (!window._gemLogged) { window._gemLogged = 1; if (statusMsg) statusMsg.textContent = t('status.playingVoice'); }
       } catch (e) { console.warn('[gemini-audio] play lỗi:', e && e.message); }
     });
     api.onGeminiClear(() => _gemClearAudio());
     api.onGeminiStatus(({ error }) => {
-      if (error === 'no-key') statusMsg.textContent = '⚠ Chưa nhập Gemini API key (⋮ → Dịch thuật)';
-      else if (error) statusMsg.textContent = '⚠ Gemini: ' + error;
+      if (error === 'no-key') statusMsg.textContent = t('status.noApiKey');
+      else if (error) statusMsg.textContent = t('status.geminiError', { error });
     });
 
     // ── Kéo chỉnh rộng 2 cột (dịch | tóm tắt) — clamp 2 min để không co quá bé ──
@@ -2196,19 +2197,19 @@
     async function doExport(mode) {
       if (!captionData.size) { statusMsg.textContent = t('status.exportEmpty'); return; }
       const sorted = [...captionData.values()].sort((a, b) => (a.tsMs || 0) - (b.tsMs || 0));
-      const TITLE = { orig: 'Bản gốc', both: 'Bản gốc + bản dịch', trans: 'Bản dịch' };
+      const TITLE = { orig: t('export.orig'), both: t('export.titleBoth'), trans: t('export.trans') };
       const NAME  = { orig: 'transcript', both: 'song-ngu', trans: 'ban-dich' };
-      const header = `=== ${TITLE[mode] || TITLE.orig} cuộc họp — ${new Date().toLocaleString('vi-VN')} ===\n` +
-                     `Tổng số dòng: ${sorted.length}\n` +
+      const header = t('export.header', { title: TITLE[mode] || TITLE.orig, date: new Date().toLocaleString(), n: sorted.length }) + '\n' +
                      `${'='.repeat(60)}\n\n`;
       let lines;
       // App chỉ còn lưu bản DỊCH (không còn transcribe gốc per-entry) → orig/both fallback sang bản dịch.
-      if (mode === 'trans')     lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.translated || ''}`).join('\n');
-      else if (mode === 'both') lines = sorted.map(c => c.original ? `[${c.ts || ''}] ${c.author || 'Unknown'}:\n  • ${c.original}\n  → ${c.translated || ''}` : `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.translated || ''}`).join('\n\n');
-      else                      lines = sorted.map(c => `[${c.ts || ''}] ${c.author || 'Unknown'}: ${c.original || c.translated || ''}`).join('\n');
+      const _unk = t('caption.unknownAuthor');
+      if (mode === 'trans')     lines = sorted.map(c => `[${c.ts || ''}] ${c.author || _unk}: ${c.translated || ''}`).join('\n');
+      else if (mode === 'both') lines = sorted.map(c => c.original ? `[${c.ts || ''}] ${c.author || _unk}:\n  • ${c.original}\n  → ${c.translated || ''}` : `[${c.ts || ''}] ${c.author || _unk}: ${c.translated || ''}`).join('\n\n');
+      else                      lines = sorted.map(c => `[${c.ts || ''}] ${c.author || _unk}: ${c.original || c.translated || ''}`).join('\n');
       const content = header + lines + '\n';
       const date = new Date().toISOString().slice(0, 10);
-      const r = await api.exportSummary({ markdown: content, defaultName: `${NAME[mode] || NAME.orig}-${date}.txt` });
+      const r = await api.exportSummary({ markdown: content, defaultName: `${NAME[mode] || NAME.orig}-${date}.txt`, dialogTitle: t('dialog.saveSummaryTitle') });
       if (r.ok) {
         statusMsg.textContent = t('status.exported', { n: sorted.length, path: r.filePath });
         setTimeout(() => { statusMsg.textContent = ''; }, 4000);
@@ -2289,7 +2290,7 @@
     const spBody    = document.getElementById('sp-body');
     const spFoot    = document.getElementById('sp-foot');
     const spSpinner = document.getElementById('sp-spinner');
-    const SP_HINT   = 'Tự động tóm tắt khi có đủ câu mới…';
+    const SP_HINT   = () => t('summary.autoHint');
     // Tóm tắt theo SỐ CÂU mới (~2 phút hội thoại), KHÔNG theo thời gian: đủ ≥SUM_MIN_NEW câu dịch mới → gọi API
     // tóm tắt NGAY (kích hoạt khi caption mới tới). 0 câu mới → không gọi. Quota: generateContent (3.1-flash-lite
     // → gemma-4-31b/26b), TÁCH với bản dịch. ~2 phút/lần → cuộc 2h ~60 request (RPD chính 500 dư).
@@ -2324,13 +2325,13 @@
     async function summarizeTick() {
       if (!_sumPanelOpen || _sumBusy || _sumStopped) return;
       const caps = [...captionData.values()];
-      if (!caps.length) { spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT + '</div>'; return; }
+      if (!caps.length) { spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT() + '</div>'; return; }
       if (caps.length < _sumPrevCount) _sumPrevCount = 0;   // đã bấm Xóa → coi như mới
       const newCount = caps.length - _sumPrevCount;
       // tóm tắt khi: đủ ≥SUM_MIN_NEW câu dịch mới (~2 phút), HOẶC lần đầu mở mà đã có nội dung.
       const should = (newCount >= SUM_MIN_NEW) || (_sumLastTime === 0);
       if (!should) {
-        if (newCount > 0 && spFoot) spFoot.textContent = '⏳ ' + newCount + '/' + SUM_MIN_NEW + ' câu mới · tự cập nhật';
+        if (newCount > 0 && spFoot) spFoot.textContent = t('summary.newPending', { newCount, min: SUM_MIN_NEW });
         return;
       }
       _sumBusy = true; if (spSpinner) spSpinner.style.display = '';   // loading
@@ -2346,18 +2347,18 @@
       if (!res || !res.ok) {
         if (res && res.error === 'no-key') {   // không key → báo lỗi + DỪNG (yêu cầu đổi setting)
           _sumStopped = true; clearInterval(_sumTimer); _sumTimer = null;
-          spBody.innerHTML = '<div class="sp-error">⚠ Cần Gemini API key.<br>Mở ⋮ → Dịch vụ → nhập key rồi mở lại panel.</div>';
+          spBody.innerHTML = '<div class="sp-error">' + t('summary.needKey') + '</div>';
         } else if (res && (res.error === 'empty' || res.error === 'empty-response')) {
-          spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT + '</div>';
+          spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT() + '</div>';
         } else {
-          spFoot.textContent = '❌ ' + shortErr(res && res.error) + ' · thử lại sau 1′';
+          spFoot.textContent = t('summary.retryLater', { err: shortErr(res && res.error) });
         }
         return;
       }
       _sumPrevCount = caps.length; _sumLastTime = Date.now();
       spRender(res.markdown);
       const d = new Date(), p = n => (n < 10 ? '0' : '') + n;
-      spFoot.textContent = '✅ ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ' · ' + caps.length + ' câu';
+      spFoot.textContent = t('summary.footDone', { time: p(d.getHours()) + ':' + p(d.getMinutes()), n: caps.length });
     }
 
     document.getElementById('sp-close-btn').addEventListener('click', closeSummaryPanel);
@@ -2393,21 +2394,21 @@
       if (!captionData.size) return;
       _sumStopped = true;   // dừng auto-rolling để không ghi đè bản tổng thể
       spGptBtn.disabled = true;
-      spBody.innerHTML = '<div class="sp-placeholder"><span class="m3-spinner-sm"></span> Đang tổng hợp báo cáo tổng thể…</div>';
+      spBody.innerHTML = '<div class="sp-placeholder"><span class="m3-spinner-sm"></span> ' + t('summary.overallGenerating') + '</div>';
       let res = null;
       try { res = await api.summarizeMeeting([...captionData.values()]); } catch (e) { res = { ok: false, error: e.message }; }
       spGptBtn.disabled = false;
       if (!res || !res.ok) { spBody.innerHTML = '<div class="sp-error">❌ ' + esc(shortErr(res && res.error)) + '</div>'; return; }
       spRender(res.markdown);
-      spFoot.textContent = '✅ · ' + captionData.size + ' câu';
+      spFoot.textContent = t('summary.overallDone', { n: captionData.size });
     });
     if (spExportBtn) spExportBtn.addEventListener('click', () => {
-      if (_spMarkdown) api.exportSummary({ markdown: _spMarkdown, defaultName: 'summary-' + new Date().toISOString().slice(0, 10) + '.md' });
+      if (_spMarkdown) api.exportSummary({ markdown: _spMarkdown, defaultName: 'summary-' + new Date().toISOString().slice(0, 10) + '.md', dialogTitle: t('dialog.saveSummaryTitle') });
     });
     if (spCopyBtn) spCopyBtn.addEventListener('click', () => { if (_spMarkdown) api.copyToClipboard(_spMarkdown); });
     if (spClearBtn) spClearBtn.addEventListener('click', () => {
       _spMarkdown = ''; _spSetExportable(false); _sumPrevCount = 0; _sumLastTime = 0; _sumStopped = false;
-      spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT + '</div>'; spFoot.textContent = '';
+      spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT() + '</div>'; spFoot.textContent = '';
     });
 
     sumGenerateBtn.addEventListener('click', async () => {
@@ -2442,7 +2443,7 @@
         const s = result.stats;
         const fmtTime = sec => sec >= 60 ? `${Math.floor(sec/60)}m${sec%60}s` : `${sec}s`;
         const parts = [
-          s.durationMin > 0 ? `⏱ Meeting: ${s.durationMin}p` : null,
+          s.durationMin > 0 ? t('summary.statMeeting', { n: s.durationMin }) : null,
           `🤖 ${s.provider}/${s.model}`,
           `📥 ${s.inputTokens.toLocaleString()} tok`,
           `📤 ${s.outputTokens.toLocaleString()} tok`,
@@ -2459,8 +2460,8 @@
     sumExportBtn.addEventListener('click', async () => {
       if (!_lastMarkdown) return;
       const date = new Date().toISOString().slice(0,10);
-      const result = await api.exportSummary({ markdown: _lastMarkdown, defaultName: `meeting-${date}.md` });
-      if (result.ok) sumStatus.textContent = `✅ Đã lưu: ${result.filePath}`;
+      const result = await api.exportSummary({ markdown: _lastMarkdown, defaultName: `meeting-${date}.md`, dialogTitle: t('dialog.saveSummaryTitle') });
+      if (result.ok) sumStatus.textContent = t('summary.saved', { path: result.filePath });
     });
 
     sumCopyBtn.addEventListener('click', async () => {
@@ -2470,8 +2471,8 @@
       try { const r = await api.copyToClipboard(_lastMarkdown); ok = !!(r && r.ok); } catch {}
       // Fallback Web Clipboard API nếu IPC không có/thất bại
       if (!ok) { try { await navigator.clipboard.writeText(_lastMarkdown); ok = true; } catch {} }
-      sumCopyBtn.textContent = ok ? '✔ Đã copy' : '❌ Lỗi copy';
-      setTimeout(() => { sumCopyBtn.textContent = '⎘ Copy'; }, 1500);
+      sumCopyBtn.textContent = ok ? t('summary.copied') : t('summary.copyFailed');
+      setTimeout(() => { sumCopyBtn.textContent = t('summary.copyReset'); }, 1500);
     });
     // ── end Summary modal ──
 
@@ -2501,14 +2502,14 @@
 
     // Rút gọn lỗi từ Gemini: map 429/quota/rate-limit sang câu ngắn tiếng Việt; lỗi lạ cắt còn ~100 ký tự để KHÔNG vỡ layout.
     function shortErr(e) {
-      const s = String(e ?? 'lỗi').replace(/\s+/g, ' ').trim();
-      if (!s) return 'lỗi';
+      const s = String(e ?? t('err.generic')).replace(/\s+/g, ' ').trim();
+      if (!s) return t('err.generic');
       if (/\b429\b|resource[_ ]?exhausted|too many requests|quota|rate[ _-]?limit|tokens? per minute|\bTPM\b|requests? per (minute|day)|\bRPM\b|\bRPD\b/i.test(s))
-        return 'Đã chạm giới hạn TPM, thử lại sau';
+        return t('err.rateLimit');
       if (/\b50[0-9]\b|unavailable|overloaded|internal error|deadline exceeded|timeout/i.test(s))
-        return 'Máy chủ Gemini bận, thử lại sau';
+        return t('err.serverBusy');
       if (/api[_ ]?key|unauthenticated|permission denied|\b401\b|\b403\b/i.test(s))
-        return 'Lỗi xác thực API key';
+        return t('err.auth');
       return s.length > 100 ? s.slice(0, 100) + '…' : s;
     }
   </script>
