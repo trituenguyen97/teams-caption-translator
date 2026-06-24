@@ -112,6 +112,8 @@ function registerAll(app) {
     micDeviceId:       Store.get('micDeviceId',       ''),
     geminiAudioOn:     Store.get('geminiAudioOn',     true),
     geminiVoice:       Store.get('geminiVoice',       'Achernar'),
+    transcribeMode:    Store.get('transcribeMode',    false),
+    summaryExtra:      Store.get('summaryExtra',      ''),
     audioProcessPid:   Store.get('audioProcessPid',   ''),
     audioProcessTitle: Store.get('audioProcessTitle', ''),
   }));
@@ -142,6 +144,8 @@ function registerAll(app) {
       }
     }
     if (s.geminiAudioOn !== undefined) { Store.set('geminiAudioOn', !!s.geminiAudioOn); state.geminiAudioOn = !!s.geminiAudioOn; try { geminiLive.setAudioOn(!!s.geminiAudioOn); } catch {} }
+    if (s.transcribeMode !== undefined) { Store.set('transcribeMode', !!s.transcribeMode); state.transcribeMode = !!s.transcribeMode; try { geminiLive.onTranscribeModeChanged(); } catch {} }   // đổi chép-lời ↔ dịch → nối lại phiên audio với echo/nguồn-transcript mới
+    if (s.summaryExtra !== undefined) { const v = String(s.summaryExtra || ''); Store.set('summaryExtra', v); state.summaryExtra = v; }   // yêu cầu tóm tắt riêng → áp ngay vòng tóm tắt kế (không cần nối lại phiên)
     if (s.geminiVoice   !== undefined) { Store.set('geminiVoice', s.geminiVoice); state.geminiVoice = s.geminiVoice; try { geminiLive.onTargetLangChanged(); } catch {} try { geminiTextLive.onTargetLangChanged(); } catch {} }   // đổi giọng → nối lại phiên áp giọng mới
     send('settings-saved', { ok: true });
   });

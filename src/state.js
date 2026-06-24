@@ -24,6 +24,13 @@ module.exports = {
   geminiAudioOn: true,   // bật/tắt đọc to (TTS dịch)
   geminiVoice: 'Achernar',
 
+  // Chép lời (transcribe): hiện ĐÚNG lời nói gốc (mọi ngôn ngữ), KHÔNG dịch — dùng ghi biên bản họp.
+  // Khi bật: gemini-live dùng inputTranscription thay outputTranscription + echoTargetLanguage:true + tắt TTS.
+  transcribeMode: false,
+
+  // Yêu cầu tóm tắt RIÊNG do người dùng tự gõ trên app — chèn thêm vào prompt tóm tắt (giữ nguyên prompt gốc).
+  summaryExtra: '',
+
   theme:  'auto',
   uiLang: 'vi',
 

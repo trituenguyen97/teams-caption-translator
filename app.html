@@ -558,7 +558,19 @@
     .summary-panel .sp-foot { padding: 5px 10px; font-size: 10.5px; color: var(--m3-on-3); flex-shrink: 0;
       border-top: 1px solid var(--m3-line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       max-height: 2.4em; }
+    .summary-panel .sp-foot:empty { display: none; }   /* trống → ẩn (chỉ hiện khi đã có "Tóm tắt lúc …") */
     #sp-live { display: flex; justify-content: center; padding: 8px 0 4px; }   /* spinner "đang nghe" ở cuối panel tóm tắt */
+    /* Ô soạn "Yêu cầu tóm tắt riêng" (mở từ nút ✏️ trên đầu panel) */
+    .sp-prompt-editor { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px;
+      border-bottom: 1px solid var(--m3-line-2); background: var(--m3-surf-1); }
+    .sp-prompt-editor textarea { width: 100%; resize: vertical; min-height: 56px; max-height: 170px; padding: 7px 9px;
+      font-family: inherit; font-size: 11.5px; line-height: 1.5; color: var(--m3-on); background: var(--m3-surf-3);
+      border: 1px solid var(--m3-line-2); border-radius: 6px; outline: none; }
+    .sp-prompt-editor textarea:focus { border-color: var(--m3-accent); }
+    .sp-prompt-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    .sp-prompt-actions button { font-size: 11.5px; padding: 5px 12px; }
+    #sp-prompt-save { background: var(--m3-accent-ctr) !important; color: var(--m3-accent-on) !important; border-color: transparent !important; }
+    #sp-prompt-btn.active { color: var(--m3-accent) !important; }   /* có prompt riêng → ✏️ sáng accent */
 
     .list {
       flex: 1;
@@ -1111,6 +1123,7 @@
     .app-menu .menu-item:hover:not(:disabled) { background: var(--m3-hover) !important; color: var(--m3-on) !important; }
     .app-menu .menu-item:disabled { opacity: .4; cursor: default; }
     .app-menu .menu-item > span:first-child { width: 18px; text-align: center; }
+    /* Option "📝 Chép lời" trong popup đích: chip bình thường, cùng hàng với các cờ (như 中文) */
 
     /* ── Status bar: play (▶/⏹) bên trái; ⋮ menu đẩy sang phải cùng hàng; dot CHỈ hiện làm spinner khi đang load ── */
     #cc-btn { margin-left: 0 !important; }
@@ -1134,6 +1147,48 @@
     .modal-x:hover { background:var(--m3-hover) !important; color:var(--m3-on) !important; }
     #sum-cancel-btn { border-radius:20px !important; padding:7px 14px !important; background:transparent !important; color:var(--m3-accent) !important; border-color:transparent !important; }
     #sum-cancel-btn:hover { background:var(--m3-hover-on) !important; color:var(--m3-accent-d) !important; }
+
+    /* ============ THỬ NGHIỆM: "vuông gọn" (squared-compact — gu app Nhật) ============
+       Bo góc nhỏ lại, bỏ pill 999px → cảm giác gọn/chắc/utility kiểu app Nhật.
+       Đây là LỚP CUỐI nên đè mọi shape phía trên (kể cả khối "M3 EXPRESSIVE").
+       Reversible: xoá nguyên khối này (từ comment tới hết) là về y như cũ.
+       GIỮ TRÒN: status dot, live-dot, spinner (hình tròn CHỨC NĂNG — không vuông). */
+    :root {
+      --r-btn:   6px;   /* nút bấm           (was pill 999px) */
+      --r-fld:   6px;   /* input / select    (was 14px)       */
+      --r-chip:  5px;   /* option/menu row, chip nhỏ          */
+      --r-card:  8px;   /* entry / card / banner (was 20px)   */
+      --r-pop:   8px;   /* popup / menu      (was 14–18px)    */
+      --r-modal: 10px;  /* hộp thoại         (was 28px)       */
+    }
+    /* — nút & "pill" → góc nhỏ — */
+    .btn-save, #settings-cancel, #sum-export-btn, #sum-copy-btn, #sum-generate-btn,
+    #sum-cancel-btn, #scroll-btn, #sum-btn, #clear-btn, #cc-btn, #export-orig-btn,
+    #s-toggle-vis, #sum-close-btn, .icon-btn, .win-ctrl, .modal-x,
+    .flag-btn, .radio-opt, .lq-flag, .lq-tts, select, button {
+      border-radius: var(--r-btn) !important;
+    }
+    .tab-btn { border-radius: 6px 6px 0 0 !important; }      /* tab vẫn bo 2 góc trên */
+    /* — ô nhập liệu — */
+    #s-apikey, #s-provider, #s-capture, #s-mic-device, #s-process,
+    .modal input[type="password"], .modal input[type="text"] {
+      border-radius: var(--r-fld) !important;
+    }
+    /* — thẻ / banner / vùng nội dung — */
+    .entry, .win-card, .hint-banner, .error-banner, .summary-body {
+      border-radius: var(--r-card) !important;
+    }
+    /* — popup / menu nổi — */
+    .lq-pop, .lq-tts-pop, .export-menu, .app-menu { border-radius: var(--r-pop) !important; }
+    .lq-tts-opt, .export-menu .export-opt, .app-menu .menu-item { border-radius: var(--r-chip) !important; }
+    /* — hộp thoại — */
+    .modal { border-radius: var(--r-modal) !important; }
+    /* — công tắc theme: ray pill → chữ nhật bo nhẹ, núm cũng vuông nhẹ — */
+    .theme-switch { border-radius: 7px !important; }
+    .theme-switch .theme-knob { border-radius: 5px !important; }
+    /* — dải accent dòng đang nói — */
+    .entry.live::before { border-radius: 0 2px 2px 0 !important; }
+    /* ============ /THỬ NGHIỆM vuông gọn ============ */
 
   </style>
 </head>
@@ -1252,7 +1307,15 @@
       <div class="sp-head">
         <span class="sp-spinner" id="sp-spinner" style="display:none"><span class="m3-spinner-sm"></span></span>
         <span class="sp-title" data-i18n="summary.liveTitle">📋 Tóm tắt trực tiếp</span>
+        <button id="sp-prompt-btn" class="sp-mini" data-i18n-title="summary.editPromptTitle" title="Sửa prompt tóm tắt">✏️</button>
         <button id="sp-close-btn" class="sp-mini" data-i18n-title="summary.closePanelTitle" title="Đóng panel">✕</button>
+      </div>
+      <div class="sp-prompt-editor" id="sp-prompt-editor" style="display:none">
+        <textarea id="sp-prompt-input" rows="4" data-i18n-ph="summary.promptPlaceholder" placeholder="Yêu cầu riêng cho bản tóm tắt…"></textarea>
+        <div class="sp-prompt-actions">
+          <button id="sp-prompt-reset" data-i18n="summary.promptReset">Mặc định</button>
+          <button id="sp-prompt-save" data-i18n="summary.promptSave">Lưu</button>
+        </div>
       </div>
       <div class="sp-body" id="sp-body">
         <div class="sp-placeholder" data-i18n="summary.autoHint">Tự động tóm tắt khi có đủ câu mới…</div>
@@ -1322,6 +1385,7 @@
       try { updateThemeIcon(); } catch (e) {}
       try { renderEmpty(); } catch (e) {}
       try { refreshTtsBtn(); } catch (e) {}
+      try { setTgtDisplay(); } catch (e) {}   // giữ nút đích (cờ/📝) + tooltip đúng sau khi đổi ngôn ngữ UI
     }
     let _themePref = 'auto';
     const _mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -1340,6 +1404,7 @@
     let _currentProvider = 'online';  // theo dõi provider hiện tại
     let _srcLang = 'ja';           // ngôn ngữ nguồn đã chọn (system/mic); Teams thì auto theo Teams
     let _tgtLang = 'vi';           // ngôn ngữ đích hiện tại (đồng bộ với cờ lq-tgt)
+    let _transcribeMode = false;   // 📝 Chép lời (không dịch) — chọn trong popup ngôn ngữ đích; áp cả Teams/Audio/Mic
     // ── TTS đọc to bản dịch (Supertonic-3 đa ngữ) ── bật + giọng (sid 0-9) + có model + hàng đợi phát nối tiếp
     let _ttsOn = false, _ttsAvail = false, _ttsVoice = 0, _gemAudioOn = true, _gemVoice = 'Achernar';
     let _ttsQueue = [], _ttsBusy = false, _ttsPlayCtx = null, _ttsCurSrc = null, _ttsCurEnd = null, _ttsResolvePlay = null;
@@ -1402,7 +1467,8 @@
       // Khôi phục ngôn ngữ ĐÍCH (quick selector cạnh ▶) + báo backend.
       const _lang = s.lang || 'vi';
       _tgtLang = _lang;
-      try { setQuickFlag(lqTgt, _lang); setFlagActive(lqTgtPop, _lang); } catch (e) {}
+      _transcribeMode = !!s.transcribeMode;
+      try { setTgtDisplay(); } catch (e) {}
       api.setLang(_lang);
       _ttsOn = false;   // TTS local (Supertonic) vẫn tắt — không đọc to dù settings cũ ttsEnabled=true
       _gemAudioOn = s.geminiAudioOn !== false;   // phát giọng dịch Gemini (mặc định bật); nút loa hiện khi provider=gemini-live
@@ -1425,6 +1491,10 @@
         if (_currentSource === 'mic') loadMicDevices(s.micDeviceId || '');
         if (_currentSource === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle);
         refreshTtsBtn();
+        const _spi = document.getElementById('sp-prompt-input');
+        if (_spi) _spi.value = s.summaryExtra || '';
+        const _spb = document.getElementById('sp-prompt-btn');
+        if (_spb) _spb.classList.toggle('active', !!(s.summaryExtra || '').trim());
       } catch (e) {}
     });
 
@@ -1770,9 +1840,38 @@
     buildFlagRow(lqSrcPop, LANG_FLAG_ORDER, (code) => {
       _srcLang = code; setQuickFlag(lqSrc, code); lqSrcPop.classList.remove('open'); api.saveSettings({ srcLang: code }); refreshTtsBtn();
     });
+    // Đích: chọn CỜ = dịch sang ngôn ngữ đó; chọn 📝 = Chép lời (không dịch). Áp cho CẢ Teams/Audio/Mic.
+    function setTgtDisplay() {
+      if (_transcribeMode) {
+        if (lqTgt) { lqTgt.innerHTML = '<span class="fl auto">📝</span>'; lqTgt.title = t('lang.transcribe'); }
+        setFlagActive(lqTgtPop, '__transcribe__');
+      } else {
+        setQuickFlag(lqTgt, _tgtLang);
+        if (lqTgt) lqTgt.title = t('header.langTitle');
+        setFlagActive(lqTgtPop, _tgtLang);
+      }
+    }
     buildFlagRow(lqTgtPop, LANG_FLAG_ORDER, (code) => {
-      _tgtLang = code; setQuickFlag(lqTgt, code); lqTgtPop.classList.remove('open'); api.setLang(code); refreshTtsBtn();
+      lqTgtPop.classList.remove('open');
+      if (code === '__transcribe__') {
+        if (!_transcribeMode) { _transcribeMode = true; api.saveSettings({ transcribeMode: true }); }
+        setTgtDisplay(); refreshTtsBtn();
+        return;
+      }
+      const wasTr = _transcribeMode; _transcribeMode = false;
+      _tgtLang = code; api.setLang(code);
+      if (wasTr) api.saveSettings({ transcribeMode: false });   // tắt chép-lời → nối lại phiên dịch
+      setTgtDisplay(); refreshTtsBtn();
     });
+    // Thêm option "📝 Chép lời" vào CUỐI popup đích (data-i18n để applyI18n tự dịch lại khi đổi ngôn ngữ UI).
+    (function addTranscribeOpt() {
+      if (!lqTgtPop) return;
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'flag-btn lq-transcribe-opt'; b.dataset.code = '__transcribe__';
+      b.setAttribute('data-i18n-title', 'lang.transcribeHint');
+      b.innerHTML = '<span class="fl auto">📝</span><span class="fl-name" data-i18n="lang.transcribe">Chép lời</span>';
+      lqTgtPop.appendChild(b);
+    })();
     lqSrc.addEventListener('click', (e) => {
       e.stopPropagation();
       if (lqSrc.classList.contains('lq-disabled')) return;   // Teams: nguồn auto → không mở picker
@@ -1800,7 +1899,8 @@
     // Nút loa: CHỈ hiện khi provider = gemini-live → bật/tắt phát GIỌNG DỊCH do Gemini sinh kèm (text dịch vẫn hiện).
     function refreshTtsBtn() {
       if (!lqTts) return;
-      lqTts.style.display = (_currentProvider === 'gemini-live') ? '' : 'none';
+      // Ẩn nút loa khi đang Chép lời (không dịch → không có TTS để bật/tắt).
+      lqTts.style.display = (_currentProvider === 'gemini-live' && !_transcribeMode) ? '' : 'none';
       lqTts.textContent = _gemAudioOn ? '🔊' : '🔇';
       lqTts.classList.toggle('active', _gemAudioOn);
       lqTts.setAttribute('aria-expanded', lqTtsPop && lqTtsPop.classList.contains('open') ? 'true' : 'false');
@@ -2330,10 +2430,7 @@
       const newCount = caps.length - _sumPrevCount;
       // tóm tắt khi: đủ ≥SUM_MIN_NEW câu dịch mới (~2 phút), HOẶC lần đầu mở mà đã có nội dung.
       const should = (newCount >= SUM_MIN_NEW) || (_sumLastTime === 0);
-      if (!should) {
-        if (newCount > 0 && spFoot) spFoot.textContent = t('summary.newPending', { newCount, min: SUM_MIN_NEW });
-        return;
-      }
+      if (!should) return;   // chưa đủ câu mới → KHÔNG hiện đếm chờ ở foot (foot chỉ hiện khi đã CÓ bản tóm tắt)
       _sumBusy = true; if (spSpinner) spSpinner.style.display = '';   // loading
       // rolling: chỉ gửi câu MỚI kể từ lần tóm trước. Trần 25 câu/lần (kể cả lần đầu mở có sẵn backlog lớn)
       // → mỗi request nhỏ, súc tích, nhẹ TPM (3.1-flash-lite 250K; gemma TPM không giới hạn).
@@ -2350,9 +2447,8 @@
           spBody.innerHTML = '<div class="sp-error">' + t('summary.needKey') + '</div>';
         } else if (res && (res.error === 'empty' || res.error === 'empty-response')) {
           spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT() + '</div>';
-        } else {
-          spFoot.textContent = t('summary.retryLater', { err: shortErr(res && res.error) });
         }
+        // lỗi tạm khác (429/mạng) → tự thử lại vòng sau; KHÔNG ghi đè foot để giữ "Tóm tắt lúc …" gần nhất
         return;
       }
       _sumPrevCount = caps.length; _sumLastTime = Date.now();
@@ -2362,6 +2458,19 @@
     }
 
     document.getElementById('sp-close-btn').addEventListener('click', closeSummaryPanel);
+
+    // ── Ô soạn "Yêu cầu tóm tắt riêng" (✏️ trên đầu panel) — chèn thêm vào prompt tóm tắt, giữ nguyên prompt gốc ──
+    const spPromptBtn = document.getElementById('sp-prompt-btn');
+    const spPromptEditor = document.getElementById('sp-prompt-editor');
+    const spPromptInput = document.getElementById('sp-prompt-input');
+    if (spPromptBtn) spPromptBtn.addEventListener('click', () => {
+      const open = spPromptEditor.style.display === 'none';
+      spPromptEditor.style.display = open ? '' : 'none';
+      if (open && spPromptInput) spPromptInput.focus();
+    });
+    const _spPromptSaveVal = (v) => { api.saveSettings({ summaryExtra: v }); if (spPromptBtn) spPromptBtn.classList.toggle('active', !!v); spPromptEditor.style.display = 'none'; };
+    document.getElementById('sp-prompt-save')?.addEventListener('click', () => _spPromptSaveVal((spPromptInput.value || '').trim()));
+    document.getElementById('sp-prompt-reset')?.addEventListener('click', () => { spPromptInput.value = ''; _spPromptSaveVal(''); });
 
     // ── Footer panel tóm tắt: Tổng thể + xuất .md + copy + xóa ──
     const spGptBtn    = document.getElementById('sp-gpt-btn');
@@ -2400,7 +2509,8 @@
       spGptBtn.disabled = false;
       if (!res || !res.ok) { spBody.innerHTML = '<div class="sp-error">❌ ' + esc(shortErr(res && res.error)) + '</div>'; return; }
       spRender(res.markdown);
-      spFoot.textContent = t('summary.overallDone', { n: captionData.size });
+      const od = new Date(), pp = n => (n < 10 ? '0' : '') + n;
+      spFoot.textContent = t('summary.overallDone', { time: pp(od.getHours()) + ':' + pp(od.getMinutes()), n: captionData.size });
     });
     if (spExportBtn) spExportBtn.addEventListener('click', () => {
       if (_spMarkdown) api.exportSummary({ markdown: _spMarkdown, defaultName: 'summary-' + new Date().toISOString().slice(0, 10) + '.md', dialogTitle: t('dialog.saveSummaryTitle') });

@@ -55,7 +55,9 @@ async function _connect() {
     // echoTargetLanguage:false = model IM LẶNG khi audio vào đã ở ngôn ngữ đích → bỏ qua chính tiếng TTS nó
     // nghe lại từ loa (TTS phát ra = ngôn ngữ đích) → CẮT vòng feedback mic↔loa ở tầng ngữ nghĩa (full-duplex-safe).
     // Vẫn dịch bình thường người nói NGUỒN. (Cẩn trọng: phụ thuộc auto language-ID của Gemini — test từng cặp.)
-    translationConfig: { targetLanguageCode: bcp47(state.langCode), echoTargetLanguage: false },
+    // CHÉP LỜI (transcribeMode): PHẢI để echo=true — vì echo=false khiến model BỎ QUA audio cùng ngôn ngữ đích
+    // (→ mất luôn inputTranscription). Ở mode này ta lấy inputTranscription (lời gốc) + KHÔNG phát TTS nên không lo feedback.
+    translationConfig: { targetLanguageCode: bcp47(state.langCode), echoTargetLanguage: state.transcribeMode ? true : false },
     contextWindowCompression: { slidingWindow: {} },
     sessionResumption: _handle ? { handle: _handle } : {},
   };
@@ -144,12 +146,16 @@ function _onMessage(gen, m) {
     // 'interrupted' = model tự bỏ dở lượt TTS (audio cuộc họp liên tục → tự-ngắt nhiều). KHÔNG cắt audio đang
     // phát/đã gom → tránh đứt-đuôi/méo; cứ gom đến khi câu đọc xong rồi phát trọn (xem _bufAudio bên dưới).
     let changed = false;
-    // Chỉ cần BẢN DỊCH (ngôn ngữ đích) để hiển thị; KHÔNG dùng inputTranscription (gốc JP) nữa.
-    const ot = sc.outputTranscription && sc.outputTranscription.text;
+    // DỊCH (mặc định): hiển thị outputTranscription (ngôn ngữ ĐÍCH).
+    // CHÉP LỜI (transcribeMode): hiển thị inputTranscription (lời nói GỐC — mọi ngôn ngữ, không qua dịch).
+    const ot = state.transcribeMode
+      ? (sc.inputTranscription && sc.inputTranscription.text)
+      : (sc.outputTranscription && sc.outputTranscription.text);
     if (typeof ot === 'string' && ot) { _transAcc += ot; changed = true; }
     // Audio TTS: GOM khúc, phát TRỌN một lần khi câu đọc xong (không phát mảnh → hết vụn/đọc-đuổi/méo đuôi).
+    // Chép lời KHÔNG phát giọng (model vẫn sinh TTS do echo=true nhưng ta BỎ — tránh ồn + vọng thừa).
     const parts = (sc.modelTurn && sc.modelTurn.parts) || sc.parts;
-    if (parts && state.geminiAudioOn !== false) for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
+    if (!state.transcribeMode && parts && state.geminiAudioOn !== false) for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
     if (changed) {
       clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emitVI(false), PARTIAL_DEBOUNCE_MS);   // hiện các câu dịch (mỗi câu 1 entry) lớn dần
       // CHỐT đoạn khi BẢN DỊCH kết câu (. ? !) + ngừng ngắn; còn dở → chỉ chốt khi ngừng hẳn.
@@ -189,6 +195,7 @@ function stop() {
   console.log('[live-translate] stop');
 }
 function onTargetLangChanged() { if (_started) { _handle = null; _transAcc = ''; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }   // đổi đích → phiên mới (bỏ câu dở để không trộn ngôn ngữ)
+function onTranscribeModeChanged() { onTargetLangChanged(); }   // đổi chép-lời ↔ dịch → phiên mới (đổi echo + nguồn transcript input/output)
 function setAudioOn(on) { state.geminiAudioOn = !!on; if (!on) { _resetAudio(); send('gemini-clear'); } }
 
 // Validate API key (zero-cost: ListModels). Trả { ok } | { ok:false, error }.
@@ -207,4 +214,4 @@ async function validateKey(key) {
   }
 }
 
-module.exports = { isConfigured, isActive, pushAudio, start, stop, onTargetLangChanged, setAudioOn, validateKey };
+module.exports = { isConfigured, isActive, pushAudio, start, stop, onTargetLangChanged, onTranscribeModeChanged, setAudioOn, validateKey };

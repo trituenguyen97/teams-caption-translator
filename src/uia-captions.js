@@ -324,6 +324,14 @@ async function runUiaService() {
       const author2 = author || 'Speaker';
       send('caption-live', { id, author: author2, original: text, translated: '…', ts, tsMs });
       _pending.add(k); renderOverlay();   // hiện placeholder (text gốc) NGAY → chờ dịch không bị "pop"
+      // CHÉP LỜI: caption Teams ĐÃ là transcript nguồn → hiện THẲNG, KHÔNG dịch (bỏ gọi Gemini → không tốn API, không TTS).
+      if (state.transcribeMode) {
+        _pending.delete(k);
+        send('caption-live', { id, author: author2, original: text, translated: cleaned, isPartial: false, ts: timestamp(), tsMs });
+        _transByKey.set(k, cleaned);
+        renderOverlay();
+        continue;
+      }
       // onDelta: STREAM bản dịch khi model đang sinh (display-only, isPartial:true).
       //   - input vẫn là MỘT câu hoàn chỉnh (cleaned) — KHÔNG phân mảnh; chỉ OUTPUT mới stream.
       //   - renderer KHÔNG lưu isPartial vào captionData → không bẩn summary/export/TTS.

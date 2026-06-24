@@ -31,9 +31,31 @@ let _mod = null, _chain = null;
 async function _sdk() { return _mod || (_mod = await import('@google/genai')); }
 
 function _sysSummary() {
-  const L = state.targetLangLabel;
+  const L = state.transcribeMode
+    ? 'the dominant language of the transcript (the language most lines are written in) — do NOT translate to any other language'
+    : state.targetLangLabel;
   return `You output ONLY the meeting summary in ${L}, formatted as Markdown. No preface, no commentary, no code fences. `
     + `Keep IT/technical terms and proper nouns in their original form. Never invent content not in the transcript.`;
+}
+
+// Ngôn ngữ ĐẦU RA của bản tóm tắt:
+//  - Dịch: theo ngôn ngữ ĐÍCH người dùng chọn (state.targetLangLabel).
+//  - Chép lời (transcribeMode): theo NGÔN NGỮ CHIẾM ĐA SỐ trong transcript (model tự nhận) — không dịch sang ngôn ngữ khác.
+//    → sau họp, đổi đích sang 1 ngôn ngữ cụ thể (transcribeMode tắt) rồi bấm Tổng thể = tóm tắt lại theo ngôn ngữ đó.
+function _outLang() {
+  return state.transcribeMode ? 'ngôn ngữ được nói nhiều nhất trong transcript' : state.targetLangLabel;
+}
+function _transcribeNote() {
+  return state.transcribeMode
+    ? `\n\nLƯU Ý NGÔN NGỮ: Transcript là LỜI NÓI GỐC (có thể lẫn nhiều ngôn ngữ). Viết bản tóm tắt bằng CHÍNH ngôn ngữ chiếm ĐA SỐ trong transcript; TUYỆT ĐỐI KHÔNG dịch sang ngôn ngữ khác.`
+    : '';
+}
+
+// Yêu cầu tóm tắt RIÊNG do người dùng gõ trên app → chèn thêm vào prompt (giữ NGUYÊN prompt gốc + quy tắc chống bịa).
+function _extraBlock() {
+  const x = (state.summaryExtra || '').trim();
+  if (!x) return '';
+  return `\n\n## YÊU CẦU RIÊNG TỪ NGƯỜI DÙNG (ưu tiên cao — vẫn TUÂN THỦ quy tắc chống bịa & giữ thuật ngữ):\n${x}`;
 }
 
 const MAX_PREV_SUMMARY_CHARS = 6000;   // ~2K token: đủ giữ bản tóm tắt rolling nhiều mục mà vẫn nhẹ; cắt nếu phình
@@ -59,12 +81,13 @@ function _toLines(captions, cap) {
 function _buildRollingPrompt(prevSummary, captions) {
   const lines = _toLines(captions, MAX_NEW_CAPTIONS);
   prevSummary = _trimPrev(prevSummary);
-  const L = state.targetLangLabel;
+  const L = _outLang();
   const RULES =
     `Cấu trúc: ## Chủ đề chính · ## Điểm nổi bật / Vấn đề · ## Quyết định & việc cần làm (kèm người phụ trách/deadline nếu CÓ nói).\n`
     + `- GIỮ NGUYÊN thuật ngữ IT/tiếng Anh & tên riêng (bug, deploy, PR, API, sprint, merge, release...).\n`
     + `- Dùng BẢNG Markdown khi có số liệu/lịch/so sánh.\n`
-    + `- KHÔNG bịa; thiếu thông tin thì để trống hoặc ghi "Chưa xác định".`;
+    + `- KHÔNG bịa; thiếu thông tin thì để trống hoặc ghi "Chưa xác định".`
+    + _transcribeNote() + _extraBlock();
   if (prevSummary && prevSummary.trim()) {
     return `Bạn đang duy trì BẢN TÓM TẮT cuộc họp ĐANG DIỄN RA (Markdown, ${L}). Dưới đây là bản tóm tắt hiện tại và `
       + `CÁC CÂU MỚI. Hãy CẬP NHẬT: gộp ý mới vào đúng mục, gộp ý trùng cho cô đọng, KHÔNG để phình dài. `
@@ -78,7 +101,7 @@ function _buildRollingPrompt(prevSummary, captions) {
 // ── TỔNG THỂ: prompt báo cáo chi tiết (giữ NGUYÊN VĂN) áp lên toàn transcript ─────
 function _buildFullReportPrompt(captions) {
   const lines = _toLines(captions);
-  const L = state.targetLangLabel;
+  const L = _outLang();
   return `Bạn là trợ lý tổng hợp cuộc họp chuyên nghiệp. Hãy tạo báo cáo cuộc họp chi tiết dạng Markdown từ phần Transcript được cung cấp ở dưới cùng.
 
 ## YÊU CẦU TRÌNH BÀY:
@@ -101,6 +124,7 @@ function _buildFullReportPrompt(captions) {
 ## NGUYÊN TẮC TRUNG THỰC:
 - Tuyệt đối không tự suy diễn, không bịa thêm nội dung hoặc giả định bất kỳ thông tin nào không có sẵn trong đoạn transcript dưới đây. Nếu thông tin (như người phụ trách, deadline) không được nói rõ, hãy để trống hoặc ghi "Chưa xác định".
 
+${_transcribeNote()}${_extraBlock()}
 ---
 BẮT ĐẦU TRANSCRIPT CUỘC HỌP:
 ${lines}`;
