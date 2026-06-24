@@ -11,7 +11,7 @@ const state = require('./state');
 
 const MODEL = 'gemini-3.1-flash-live-preview';
 const RECYCLE_MS = 90 * 1000;
-const MAX_TURNS = 15;
+const MAX_TURNS = 8;   // 15→8: phiên gọn hơn, ít trôi ngữ cảnh; vẫn đủ thưa để reconnect không chen vào giữa 2 caption (RECYCLE_MS=90s đã chặn trôi theo thời gian)
 const TURN_TIMEOUT_MS = 25000;
 const MAX_QUEUE = 16;
 
@@ -39,10 +39,13 @@ function _clean(s) {
   if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith('“') && t.endsWith('”'))) t = t.slice(1, -1);
   return t.trim();
 }
-function _emitUtterance(bufs) {
-  if (!bufs || !bufs.length) return;
-  try { send('gemini-audio', { b64: Buffer.concat(bufs).toString('base64'), sampleRate: 24000 }); }
-  catch (e) {}
+// Làm sạch BẢN DỊCH ĐANG CHẢY (chưa hoàn tất): chỉ gỡ preface ở đầu + 1 dấu mở ngoặc ở đầu;
+// KHÔNG yêu cầu dấu đóng (chuỗi còn dở) nên không cắt nhầm khi mới nhận nửa câu.
+function _cleanPartial(s) {
+  let t = (s || '').replace(/^\s+/, ''); if (!t) return t;
+  t = t.replace(/^(sure|okay|ok|certainly|here(?:'s| is)[^:]{0,40}:|translation:|bản dịch[^:]{0,20}:)\s*/i, '');
+  if (t.startsWith('"') || t.startsWith('“')) t = t.slice(1);
+  return t.replace(/^\s+/, '');
 }
 
 async function _connect() {
@@ -85,15 +88,27 @@ function _onMessage(gen, m) {
   try {
     const sc = m && m.serverContent;
     const parts = (sc && sc.modelTurn && sc.modelTurn.parts) || (sc && sc.parts);
+    // (1) AUDIO STREAMING: phát NGAY từng chunk inlineData (KHÔNG buffer→concat ở turnComplete).
+    //     _gen guard ở đầu hàm (return khi gen!==_gen) đã chặn chunk phiên cũ; gate theo state.geminiAudioOn.
+    //     d là base64 từ API → gửi thẳng (renderer atob); khỏi decode/re-encode.
     if (parts && parts.length && _inflight) for (const p of parts) {
       const id = p && (p.inlineData || p.inline_data); const d = id && id.data;
-      if (d) { try { _inflight.audio.push(Buffer.from(d, 'base64')); } catch {} if (!_audioLogged) { _audioLogged = true; console.log('[gemini-text-live] audio chunk ĐẦU'); } }
+      if (d) {
+        // noAudio (câu lớn dần) → KHÔNG phát audio (chống đọc LẶP phần đã nói); vẫn nhận text qua onDelta.
+        if (state.geminiAudioOn !== false && !_inflight.noAudio) { try { send('gemini-audio', { b64: d, sampleRate: 24000 }); } catch {} }
+        if (!_audioLogged) { _audioLogged = true; console.log('[gemini-text-live] audio chunk ĐẦU (stream)'); }
+      }
     }
+    // (2) TEXT STREAMING: cộng dồn rồi báo delta đã-làm-sạch cho caller (nếu có onDelta).
     const ot = sc && sc.outputTranscription && sc.outputTranscription.text;
-    if (ot && _inflight) _inflight.acc += ot;
+    if (ot && _inflight) {
+      _inflight.acc += ot;
+      if (typeof _inflight.onDelta === 'function') { try { _inflight.onDelta(_cleanPartial(_inflight.acc)); } catch {} }
+    }
     if (sc && sc.turnComplete && _inflight) {
       const inf = _inflight; _inflight = null; clearTimeout(inf.timer);
-      if (state.geminiAudioOn !== false) _emitUtterance(inf.audio);
+      // Khoảng NGHỈ giữa câu (chống đọc nối liền) — mirror chế độ audio. KHÔNG có b64 → renderer chỉ chèn lặng.
+      if (state.geminiAudioOn !== false && !inf.noAudio) { try { send('gemini-audio', { pauseMs: 200 }); } catch {} }
       try { inf.resolve(_clean(inf.acc)); } catch {}
       _turns++; if (_turns >= MAX_TURNS) _recNeeded = true;
       _maybeRecycle(); _drain();
@@ -109,7 +124,7 @@ async function _drain() {
       const sess = await _ensure();
       if (!sess) break;
       const item = _queue.shift();
-      _inflight = { resolve: item.resolve, text: item.text, acc: '', audio: [], timer: null };
+      _inflight = { resolve: item.resolve, onDelta: item.onDelta, text: item.text, acc: '', timer: null, noAudio: !!item.noAudio };
       _inflight.timer = setTimeout(() => { console.warn('[gemini-text-live] turn timeout → reconnect'); _close(); _fail(); }, TURN_TIMEOUT_MS);
       try { sess.sendClientContent({ turns: [{ role: 'user', parts: [{ text: item.text }] }], turnComplete: true }); }
       catch (e) { console.warn('[gemini-text-live] send lỗi:', e && e.message); clearTimeout(_inflight.timer); _inflight = null; try { item.resolve(null); } catch {} _close(); }
@@ -120,12 +135,26 @@ function _scheduleRecycle() { clearTimeout(_recTimer); _recTimer = setTimeout(()
 function _maybeRecycle() { if (!_recNeeded || !_started) return; if (_inflight || _queue.length) return; _recNeeded = false; _close(); _scheduleRecycle(); }
 
 // ── API công khai ──
-function translate(text) {
+// translate(text)           → resolve bản dịch CHỐT (như cũ).
+// translate(text, onDelta)  → onDelta(partial) gọi liên tục khi bản dịch chảy về; resolve = bản CHỐT.
+function translate(text, onDelta) {
   if (!_started || !isConfigured()) return Promise.resolve(null);
   const t = (text || '').trim();
   if (!t) return Promise.resolve(null);
   return new Promise((resolve) => {
-    _queue.push({ text: t, resolve });
+    _queue.push({ text: t, resolve, onDelta: typeof onDelta === 'function' ? onDelta : null });
+    while (_queue.length > MAX_QUEUE) { const d = _queue.shift(); try { d.resolve(null); } catch {} }
+    _drain();
+  });
+}
+// translateText(text, onDelta): dịch + stream TEXT nhưng KHÔNG phát audio (noAudio). Dùng cho câu LỚN DẦN
+// (reuseId) → cập nhật bản dịch đầy đủ trên màn hình mà không đọc lại phần đã nói → chống LẶP câu.
+function translateText(text, onDelta) {
+  if (!_started || !isConfigured()) return Promise.resolve(null);
+  const t = (text || '').trim();
+  if (!t) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    _queue.push({ text: t, resolve, onDelta: typeof onDelta === 'function' ? onDelta : null, noAudio: true });
     while (_queue.length > MAX_QUEUE) { const d = _queue.shift(); try { d.resolve(null); } catch {} }
     _drain();
   });
@@ -165,4 +194,4 @@ function _forceRecycle() {
 }
 function onTargetLangChanged() { if (_started) _forceRecycle(); }   // đổi đích/giọng → nối lại áp config mới NGAY
 
-module.exports = { isConfigured, isActive, translate, start, stop, onTargetLangChanged };
+module.exports = { isConfigured, isActive, translate, translateText, start, stop, onTargetLangChanged };

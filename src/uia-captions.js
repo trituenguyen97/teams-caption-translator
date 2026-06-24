@@ -221,7 +221,10 @@ async function runUiaService() {
   _pending = new Set();
   let isInit = true;   // entryId nay la bien module (_uiaEntryId) -> tang don dieu xuyen cac lan chay service
   let _lastRowKey = '', _lastRowSince = 0;
-  const LAST_ROW_SETTLE_MS = 10000;
+  // Thời gian dòng cuối phải ĐỨNG YÊN trước khi coi là CHỐT (khi không có dấu kết câu).
+  // 10000→2500: bắt được khoảng nghỉ cuối lượt nói mà vẫn HIẾM khi cắt giữa câu.
+  // (1500 từng cắt nhầm lúc người nói thở giữa câu → phân mảnh; 2500 an toàn hơn.)
+  const LAST_ROW_SETTLE_MS = 2500;
   const SENTENCE_END_RE = /[。．.！!？?]\s*$/;
 
   let idleSent = false, runningSent = false, waitCapSent = false;
@@ -312,7 +315,8 @@ async function runUiaService() {
           }
         }
       }
-      const id = reuseId !== null ? reuseId : ++_uiaEntryId;
+      const isGrowth = reuseId !== null;   // câu LỚN DẦN (đã commit+đọc prefix) → KHÔNG đọc lại, chỉ cập nhật text
+      const id = isGrowth ? reuseId : ++_uiaEntryId;
       committed.set(k, { id, ts: Date.now() });
       const ts = timestamp();
       const tsMs = Date.now();
@@ -320,11 +324,27 @@ async function runUiaService() {
       const author2 = author || 'Speaker';
       send('caption-live', { id, author: author2, original: text, translated: '…', ts, tsMs });
       _pending.add(k); renderOverlay();   // hiện placeholder (text gốc) NGAY → chờ dịch không bị "pop"
-      geminiTextLive.translate(cleaned).then(translated => {
+      // onDelta: STREAM bản dịch khi model đang sinh (display-only, isPartial:true).
+      //   - input vẫn là MỘT câu hoàn chỉnh (cleaned) — KHÔNG phân mảnh; chỉ OUTPUT mới stream.
+      //   - renderer KHÔNG lưu isPartial vào captionData → không bẩn summary/export/TTS.
+      //   - .then() bên dưới mới là bản CHỐT (isPartial:false, authoritative).
+      //   - acc của gemini-text-live là TÍCH LUỸ → partial là chuỗi đầy-đủ-tới-giờ.
+      const onDelta = (partial) => {
+        if (!state.userActive) return;
+        if (typeof partial !== 'string') return;
+        const p = partial.trim();
+        if (!p) return;
+        send('caption-live', { id, author: author2, original: text, translated: p, isPartial: true, ts, tsMs });
+      };
+      // Câu mới → translate() (đọc 1 lần). Câu lớn dần → translateText() (chỉ cập nhật text, KHÔNG đọc lại → chống LẶP).
+      const p = (isGrowth && typeof geminiTextLive.translateText === 'function')
+        ? geminiTextLive.translateText(cleaned, onDelta)
+        : geminiTextLive.translate(cleaned, onDelta);
+      p.then(translated => {
         _pending.delete(k);
         if (!state.userActive) return;
         const isTranslated = !!translated && translated !== cleaned && translated !== text;
-        send('caption-live', { id, author: author2, original: text, translated: isTranslated ? translated : null, ts: timestamp(), tsMs });
+        send('caption-live', { id, author: author2, original: text, translated: isTranslated ? translated : null, isPartial: false, ts: timestamp(), tsMs });
         if (isTranslated) _transByKey.set(k, translated);
         renderOverlay();   // swap placeholder→bản dịch (hoặc bỏ nếu dịch fail) — không nháy layout
       });
