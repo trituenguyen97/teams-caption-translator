@@ -62,6 +62,25 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .summary-body th, .summary-body td { border: 1px solid var(--bd); padding: 3px 6px; text-align: left; }
 .summary-body code { background: var(--bg3); padding: 1px 4px; border-radius: 4px; }
 
+/* Cờ + dropdown chọn ngôn ngữ (UI + đích) */
+.flag { display: inline-flex; align-items: center; }
+.flag svg { width: 18px; height: 12px; border-radius: 2px; display: block; box-shadow: 0 0 0 1px #0006; }
+.dd { position: relative; }
+.flag-btn { display: inline-flex; align-items: center; justify-content: center; }
+.flag-select { width: 100%; display: flex; align-items: center; gap: 8px; background: var(--bg3); color: var(--fg); border: 1px solid var(--bd); border-radius: 8px; padding: 7px 9px; cursor: pointer; font: inherit; text-align: left; }
+.flag-select:hover { border-color: var(--accent2); }
+.menu { position: absolute; z-index: 60; top: calc(100% + 4px); right: 0; min-width: 168px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow: auto; box-shadow: 0 8px 24px #0009; }
+#target-menu { left: 0; right: 0; }
+.menu button { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; color: var(--fg); padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit; text-align: left; white-space: nowrap; }
+.menu button:hover { background: var(--bg2); }
+.menu button.sel { color: var(--accent); background: var(--bg2); }
+
+/* Hộp sửa yêu cầu tóm tắt (bút chì trong panel tóm tắt) */
+.sum-edit-box { padding: 8px 10px; border-bottom: 1px solid var(--bd); background: var(--bg3); display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.sum-edit-box textarea { width: 100%; }
+.row-end { display: flex; justify-content: flex-end; }
+.primary-mini { background: var(--accent2); border-color: var(--accent2); color: #fff; font-weight: 600; }
+
 .bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-top: 1px solid var(--bd); }
 .count { font-size: 11px; color: var(--muted); }
 button.mini { background: var(--bg3); border: 1px solid var(--bd); color: var(--fg); border-radius: 7px; padding: 4px 8px; cursor: pointer; font-size: 12px; }

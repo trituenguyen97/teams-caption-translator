@@ -11,65 +11,76 @@
     <span class="logo">💬</span>
     <span class="title">Caption Translator</span>
     <span class="spacer"></span>
-    <button id="popout-btn" class="icon-btn" title="Tách ra cửa sổ riêng (pop-out)">⧉</button>
-    <button id="settings-btn" class="icon-btn" title="Cài đặt">⚙️</button>
+    <div class="dd">
+      <button id="lang-btn" class="icon-btn flag-btn" data-i18n-title="uilang.title" type="button"></button>
+      <div id="lang-menu" class="menu hidden"></div>
+    </div>
+    <button id="popout-btn" class="icon-btn" data-i18n-title="popout.title" type="button">⧉</button>
+    <button id="settings-btn" class="icon-btn" data-i18n-title="settings" type="button">⚙️</button>
   </header>
 
   <!-- Cài đặt (ẩn/hiện) -->
   <section id="settings" class="settings hidden">
     <label class="fld">
-      <span>Gemini API key</span>
-      <input id="apikey" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" />
+      <span data-i18n="settings.apiKey">Gemini API key</span>
+      <input id="apikey" type="password" data-i18n-ph="apiKey.ph" placeholder="AIza…" autocomplete="off" spellcheck="false" />
     </label>
     <div class="key-status" id="key-status"></div>
-    <label class="fld">
-      <span>Yêu cầu tóm tắt riêng (tuỳ chọn)</span>
-      <textarea id="summary-extra" rows="2" placeholder="VD: tập trung vào quyết định & deadline"></textarea>
-    </label>
+    <div class="fld">
+      <span data-i18n="settings.source">Nguồn âm thanh</span>
+      <select id="source">
+        <option value="mic" data-i18n="source.mic">🎤 Micro</option>
+        <option value="screen" data-i18n="source.screen">🔊 Âm thanh (tab / màn hình / cửa sổ)</option>
+      </select>
+    </div>
+    <div class="fld">
+      <span data-i18n="settings.targetLang">Ngôn ngữ đích</span>
+      <div class="dd">
+        <button id="target-btn" class="flag-select" type="button"></button>
+        <div id="target-menu" class="menu hidden"></div>
+      </div>
+    </div>
   </section>
 
   <!-- Thanh điều khiển -->
   <section class="controls">
     <div class="row">
-      <select id="source" title="Nguồn âm thanh">
-        <option value="mic">🎤 Micro</option>
-        <option value="screen">🔊 Âm thanh (tab / màn hình / cửa sổ)</option>
-      </select>
-      <select id="lang" title="Ngôn ngữ đích"></select>
+      <select id="voice" title="Voice"></select>
+      <button id="start" class="primary">▶</button>
     </div>
-
-    <div class="row">
-      <select id="voice" title="Giọng đọc TTS"></select>
-      <button id="start" class="primary">▶ Bắt đầu</button>
-    </div>
-    <div class="status" id="status">Sẵn sàng. Nhập API key rồi bấm Bắt đầu.</div>
+    <div class="status" id="status"></div>
   </section>
 
   <!-- Danh sách caption -->
   <main id="list" class="list" aria-live="polite"></main>
 
-  <div id="v-resizer" class="v-resizer hidden" title="Kéo để chỉnh chiều cao tóm tắt"></div>
+  <div id="v-resizer" class="v-resizer hidden" title="↕"></div>
 
   <!-- Tóm tắt -->
   <section id="summary-wrap" class="summary-wrap hidden">
     <div class="summary-bar">
-      <strong>Tóm tắt</strong>
+      <strong data-i18n="summary.title">Tóm tắt</strong>
+      <button id="sum-edit" class="mini" data-i18n-title="summary.editTitle" type="button">✏️</button>
       <span class="spacer"></span>
-      <button id="sum-full" class="mini" title="Báo cáo tổng thể (khi đã dừng)">📊 Tổng thể</button>
-      <button id="sum-copy" class="mini" title="Copy">⎘</button>
-      <button id="sum-export" class="mini" title="Xuất .md">⬇</button>
+      <button id="sum-full" class="mini" data-i18n="summary.full" data-i18n-title="summary.fullTitle" type="button">📊</button>
+      <button id="sum-copy" class="mini" data-i18n-title="summary.copyTitle" type="button">⎘</button>
+      <button id="sum-export" class="mini" data-i18n-title="summary.exportTitle" type="button">⬇</button>
     </div>
-    <div id="summary" class="summary-body"><em class="muted">Chưa có tóm tắt.</em></div>
+    <div id="sum-edit-box" class="sum-edit-box hidden">
+      <textarea id="summary-extra" rows="3" data-i18n-ph="summary.extraPh" placeholder="VD: tập trung vào quyết định & deadline"></textarea>
+      <div class="row-end"><button id="sum-extra-save" class="mini primary-mini" data-i18n="summary.save" type="button">Lưu</button></div>
+    </div>
+    <div id="summary" class="summary-body"></div>
   </section>
 
   <!-- Footer -->
   <footer class="bottom">
-    <span class="count" id="count">0 câu</span>
+    <span class="count" id="count">0</span>
     <span class="spacer"></span>
-    <button id="autoscroll" class="mini active" title="Tự cuộn">↓ Auto</button>
-    <button id="summary-toggle" class="mini" title="Bật/tắt tóm tắt">📋 Tóm tắt</button>
-    <button id="export" class="mini" title="Xuất transcript">💾</button>
-    <button id="clear" class="mini" title="Xoá">🗑</button>
+    <button id="autoscroll" class="mini active" data-i18n="footer.auto" data-i18n-title="footer.autoTitle" type="button">↓ Auto</button>
+    <button id="summary-toggle" class="mini" data-i18n="footer.summary" type="button">📋 Tóm tắt</button>
+    <button id="export" class="mini" data-i18n-title="footer.exportTitle" type="button">💾</button>
+    <button id="clear" class="mini" data-i18n-title="footer.clearTitle" type="button">🗑</button>
   </footer>
   <a id="dl" hidden></a>
 

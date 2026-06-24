@@ -5472,15 +5472,15 @@
     }
   };
   function __rest(s, e) {
-    var t = {};
+    var t2 = {};
     for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-      t[p] = s[p];
+      t2[p] = s[p];
     if (s != null && typeof Object.getOwnPropertySymbols === "function")
       for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
         if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-          t[p[i]] = s[p[i]];
+          t2[p[i]] = s[p[i]];
       }
-    return t;
+    return t2;
   }
   function __values(o) {
     var s = typeof Symbol === "function" && Symbol.iterator, m = s && o[s], i = 0;
@@ -11900,15 +11900,15 @@
       let cursor = void 0;
       let numTools = 0;
       while (numTools < maxTools) {
-        const t = yield __await(mcpClient.listTools({ cursor }));
-        for (const tool of t.tools) {
+        const t2 = yield __await(mcpClient.listTools({ cursor }));
+        for (const tool of t2.tools) {
           yield yield __await(tool);
           numTools++;
         }
-        if (!t.nextCursor) {
+        if (!t2.nextCursor) {
           break;
         }
-        cursor = t.nextCursor;
+        cursor = t2.nextCursor;
       }
     });
   }
@@ -20808,13 +20808,6 @@
   var LANG_LABELS = { vi: "ti\u1EBFng Vi\u1EC7t", en: "English", ja: "\u65E5\u672C\u8A9E", ko: "\uD55C\uAD6D\uC5B4", "zh-CN": "\u4E2D\u6587", zh: "\u4E2D\u6587" };
   var LANG_BCP47 = { vi: "vi", en: "en", ja: "ja", ko: "ko", "zh-CN": "zh-Hans", zh: "zh-Hans" };
   var bcp47 = (code) => LANG_BCP47[code] || code || "en";
-  var LANG_ORDER = [
-    { code: "vi", flag: "\u{1F1FB}\u{1F1F3}", name: "Ti\u1EBFng Vi\u1EC7t" },
-    { code: "en", flag: "\u{1F1FA}\u{1F1F8}", name: "English" },
-    { code: "ja", flag: "\u{1F1EF}\u{1F1F5}", name: "\u65E5\u672C\u8A9E" },
-    { code: "ko", flag: "\u{1F1F0}\u{1F1F7}", name: "\uD55C\uAD6D\uC5B4" },
-    { code: "zh-CN", flag: "\u{1F1E8}\u{1F1F3}", name: "\u4E2D\u6587" }
-  ];
 
   // extension/lib/gemini-live.js
   var MODEL = "gemini-3.5-live-translate-preview";
@@ -20854,7 +20847,7 @@
     return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
   }
   function createLiveTranslator(opts) {
-    const st = () => opts.getState();
+    const st2 = () => opts.getState();
     const onCaption = opts.onCaption || (() => {
     });
     const onAudio = opts.onAudio || (() => {
@@ -20868,7 +20861,7 @@
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
     let _lineBase = 1, _transAcc = "";
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null;
-    const isConfigured = () => !!(st().apiKey && String(st().apiKey).trim());
+    const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
     function _splitVI(s) {
       s = s || "";
       const out = [];
@@ -20949,7 +20942,7 @@
         }
         const sc = m.serverContent;
         if (!sc) return;
-        const transcribe = !!st().transcribeMode;
+        const transcribe = !!st2().transcribeMode;
         let changed = false;
         const ot = transcribe ? sc.inputTranscription && sc.inputTranscription.text : sc.outputTranscription && sc.outputTranscription.text;
         if (typeof ot === "string" && ot) {
@@ -20957,7 +20950,7 @@
           changed = true;
         }
         const parts = sc.modelTurn && sc.modelTurn.parts || sc.parts;
-        if (!transcribe && parts && st().geminiAudioOn !== false) {
+        if (!transcribe && parts && st2().geminiAudioOn !== false) {
           for (const p of parts) {
             const id = p && (p.inlineData || p.inline_data);
             const d = id && id.data;
@@ -20977,13 +20970,13 @@
       }
     }
     async function _connect() {
-      const ai = new GoogleGenAI2({ apiKey: String(st().apiKey).trim() });
+      const ai = new GoogleGenAI2({ apiKey: String(st2().apiKey).trim() });
       const myGen = ++_gen;
       const config = {
         responseModalities: [Modality.AUDIO],
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        translationConfig: { targetLanguageCode: bcp47(st().langCode), echoTargetLanguage: st().transcribeMode ? true : false },
+        translationConfig: { targetLanguageCode: bcp47(st2().langCode), echoTargetLanguage: st2().transcribeMode ? true : false },
         contextWindowCompression: { slidingWindow: {} },
         sessionResumption: _handle ? { handle: _handle } : {}
       };
@@ -20991,7 +20984,7 @@
         model: MODEL,
         config,
         callbacks: {
-          onopen: () => console.log("[live] phi\xEAn m\u1EDF (gen " + myGen + ", \u2192" + bcp47(st().langCode) + (_handle ? ", resume" : "") + ")"),
+          onopen: () => console.log("[live] phi\xEAn m\u1EDF (gen " + myGen + ", \u2192" + bcp47(st2().langCode) + (_handle ? ", resume" : "") + ")"),
           onmessage: (m) => _onMessage(myGen, m),
           onerror: (e) => console.warn("[live] ws error:", e && e.message),
           onclose: () => {
@@ -21278,8 +21271,8 @@ ${lines}`;
       return _chain;
     }
     const _onCooldown = (id) => {
-      const t = _cooldownUntil[id];
-      return !!t && Date.now() < t;
+      const t2 = _cooldownUntil[id];
+      return !!t2 && Date.now() < t2;
     };
     const _isQuota = (msg) => /\b429\b|RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(msg);
     function _setCooldown(id, msg) {
@@ -21388,6 +21381,309 @@ ${lines}`;
   ];
   var DEFAULT_VOICE = "Achernar";
 
+  // extension/lib/i18n.js
+  var FLAGS = {
+    vi: `<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#da251d"/><path d="M15 4.2l1.62 4.98h5.24l-4.24 3.08 1.62 4.98L15 14.14l-4.24 3.08 1.62-4.98-4.24-3.08h5.24z" fill="#ff0"/></svg>`,
+    en: `<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><g fill="#b22234"><rect width="30" height="2" y="0"/><rect width="30" height="2" y="4"/><rect width="30" height="2" y="8"/><rect width="30" height="2" y="12"/><rect width="30" height="2" y="16"/></g><rect width="13" height="11" fill="#3c3b6e"/></svg>`,
+    ja: `<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="5.5" fill="#bc002d"/></svg>`,
+    ko: `<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="5" fill="#cd2e3a"/><path d="M15 5a2.5 2.5 0 0 1 0 5 2.5 2.5 0 0 0 0 5 5 5 0 0 1 0-10z" fill="#0047a0"/></svg>`,
+    "zh-CN": `<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#de2910"/><path d="M6 3.6l1.13 3.48h3.66l-2.96 2.15 1.13 3.48L6 10.56l-2.96 2.15 1.13-3.48L1.21 7.08h3.66z" fill="#ffde00"/><g fill="#ffde00"><circle cx="12" cy="3" r=".8"/><circle cx="14" cy="5.2" r=".8"/><circle cx="14" cy="8.2" r=".8"/><circle cx="12" cy="10.4" r=".8"/></g></svg>`
+  };
+  var flag = (code) => FLAGS[code] || FLAGS[(code || "").split("-")[0]] || "";
+  var I18N_LOCALES = [
+    { code: "vi", name: "Ti\u1EBFng Vi\u1EC7t" },
+    { code: "en", name: "English" },
+    { code: "ja", name: "\u65E5\u672C\u8A9E" },
+    { code: "ko", name: "\uD55C\uAD6D\uC5B4" },
+    { code: "zh-CN", name: "\u4E2D\u6587" }
+  ];
+  var I18N = {
+    vi: {
+      settings: "C\xE0i \u0111\u1EB7t",
+      "settings.apiKey": "Gemini API key",
+      "settings.source": "Ngu\u1ED3n \xE2m thanh",
+      "settings.targetLang": "Ng\xF4n ng\u1EEF \u0111\xEDch",
+      "uilang.title": "Ng\xF4n ng\u1EEF giao di\u1EC7n",
+      "popout.title": "T\xE1ch ra c\u1EEDa s\u1ED5 ri\xEAng",
+      "apiKey.ph": "AIza\u2026",
+      "source.mic": "\u{1F3A4} Micro",
+      "source.screen": "\u{1F50A} \xC2m thanh (tab / m\xE0n h\xECnh / c\u1EEDa s\u1ED5)",
+      "lang.transcribe": "\u{1F4DD} Ch\xE9p l\u1EDDi",
+      "voice.off": "\u{1F507} T\u1EAFt \u0111\u1ECDc",
+      "btn.start": "\u25B6 B\u1EAFt \u0111\u1EA7u",
+      "btn.stop": "\u23F9 D\u1EEBng",
+      "footer.auto": "\u2193 Auto",
+      "footer.autoTitle": "T\u1EF1 cu\u1ED9n",
+      "footer.summary": "\u{1F4CB} T\xF3m t\u1EAFt",
+      "footer.exportTitle": "Xu\u1EA5t transcript",
+      "footer.clearTitle": "Xo\xE1",
+      "summary.title": "T\xF3m t\u1EAFt",
+      "summary.full": "\u{1F4CA} T\u1ED5ng th\u1EC3",
+      "summary.fullTitle": "B\xE1o c\xE1o t\u1ED5ng th\u1EC3 (khi \u0111\xE3 d\u1EEBng)",
+      "summary.copyTitle": "Copy",
+      "summary.exportTitle": "Xu\u1EA5t .md",
+      "summary.editTitle": "S\u1EEDa y\xEAu c\u1EA7u t\xF3m t\u1EAFt",
+      "summary.empty": "Ch\u01B0a c\xF3 t\xF3m t\u1EAFt.",
+      "summary.extraPh": "VD: t\u1EADp trung v\xE0o quy\u1EBFt \u0111\u1ECBnh & deadline",
+      "summary.save": "L\u01B0u",
+      count: "{n} c\xE2u",
+      "status.ready": "S\u1EB5n s\xE0ng. B\u1EA5m B\u1EAFt \u0111\u1EA7u.",
+      "status.readyNoKey": "Nh\u1EADp API key (\u2699\uFE0F) r\u1ED3i b\u1EA5m B\u1EAFt \u0111\u1EA7u.",
+      "status.needKey": "Nh\u1EADp Gemini API key tr\u01B0\u1EDBc.",
+      "status.listeningMic": "\u0110ang nghe micro\u2026",
+      "status.listeningAudio": "\u0110ang nghe \xE2m thanh \u0111\xE3 ch\u1ECDn\u2026",
+      "status.stopped": "\u0110\xE3 d\u1EEBng.",
+      "status.canceled": "\u0110\xE3 hu\u1EF7 ch\u1ECDn ngu\u1ED3n \xE2m thanh.",
+      "status.captureErr": "L\u1ED7i thu \xE2m: {err}",
+      "status.checking": "\u0110ang ki\u1EC3m tra\u2026",
+      "status.keyOk": "\u2713 Key h\u1EE3p l\u1EC7",
+      "status.keyBad": "\u2715 Key kh\xF4ng h\u1EE3p l\u1EC7",
+      "status.copied": "\u0110\xE3 copy t\xF3m t\u1EAFt.",
+      "status.makingFull": "\u0110ang t\u1EA1o b\xE1o c\xE1o t\u1ED5ng th\u1EC3\u2026",
+      "status.fullDone": "Xong b\xE1o c\xE1o t\u1ED5ng th\u1EC3.",
+      "status.fullErr": "B\xE1o c\xE1o l\u1ED7i: {err}",
+      "status.noContent": "Ch\u01B0a c\xF3 n\u1ED9i dung.",
+      "status.summaryErr": "T\xF3m t\u1EAFt: {err}",
+      "status.stopFirst": "D\u1EEBng ghi tr\u01B0\u1EDBc khi t\u1EA1o b\xE1o c\xE1o t\u1ED5ng th\u1EC3.",
+      "status.popoutErr": "Kh\xF4ng m\u1EDF \u0111\u01B0\u1EE3c c\u1EEDa s\u1ED5 ri\xEAng: {err}",
+      "status.summaryApplied": "\u0110\xE3 \xE1p d\u1EE5ng y\xEAu c\u1EA7u & t\xF3m t\u1EAFt l\u1EA1i.",
+      "status.noKeyShort": "Thi\u1EBFu API key.",
+      "status.geminiErr": "Gemini: {err}"
+    },
+    en: {
+      settings: "Settings",
+      "settings.apiKey": "Gemini API key",
+      "settings.source": "Audio source",
+      "settings.targetLang": "Target language",
+      "uilang.title": "Interface language",
+      "popout.title": "Pop out to a separate window",
+      "apiKey.ph": "AIza\u2026",
+      "source.mic": "\u{1F3A4} Microphone",
+      "source.screen": "\u{1F50A} Audio (tab / screen / window)",
+      "lang.transcribe": "\u{1F4DD} Transcribe",
+      "voice.off": "\u{1F507} Voice off",
+      "btn.start": "\u25B6 Start",
+      "btn.stop": "\u23F9 Stop",
+      "footer.auto": "\u2193 Auto",
+      "footer.autoTitle": "Auto-scroll",
+      "footer.summary": "\u{1F4CB} Summary",
+      "footer.exportTitle": "Export transcript",
+      "footer.clearTitle": "Clear",
+      "summary.title": "Summary",
+      "summary.full": "\u{1F4CA} Full report",
+      "summary.fullTitle": "Full meeting report (after stopping)",
+      "summary.copyTitle": "Copy",
+      "summary.exportTitle": "Export .md",
+      "summary.editTitle": "Edit summary instructions",
+      "summary.empty": "No summary yet.",
+      "summary.extraPh": "e.g. focus on decisions & deadlines",
+      "summary.save": "Save",
+      count: "{n} lines",
+      "status.ready": "Ready. Click Start.",
+      "status.readyNoKey": "Enter API key (\u2699\uFE0F) then click Start.",
+      "status.needKey": "Enter your Gemini API key first.",
+      "status.listeningMic": "Listening to microphone\u2026",
+      "status.listeningAudio": "Listening to selected audio\u2026",
+      "status.stopped": "Stopped.",
+      "status.canceled": "Audio source selection canceled.",
+      "status.captureErr": "Capture error: {err}",
+      "status.checking": "Checking\u2026",
+      "status.keyOk": "\u2713 Key valid",
+      "status.keyBad": "\u2715 Invalid key",
+      "status.copied": "Summary copied.",
+      "status.makingFull": "Generating full report\u2026",
+      "status.fullDone": "Full report done.",
+      "status.fullErr": "Report error: {err}",
+      "status.noContent": "No content yet.",
+      "status.summaryErr": "Summary: {err}",
+      "status.stopFirst": "Stop recording before generating the full report.",
+      "status.popoutErr": "Could not open separate window: {err}",
+      "status.summaryApplied": "Instructions applied & re-summarized.",
+      "status.noKeyShort": "Missing API key.",
+      "status.geminiErr": "Gemini: {err}"
+    },
+    ja: {
+      settings: "\u8A2D\u5B9A",
+      "settings.apiKey": "Gemini API \u30AD\u30FC",
+      "settings.source": "\u97F3\u58F0\u30BD\u30FC\u30B9",
+      "settings.targetLang": "\u7FFB\u8A33\u5148\u306E\u8A00\u8A9E",
+      "uilang.title": "\u8868\u793A\u8A00\u8A9E",
+      "popout.title": "\u5225\u30A6\u30A3\u30F3\u30C9\u30A6\u3067\u958B\u304F",
+      "apiKey.ph": "AIza\u2026",
+      "source.mic": "\u{1F3A4} \u30DE\u30A4\u30AF",
+      "source.screen": "\u{1F50A} \u97F3\u58F0\uFF08\u30BF\u30D6 / \u753B\u9762 / \u30A6\u30A3\u30F3\u30C9\u30A6\uFF09",
+      "lang.transcribe": "\u{1F4DD} \u6587\u5B57\u8D77\u3053\u3057",
+      "voice.off": "\u{1F507} \u8AAD\u307F\u4E0A\u3052\u30AA\u30D5",
+      "btn.start": "\u25B6 \u958B\u59CB",
+      "btn.stop": "\u23F9 \u505C\u6B62",
+      "footer.auto": "\u2193 \u81EA\u52D5",
+      "footer.autoTitle": "\u81EA\u52D5\u30B9\u30AF\u30ED\u30FC\u30EB",
+      "footer.summary": "\u{1F4CB} \u8981\u7D04",
+      "footer.exportTitle": "\u6587\u5B57\u8D77\u3053\u3057\u3092\u66F8\u304D\u51FA\u3059",
+      "footer.clearTitle": "\u30AF\u30EA\u30A2",
+      "summary.title": "\u8981\u7D04",
+      "summary.full": "\u{1F4CA} \u5168\u4F53\u30EC\u30DD\u30FC\u30C8",
+      "summary.fullTitle": "\u4F1A\u8B70\u5168\u4F53\u306E\u30EC\u30DD\u30FC\u30C8\uFF08\u505C\u6B62\u5F8C\uFF09",
+      "summary.copyTitle": "\u30B3\u30D4\u30FC",
+      "summary.exportTitle": ".md \u3067\u66F8\u304D\u51FA\u3059",
+      "summary.editTitle": "\u8981\u7D04\u306E\u6307\u793A\u3092\u7DE8\u96C6",
+      "summary.empty": "\u307E\u3060\u8981\u7D04\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+      "summary.extraPh": "\u4F8B\uFF1A\u6C7A\u5B9A\u4E8B\u9805\u3068\u671F\u9650\u3092\u91CD\u8996",
+      "summary.save": "\u4FDD\u5B58",
+      count: "{n} \u884C",
+      "status.ready": "\u6E96\u5099\u5B8C\u4E86\u3002\u958B\u59CB\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "status.readyNoKey": "API \u30AD\u30FC\uFF08\u2699\uFE0F\uFF09\u3092\u5165\u529B\u3057\u3066\u304B\u3089\u958B\u59CB\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "status.needKey": "\u5148\u306B Gemini API \u30AD\u30FC\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "status.listeningMic": "\u30DE\u30A4\u30AF\u3092\u805E\u3044\u3066\u3044\u307E\u3059\u2026",
+      "status.listeningAudio": "\u9078\u629E\u3057\u305F\u97F3\u58F0\u3092\u805E\u3044\u3066\u3044\u307E\u3059\u2026",
+      "status.stopped": "\u505C\u6B62\u3057\u307E\u3057\u305F\u3002",
+      "status.canceled": "\u97F3\u58F0\u30BD\u30FC\u30B9\u306E\u9078\u629E\u3092\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F\u3002",
+      "status.captureErr": "\u9332\u97F3\u30A8\u30E9\u30FC: {err}",
+      "status.checking": "\u78BA\u8A8D\u4E2D\u2026",
+      "status.keyOk": "\u2713 \u30AD\u30FC\u306F\u6709\u52B9\u3067\u3059",
+      "status.keyBad": "\u2715 \u30AD\u30FC\u304C\u7121\u52B9\u3067\u3059",
+      "status.copied": "\u8981\u7D04\u3092\u30B3\u30D4\u30FC\u3057\u307E\u3057\u305F\u3002",
+      "status.makingFull": "\u5168\u4F53\u30EC\u30DD\u30FC\u30C8\u3092\u4F5C\u6210\u4E2D\u2026",
+      "status.fullDone": "\u5168\u4F53\u30EC\u30DD\u30FC\u30C8\u5B8C\u4E86\u3002",
+      "status.fullErr": "\u30EC\u30DD\u30FC\u30C8\u30A8\u30E9\u30FC: {err}",
+      "status.noContent": "\u5185\u5BB9\u304C\u307E\u3060\u3042\u308A\u307E\u305B\u3093\u3002",
+      "status.summaryErr": "\u8981\u7D04: {err}",
+      "status.stopFirst": "\u5168\u4F53\u30EC\u30DD\u30FC\u30C8\u3092\u4F5C\u6210\u3059\u308B\u524D\u306B\u505C\u6B62\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "status.popoutErr": "\u5225\u30A6\u30A3\u30F3\u30C9\u30A6\u3092\u958B\u3051\u307E\u305B\u3093: {err}",
+      "status.summaryApplied": "\u6307\u793A\u3092\u9069\u7528\u3057\u3066\u518D\u8981\u7D04\u3057\u307E\u3057\u305F\u3002",
+      "status.noKeyShort": "API \u30AD\u30FC\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
+      "status.geminiErr": "Gemini: {err}"
+    },
+    ko: {
+      settings: "\uC124\uC815",
+      "settings.apiKey": "Gemini API \uD0A4",
+      "settings.source": "\uC624\uB514\uC624 \uC18C\uC2A4",
+      "settings.targetLang": "\uB300\uC0C1 \uC5B8\uC5B4",
+      "uilang.title": "\uD45C\uC2DC \uC5B8\uC5B4",
+      "popout.title": "\uBCC4\uB3C4 \uCC3D\uC73C\uB85C \uC5F4\uAE30",
+      "apiKey.ph": "AIza\u2026",
+      "source.mic": "\u{1F3A4} \uB9C8\uC774\uD06C",
+      "source.screen": "\u{1F50A} \uC624\uB514\uC624 (\uD0ED / \uD654\uBA74 / \uCC3D)",
+      "lang.transcribe": "\u{1F4DD} \uBC1B\uC544\uC4F0\uAE30",
+      "voice.off": "\u{1F507} \uC74C\uC131 \uB044\uAE30",
+      "btn.start": "\u25B6 \uC2DC\uC791",
+      "btn.stop": "\u23F9 \uC911\uC9C0",
+      "footer.auto": "\u2193 \uC790\uB3D9",
+      "footer.autoTitle": "\uC790\uB3D9 \uC2A4\uD06C\uB864",
+      "footer.summary": "\u{1F4CB} \uC694\uC57D",
+      "footer.exportTitle": "\uC804\uC0AC \uB0B4\uBCF4\uB0B4\uAE30",
+      "footer.clearTitle": "\uC9C0\uC6B0\uAE30",
+      "summary.title": "\uC694\uC57D",
+      "summary.full": "\u{1F4CA} \uC804\uCCB4 \uBCF4\uACE0\uC11C",
+      "summary.fullTitle": "\uC804\uCCB4 \uD68C\uC758 \uBCF4\uACE0\uC11C (\uC911\uC9C0 \uD6C4)",
+      "summary.copyTitle": "\uBCF5\uC0AC",
+      "summary.exportTitle": ".md \uB0B4\uBCF4\uB0B4\uAE30",
+      "summary.editTitle": "\uC694\uC57D \uC9C0\uC2DC \uD3B8\uC9D1",
+      "summary.empty": "\uC544\uC9C1 \uC694\uC57D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
+      "summary.extraPh": "\uC608: \uACB0\uC815 \uC0AC\uD56D\uACFC \uB9C8\uAC10\uC77C \uC911\uC2EC",
+      "summary.save": "\uC800\uC7A5",
+      count: "{n}\uC904",
+      "status.ready": "\uC900\uBE44\uB428. \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.",
+      "status.readyNoKey": "API \uD0A4(\u2699\uFE0F)\uB97C \uC785\uB825\uD55C \uD6C4 \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.",
+      "status.needKey": "\uBA3C\uC800 Gemini API \uD0A4\uB97C \uC785\uB825\uD558\uC138\uC694.",
+      "status.listeningMic": "\uB9C8\uC774\uD06C\uB97C \uB4E3\uB294 \uC911\u2026",
+      "status.listeningAudio": "\uC120\uD0DD\uD55C \uC624\uB514\uC624\uB97C \uB4E3\uB294 \uC911\u2026",
+      "status.stopped": "\uC911\uC9C0\uB428.",
+      "status.canceled": "\uC624\uB514\uC624 \uC18C\uC2A4 \uC120\uD0DD\uC774 \uCDE8\uC18C\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
+      "status.captureErr": "\uB179\uC74C \uC624\uB958: {err}",
+      "status.checking": "\uD655\uC778 \uC911\u2026",
+      "status.keyOk": "\u2713 \uC720\uD6A8\uD55C \uD0A4",
+      "status.keyBad": "\u2715 \uC798\uBABB\uB41C \uD0A4",
+      "status.copied": "\uC694\uC57D\uC744 \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.",
+      "status.makingFull": "\uC804\uCCB4 \uBCF4\uACE0\uC11C \uC0DD\uC131 \uC911\u2026",
+      "status.fullDone": "\uC804\uCCB4 \uBCF4\uACE0\uC11C \uC644\uB8CC.",
+      "status.fullErr": "\uBCF4\uACE0\uC11C \uC624\uB958: {err}",
+      "status.noContent": "\uC544\uC9C1 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
+      "status.summaryErr": "\uC694\uC57D: {err}",
+      "status.stopFirst": "\uC804\uCCB4 \uBCF4\uACE0\uC11C\uB97C \uB9CC\uB4E4\uAE30 \uC804\uC5D0 \uB179\uC74C\uC744 \uC911\uC9C0\uD558\uC138\uC694.",
+      "status.popoutErr": "\uBCC4\uB3C4 \uCC3D\uC744 \uC5F4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4: {err}",
+      "status.summaryApplied": "\uC9C0\uC2DC\uB97C \uC801\uC6A9\uD558\uACE0 \uB2E4\uC2DC \uC694\uC57D\uD588\uC2B5\uB2C8\uB2E4.",
+      "status.noKeyShort": "API \uD0A4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.",
+      "status.geminiErr": "Gemini: {err}"
+    },
+    "zh-CN": {
+      settings: "\u8BBE\u7F6E",
+      "settings.apiKey": "Gemini API \u5BC6\u94A5",
+      "settings.source": "\u97F3\u9891\u6765\u6E90",
+      "settings.targetLang": "\u76EE\u6807\u8BED\u8A00",
+      "uilang.title": "\u754C\u9762\u8BED\u8A00",
+      "popout.title": "\u5728\u5355\u72EC\u7A97\u53E3\u4E2D\u6253\u5F00",
+      "apiKey.ph": "AIza\u2026",
+      "source.mic": "\u{1F3A4} \u9EA6\u514B\u98CE",
+      "source.screen": "\u{1F50A} \u97F3\u9891\uFF08\u6807\u7B7E\u9875 / \u5C4F\u5E55 / \u7A97\u53E3\uFF09",
+      "lang.transcribe": "\u{1F4DD} \u8F6C\u5199",
+      "voice.off": "\u{1F507} \u5173\u95ED\u6717\u8BFB",
+      "btn.start": "\u25B6 \u5F00\u59CB",
+      "btn.stop": "\u23F9 \u505C\u6B62",
+      "footer.auto": "\u2193 \u81EA\u52A8",
+      "footer.autoTitle": "\u81EA\u52A8\u6EDA\u52A8",
+      "footer.summary": "\u{1F4CB} \u6458\u8981",
+      "footer.exportTitle": "\u5BFC\u51FA\u8F6C\u5199",
+      "footer.clearTitle": "\u6E05\u9664",
+      "summary.title": "\u6458\u8981",
+      "summary.full": "\u{1F4CA} \u5B8C\u6574\u62A5\u544A",
+      "summary.fullTitle": "\u5B8C\u6574\u4F1A\u8BAE\u62A5\u544A\uFF08\u505C\u6B62\u540E\uFF09",
+      "summary.copyTitle": "\u590D\u5236",
+      "summary.exportTitle": "\u5BFC\u51FA .md",
+      "summary.editTitle": "\u7F16\u8F91\u6458\u8981\u8981\u6C42",
+      "summary.empty": "\u6682\u65E0\u6458\u8981\u3002",
+      "summary.extraPh": "\u4F8B\u5982\uFF1A\u805A\u7126\u51B3\u7B56\u4E0E\u622A\u6B62\u65E5\u671F",
+      "summary.save": "\u4FDD\u5B58",
+      count: "{n} \u884C",
+      "status.ready": "\u5C31\u7EEA\u3002\u70B9\u51FB\u5F00\u59CB\u3002",
+      "status.readyNoKey": "\u8F93\u5165 API \u5BC6\u94A5\uFF08\u2699\uFE0F\uFF09\u540E\u70B9\u51FB\u5F00\u59CB\u3002",
+      "status.needKey": "\u8BF7\u5148\u8F93\u5165 Gemini API \u5BC6\u94A5\u3002",
+      "status.listeningMic": "\u6B63\u5728\u8046\u542C\u9EA6\u514B\u98CE\u2026",
+      "status.listeningAudio": "\u6B63\u5728\u8046\u542C\u6240\u9009\u97F3\u9891\u2026",
+      "status.stopped": "\u5DF2\u505C\u6B62\u3002",
+      "status.canceled": "\u5DF2\u53D6\u6D88\u97F3\u9891\u6765\u6E90\u9009\u62E9\u3002",
+      "status.captureErr": "\u5F55\u5236\u9519\u8BEF\uFF1A{err}",
+      "status.checking": "\u68C0\u67E5\u4E2D\u2026",
+      "status.keyOk": "\u2713 \u5BC6\u94A5\u6709\u6548",
+      "status.keyBad": "\u2715 \u5BC6\u94A5\u65E0\u6548",
+      "status.copied": "\u5DF2\u590D\u5236\u6458\u8981\u3002",
+      "status.makingFull": "\u6B63\u5728\u751F\u6210\u5B8C\u6574\u62A5\u544A\u2026",
+      "status.fullDone": "\u5B8C\u6574\u62A5\u544A\u5B8C\u6210\u3002",
+      "status.fullErr": "\u62A5\u544A\u9519\u8BEF\uFF1A{err}",
+      "status.noContent": "\u6682\u65E0\u5185\u5BB9\u3002",
+      "status.summaryErr": "\u6458\u8981\uFF1A{err}",
+      "status.stopFirst": "\u751F\u6210\u5B8C\u6574\u62A5\u544A\u524D\u8BF7\u5148\u505C\u6B62\u5F55\u5236\u3002",
+      "status.popoutErr": "\u65E0\u6CD5\u6253\u5F00\u5355\u72EC\u7A97\u53E3\uFF1A{err}",
+      "status.summaryApplied": "\u5DF2\u5E94\u7528\u8981\u6C42\u5E76\u91CD\u65B0\u6458\u8981\u3002",
+      "status.noKeyShort": "\u7F3A\u5C11 API \u5BC6\u94A5\u3002",
+      "status.geminiErr": "Gemini\uFF1A{err}"
+    }
+  };
+  var _loc = "vi";
+  function setLocale(code) {
+    if (I18N[code]) _loc = code;
+  }
+  function currentLocale() {
+    return _loc;
+  }
+  function t(key, vars) {
+    const d = I18N[_loc] || I18N.en;
+    let s = d[key] != null ? d[key] : I18N.en[key] != null ? I18N.en[key] : key;
+    if (vars) for (const k in vars) s = s.split("{" + k + "}").join(vars[k]);
+    return s;
+  }
+  function applyI18n(root = document) {
+    root.querySelectorAll("[data-i18n]").forEach((e) => {
+      e.textContent = t(e.getAttribute("data-i18n"));
+    });
+    root.querySelectorAll("[data-i18n-title]").forEach((e) => {
+      e.title = t(e.getAttribute("data-i18n-title"));
+    });
+    root.querySelectorAll("[data-i18n-ph]").forEach((e) => {
+      e.setAttribute("placeholder", t(e.getAttribute("data-i18n-ph")));
+    });
+  }
+
   // extension/app.js
   var DEFAULTS = {
     apiKey: "",
@@ -21396,7 +21692,8 @@ ${lines}`;
     geminiVoice: DEFAULT_VOICE,
     geminiAudioOn: true,
     source: "mic",
-    summaryExtra: ""
+    summaryExtra: "",
+    uiLang: "vi"
   };
   var S = { ...DEFAULTS };
   async function loadSettings() {
@@ -21412,11 +21709,13 @@ ${lines}`;
     settingsBtn: $("settings-btn"),
     popoutBtn: $("popout-btn"),
     settings: $("settings"),
+    langBtn: $("lang-btn"),
+    langMenu: $("lang-menu"),
     apikey: $("apikey"),
     keyStatus: $("key-status"),
-    summaryExtra: $("summary-extra"),
     source: $("source"),
-    lang: $("lang"),
+    targetBtn: $("target-btn"),
+    targetMenu: $("target-menu"),
     voice: $("voice"),
     start: $("start"),
     status: $("status"),
@@ -21428,14 +21727,21 @@ ${lines}`;
     clear: $("clear"),
     summaryWrap: $("summary-wrap"),
     summary: $("summary"),
+    sumEdit: $("sum-edit"),
+    sumEditBox: $("sum-edit-box"),
+    summaryExtra: $("summary-extra"),
+    sumExtraSave: $("sum-extra-save"),
     sumFull: $("sum-full"),
     sumCopy: $("sum-copy"),
     sumExport: $("sum-export"),
     vResizer: $("v-resizer"),
     dl: $("dl")
   };
-  function setStatus(msg, cls) {
-    el.status.textContent = msg;
+  var langName = (c) => (I18N_LOCALES.find((l) => l.code === c) || {}).name || c;
+  var _lastStatus = null;
+  function st(key, vars, cls) {
+    _lastStatus = { key, vars, cls };
+    el.status.textContent = t(key, vars);
     el.status.className = "status" + (cls ? " " + cls : "");
   }
   var live = createLiveTranslator({
@@ -21444,8 +21750,8 @@ ${lines}`;
     onAudio: playAudio,
     onClear: clearAudio,
     onStatus: ({ error }) => {
-      if (error === "no-key") setStatus("Thi\u1EBFu API key.", "err");
-      else if (error) setStatus("Gemini: " + error, "err");
+      if (error === "no-key") st("status.noKeyShort", null, "err");
+      else if (error) st("status.geminiErr", { err: error }, "err");
     }
   });
   var summarizer = createSummarizer({
@@ -21455,6 +21761,9 @@ ${lines}`;
   var byId = /* @__PURE__ */ new Map();
   var rowById = /* @__PURE__ */ new Map();
   var autoScroll = true;
+  function refreshCount() {
+    el.count.textContent = t("count", { n: captions.length });
+  }
   function addCaption(c) {
     let e = byId.get(c.id);
     if (!e) {
@@ -21483,7 +21792,7 @@ ${lines}`;
     row.querySelector(".who").textContent = e.author || "STT";
     row.querySelector(".ts").textContent = e.ts || "";
     row.querySelector(".entry-text").textContent = e.translated || e.original || "";
-    el.count.textContent = captions.length + " c\xE2u";
+    refreshCount();
     if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
   }
   function clearList() {
@@ -21491,7 +21800,7 @@ ${lines}`;
     byId.clear();
     rowById.clear();
     el.list.innerHTML = "";
-    el.count.textContent = "0 c\xE2u";
+    refreshCount();
     summaryMd = "";
     sumPrevCount = 0;
     sumLastTime = 0;
@@ -21593,7 +21902,7 @@ ${lines}`;
         video: true,
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       });
-      stream.getVideoTracks().forEach((t) => t.stop());
+      stream.getVideoTracks().forEach((t2) => t2.stop());
     }
     rawStream = stream;
     const tracks = stream.getAudioTracks();
@@ -21656,14 +21965,18 @@ ${lines}`;
     } catch (e) {
     }
     procNode = srcNode = zeroGain = audioCtx = null;
-    rawStream?.getTracks().forEach((t) => t.stop());
+    rawStream?.getTracks().forEach((t2) => t2.stop());
     rawStream = null;
   }
   var running = false;
+  function refreshStartBtn() {
+    el.start.textContent = t(running ? "btn.stop" : "btn.start");
+    el.start.classList.toggle("on", running);
+  }
   async function start() {
     if (running) return;
     if (!S.apiKey || !S.apiKey.trim()) {
-      setStatus("Nh\u1EADp Gemini API key tr\u01B0\u1EDBc.", "err");
+      st("status.needKey", null, "err");
       el.settings.classList.remove("hidden");
       return;
     }
@@ -21672,15 +21985,14 @@ ${lines}`;
       live.start();
       await startCapture();
       running = true;
-      el.start.textContent = "\u23F9 D\u1EEBng";
-      el.start.classList.add("on");
-      setStatus(S.source === "mic" ? "\u0110ang nghe micro\u2026" : "\u0110ang nghe \xE2m thanh \u0111\xE3 ch\u1ECDn\u2026", "run");
+      refreshStartBtn();
+      st(S.source === "mic" ? "status.listeningMic" : "status.listeningAudio", null, "run");
     } catch (e) {
       console.error(e);
       live.stop();
       stopCapture();
-      if (e && e.name === "NotAllowedError") setStatus("\u0110\xE3 hu\u1EF7 ch\u1ECDn ngu\u1ED3n \xE2m thanh.");
-      else setStatus("L\u1ED7i thu \xE2m: " + (e.message || e.name || e), "err");
+      if (e && e.name === "NotAllowedError") st("status.canceled");
+      else st("status.captureErr", { err: e.message || e.name || e }, "err");
     }
   }
   function stop() {
@@ -21689,9 +22001,8 @@ ${lines}`;
     live.stop();
     stopCapture();
     clearAudio();
-    el.start.textContent = "\u25B6 B\u1EAFt \u0111\u1EA7u";
-    el.start.classList.remove("on");
-    setStatus("\u0110\xE3 d\u1EEBng.");
+    refreshStartBtn();
+    st("status.stopped");
   }
   var summaryMd = "";
   var sumPrevCount = 0;
@@ -21718,9 +22029,9 @@ ${lines}`;
         renderSummary();
         sumPrevCount = caps.length;
         sumLastTime = Date.now();
-      } else if (res && res.error !== "empty") setStatus("T\xF3m t\u1EAFt: " + res.error, "err");
+      } else if (res && res.error !== "empty") st("status.summaryErr", { err: res.error }, "err");
     } catch (e) {
-      setStatus("T\xF3m t\u1EAFt l\u1ED7i: " + e.message, "err");
+      st("status.summaryErr", { err: e.message }, "err");
     } finally {
       sumBusy = false;
     }
@@ -21740,11 +22051,12 @@ ${lines}`;
     el.summaryWrap.classList.add("hidden");
     el.vResizer.classList.add("hidden");
     el.summaryToggle.classList.remove("active");
+    el.sumEditBox.classList.add("hidden");
     clearInterval(sumTimer);
     sumTimer = null;
   }
   function renderSummary() {
-    el.summary.innerHTML = summaryMd ? md2html(summaryMd) : '<em class="muted">Ch\u01B0a c\xF3 t\xF3m t\u1EAFt.</em>';
+    el.summary.innerHTML = summaryMd ? md2html(summaryMd) : `<em class="muted">${t("summary.empty")}</em>`;
   }
   function md2html(md) {
     const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -21816,7 +22128,7 @@ ${lines}`;
   }
   function exportTranscript() {
     if (!captions.length) {
-      setStatus("Ch\u01B0a c\xF3 n\u1ED9i dung \u0111\u1EC3 xu\u1EA5t.");
+      st("status.noContent");
       return;
     }
     const lines = captions.map((c) => {
@@ -21826,28 +22138,13 @@ ${lines}`;
   \u2192 ${c.translated || ""}`;
       return `${head} ${c.translated || ""}`;
     });
-    const d = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    download(`transcript-${d}.txt`, lines.join("\n"));
-  }
-  function buildLangSelect() {
-    el.lang.innerHTML = "";
-    for (const L of LANG_ORDER) {
-      const o = document.createElement("option");
-      o.value = L.code;
-      o.textContent = `${L.flag} ${L.name}`;
-      el.lang.appendChild(o);
-    }
-    const t = document.createElement("option");
-    t.value = "__transcribe__";
-    t.textContent = "\u{1F4DD} Ch\xE9p l\u1EDDi";
-    el.lang.appendChild(t);
-    el.lang.value = S.transcribeMode ? "__transcribe__" : S.langCode;
+    download(`transcript-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.txt`, lines.join("\n"));
   }
   function buildVoiceSelect() {
     el.voice.innerHTML = "";
     const off = document.createElement("option");
     off.value = "__off__";
-    off.textContent = "\u{1F507} T\u1EAFt \u0111\u1ECDc";
+    off.textContent = t("voice.off");
     el.voice.appendChild(off);
     for (const v of GEM_VOICES) {
       const o = document.createElement("option");
@@ -21856,6 +22153,74 @@ ${lines}`;
       el.voice.appendChild(o);
     }
     el.voice.value = S.geminiAudioOn ? S.geminiVoice : "__off__";
+  }
+  function buildTargetButton() {
+    el.targetBtn.innerHTML = S.transcribeMode ? `<span>${t("lang.transcribe")}</span>` : `<span class="flag">${flag(S.langCode)}</span><span>${langName(S.langCode)}</span>`;
+  }
+  function buildLangMenu() {
+    el.langMenu.innerHTML = "";
+    for (const L of I18N_LOCALES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
+      if (L.code === currentLocale()) b.classList.add("sel");
+      b.addEventListener("click", () => {
+        applyLocale(L.code);
+        closeMenus();
+      });
+      el.langMenu.appendChild(b);
+    }
+  }
+  function buildTargetMenu() {
+    el.targetMenu.innerHTML = "";
+    for (const L of I18N_LOCALES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
+      if (!S.transcribeMode && S.langCode === L.code) b.classList.add("sel");
+      b.addEventListener("click", () => {
+        pickTarget(L.code, false);
+        closeMenus();
+      });
+      el.targetMenu.appendChild(b);
+    }
+    const tb = document.createElement("button");
+    tb.type = "button";
+    tb.innerHTML = `<span>${t("lang.transcribe")}</span>`;
+    if (S.transcribeMode) tb.classList.add("sel");
+    tb.addEventListener("click", () => {
+      pickTarget(null, true);
+      closeMenus();
+    });
+    el.targetMenu.appendChild(tb);
+  }
+  function pickTarget(code, transcribe) {
+    if (transcribe) {
+      save({ transcribeMode: true });
+      live.onTranscribeModeChanged();
+    } else {
+      const wasT = S.transcribeMode;
+      save({ langCode: code, transcribeMode: false });
+      wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged();
+    }
+    el.voice.disabled = S.transcribeMode;
+    buildTargetButton();
+  }
+  function closeMenus() {
+    el.langMenu.classList.add("hidden");
+    el.targetMenu.classList.add("hidden");
+  }
+  function applyLocale(code) {
+    setLocale(code);
+    save({ uiLang: code });
+    applyI18n(document);
+    buildVoiceSelect();
+    buildTargetButton();
+    refreshStartBtn();
+    refreshCount();
+    renderSummary();
+    el.langBtn.innerHTML = `<span class="flag">${flag(code)}</span>`;
+    if (_lastStatus) st(_lastStatus.key, _lastStatus.vars, _lastStatus.cls);
   }
   function initResizer() {
     let startY = 0, startH = 0, dragging = false;
@@ -21893,46 +22258,56 @@ ${lines}`;
       el.keyStatus.className = "key-status";
       return;
     }
-    el.keyStatus.textContent = "\u0110ang ki\u1EC3m tra\u2026";
+    el.keyStatus.textContent = t("status.checking");
     el.keyStatus.className = "key-status";
     const r = await validateKey(k);
     if (r.ok) {
-      el.keyStatus.textContent = "\u2713 Key h\u1EE3p l\u1EC7";
+      el.keyStatus.textContent = t("status.keyOk");
       el.keyStatus.className = "key-status ok";
     } else {
-      el.keyStatus.textContent = r.error === "invalid" ? "\u2715 Key kh\xF4ng h\u1EE3p l\u1EC7" : "\u2715 " + r.error;
+      el.keyStatus.textContent = r.error === "invalid" ? t("status.keyBad") : "\u2715 " + r.error;
       el.keyStatus.className = "key-status err";
     }
   }
   function wire() {
     el.settingsBtn.addEventListener("click", () => el.settings.classList.toggle("hidden"));
-    el.popoutBtn.addEventListener("click", () => {
+    el.popoutBtn.addEventListener("click", async () => {
       const page = location.pathname.split("/").pop() || "sidepanel.html";
       try {
-        chrome.windows.create({ url: chrome.runtime.getURL(page + "?popup=1"), type: "popup", width: 460, height: 820, focused: true });
+        if (running) stop();
+        await chrome.windows.create({ url: chrome.runtime.getURL(page + "?popup=1"), type: "popup", width: 460, height: 820, focused: true });
+        window.close();
       } catch (e) {
-        setStatus("Kh\xF4ng m\u1EDF \u0111\u01B0\u1EE3c c\u1EEDa s\u1ED5 ri\xEAng: " + (e && e.message), "err");
+        st("status.popoutErr", { err: e && e.message }, "err");
       }
+    });
+    el.langBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const show = el.langMenu.classList.contains("hidden");
+      closeMenus();
+      if (show) {
+        buildLangMenu();
+        el.langMenu.classList.remove("hidden");
+      }
+    });
+    el.targetBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const show = el.targetMenu.classList.contains("hidden");
+      closeMenus();
+      if (show) {
+        buildTargetMenu();
+        el.targetMenu.classList.remove("hidden");
+      }
+    });
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".dd")) closeMenus();
     });
     el.apikey.addEventListener("input", () => {
       save({ apiKey: el.apikey.value.trim() });
       clearTimeout(keyTimer);
       keyTimer = setTimeout(checkKey, 600);
     });
-    el.summaryExtra.addEventListener("input", () => save({ summaryExtra: el.summaryExtra.value }));
     el.source.addEventListener("change", () => save({ source: el.source.value }));
-    el.lang.addEventListener("change", () => {
-      const v = el.lang.value;
-      if (v === "__transcribe__") {
-        save({ transcribeMode: true });
-        live.onTranscribeModeChanged();
-      } else {
-        const wasT = S.transcribeMode;
-        save({ langCode: v, transcribeMode: false });
-        wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged();
-      }
-      el.voice.disabled = S.transcribeMode;
-    });
     el.voice.addEventListener("change", () => {
       const v = el.voice.value;
       if (v === "__off__") {
@@ -21960,7 +22335,7 @@ ${lines}`;
     el.sumCopy.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(summaryMd || "");
-        setStatus("\u0110\xE3 copy t\xF3m t\u1EAFt.");
+        st("status.copied");
       } catch (e) {
       }
     });
@@ -21969,37 +22344,61 @@ ${lines}`;
     });
     el.sumFull.addEventListener("click", async () => {
       if (running) {
-        setStatus("D\u1EEBng ghi tr\u01B0\u1EDBc khi t\u1EA1o b\xE1o c\xE1o t\u1ED5ng th\u1EC3.");
+        st("status.stopFirst");
         return;
       }
       const caps = finalized();
       if (!caps.length) {
-        setStatus("Ch\u01B0a c\xF3 n\u1ED9i dung.");
+        st("status.noContent");
         return;
       }
-      setStatus("\u0110ang t\u1EA1o b\xE1o c\xE1o t\u1ED5ng th\u1EC3\u2026");
+      st("status.makingFull");
       const r = await summarizer.summarizeFull(caps);
       if (r && r.ok) {
         summaryMd = r.markdown;
         renderSummary();
         el.summaryWrap.classList.remove("hidden");
-        setStatus("Xong b\xE1o c\xE1o t\u1ED5ng th\u1EC3.");
-      } else setStatus("B\xE1o c\xE1o l\u1ED7i: " + (r && r.error), "err");
+        st("status.fullDone");
+      } else st("status.fullErr", { err: r && r.error }, "err");
+    });
+    el.sumEdit.addEventListener("click", () => {
+      const show = el.sumEditBox.classList.contains("hidden");
+      el.sumEditBox.classList.toggle("hidden");
+      if (show) {
+        el.summaryExtra.value = S.summaryExtra || "";
+        el.summaryExtra.focus();
+      }
+    });
+    el.sumExtraSave.addEventListener("click", async () => {
+      save({ summaryExtra: el.summaryExtra.value.trim() });
+      el.sumEditBox.classList.add("hidden");
+      summaryMd = "";
+      sumPrevCount = 0;
+      sumLastTime = 0;
+      renderSummary();
+      if (!sumPanelOpen) openSummary();
+      else await summarizeTick();
+      st("status.summaryApplied");
     });
   }
   (async function init() {
     await loadSettings();
+    setLocale(S.uiLang || "vi");
     if (new URLSearchParams(location.search).get("popup") === "1") el.popoutBtn.style.display = "none";
     if (S.source !== "mic" && S.source !== "screen") save({ source: "screen" });
     el.apikey.value = S.apiKey;
-    el.summaryExtra.value = S.summaryExtra;
     el.source.value = S.source;
-    buildLangSelect();
     buildVoiceSelect();
     el.voice.disabled = S.transcribeMode;
+    buildTargetButton();
+    el.langBtn.innerHTML = `<span class="flag">${flag(S.uiLang)}</span>`;
+    applyI18n(document);
+    refreshStartBtn();
+    refreshCount();
+    renderSummary();
     initResizer();
     wire();
     if (S.apiKey) checkKey();
-    setStatus(S.apiKey ? "S\u1EB5n s\xE0ng. B\u1EA5m B\u1EAFt \u0111\u1EA7u." : "Nh\u1EADp API key (\u2699\uFE0F) r\u1ED3i b\u1EA5m B\u1EAFt \u0111\u1EA7u.");
+    st(S.apiKey ? "status.ready" : "status.readyNoKey");
   })();
 })();

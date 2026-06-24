@@ -1,13 +1,14 @@
-// app.js — controller cho side panel. Thu (mic/tab) → Gemini Live → list + TTS + tóm tắt.
+// app.js — controller cho side panel. Thu (mic/màn hình) → Gemini Live → list + TTS + tóm tắt.
 import { createLiveTranslator, validateKey } from './lib/gemini-live.js';
 import { createSummarizer } from './lib/gemini-text.js';
-import { LANG_ORDER, LANG_LABELS } from './lib/langs.js';
+import { LANG_LABELS } from './lib/langs.js';
 import { GEM_VOICES, DEFAULT_VOICE } from './lib/voices.js';
+import { I18N_LOCALES, flag, t, setLocale, currentLocale, applyI18n } from './lib/i18n.js';
 
 // ── State + lưu trữ ────────────────────────────────────────────────────────────
 const DEFAULTS = {
   apiKey: '', langCode: 'vi', transcribeMode: false, geminiVoice: DEFAULT_VOICE,
-  geminiAudioOn: true, source: 'mic', summaryExtra: '',
+  geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi',
 };
 const S = { ...DEFAULTS };
 async function loadSettings() { const got = await chrome.storage.local.get(DEFAULTS); Object.assign(S, got); }
@@ -16,14 +17,22 @@ function save(patch) { Object.assign(S, patch); chrome.storage.local.set(patch);
 // ── DOM ─────────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const el = {
-  settingsBtn: $('settings-btn'), popoutBtn: $('popout-btn'), settings: $('settings'), apikey: $('apikey'), keyStatus: $('key-status'),
-  summaryExtra: $('summary-extra'), source: $('source'), lang: $('lang'),
+  settingsBtn: $('settings-btn'), popoutBtn: $('popout-btn'), settings: $('settings'),
+  langBtn: $('lang-btn'), langMenu: $('lang-menu'),
+  apikey: $('apikey'), keyStatus: $('key-status'), source: $('source'),
+  targetBtn: $('target-btn'), targetMenu: $('target-menu'),
   voice: $('voice'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
   autoscroll: $('autoscroll'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
-  summaryWrap: $('summary-wrap'), summary: $('summary'), sumFull: $('sum-full'), sumCopy: $('sum-copy'), sumExport: $('sum-export'),
+  summaryWrap: $('summary-wrap'), summary: $('summary'),
+  sumEdit: $('sum-edit'), sumEditBox: $('sum-edit-box'), summaryExtra: $('summary-extra'), sumExtraSave: $('sum-extra-save'),
+  sumFull: $('sum-full'), sumCopy: $('sum-copy'), sumExport: $('sum-export'),
   vResizer: $('v-resizer'), dl: $('dl'),
 };
-function setStatus(msg, cls) { el.status.textContent = msg; el.status.className = 'status' + (cls ? ' ' + cls : ''); }
+const langName = c => (I18N_LOCALES.find(l => l.code === c) || {}).name || c;
+
+// Trạng thái có khoá i18n để đổi ngôn ngữ là render lại được.
+let _lastStatus = null;
+function st(key, vars, cls) { _lastStatus = { key, vars, cls }; el.status.textContent = t(key, vars); el.status.className = 'status' + (cls ? ' ' + cls : ''); }
 
 // ── Engines ──────────────────────────────────────────────────────────────────────
 const live = createLiveTranslator({
@@ -31,7 +40,7 @@ const live = createLiveTranslator({
   onCaption: addCaption,
   onAudio: playAudio,
   onClear: clearAudio,
-  onStatus: ({ error }) => { if (error === 'no-key') setStatus('Thiếu API key.', 'err'); else if (error) setStatus('Gemini: ' + error, 'err'); },
+  onStatus: ({ error }) => { if (error === 'no-key') st('status.noKeyShort', null, 'err'); else if (error) st('status.geminiErr', { err: error }, 'err'); },
 });
 const summarizer = createSummarizer({
   getState: () => ({ apiKey: S.apiKey, targetLangLabel: LANG_LABELS[S.langCode] || 'tiếng Việt', transcribeMode: S.transcribeMode, summaryExtra: S.summaryExtra }),
@@ -40,6 +49,7 @@ const summarizer = createSummarizer({
 // ── Caption list ─────────────────────────────────────────────────────────────────
 const captions = []; const byId = new Map(); const rowById = new Map();
 let autoScroll = true;
+function refreshCount() { el.count.textContent = t('count', { n: captions.length }); }
 function addCaption(c) {
   let e = byId.get(c.id);
   if (!e) { e = { id: c.id, author: c.author, translated: c.translated, original: c.original, ts: c.ts, tsMs: c.tsMs, partial: c.isPartial }; captions.push(e); byId.set(c.id, e); }
@@ -58,11 +68,11 @@ function upsertRow(e) {
   row.querySelector('.who').textContent = e.author || 'STT';
   row.querySelector('.ts').textContent = e.ts || '';
   row.querySelector('.entry-text').textContent = e.translated || e.original || '';
-  el.count.textContent = captions.length + ' câu';
+  refreshCount();
   if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
 }
 function clearList() {
-  captions.length = 0; byId.clear(); rowById.clear(); el.list.innerHTML = ''; el.count.textContent = '0 câu';
+  captions.length = 0; byId.clear(); rowById.clear(); el.list.innerHTML = ''; refreshCount();
   summaryMd = ''; sumPrevCount = 0; sumLastTime = 0; renderSummary();
 }
 
@@ -133,8 +143,7 @@ async function startCapture() {
   srcNode.connect(procNode); procNode.connect(zeroGain); zeroGain.connect(audioCtx.destination);
   lastTs = Date.now(); clearInterval(watchdog);
   watchdog = setInterval(() => { if (recActive && audioCtx && Date.now() - lastTs > 3000) audioCtx.resume().catch(() => {}); }, 2000);
-  // dừng khi user tự tắt chia sẻ/track
-  tracks[0].addEventListener('ended', () => { if (recActive) stop(); });
+  tracks[0].addEventListener('ended', () => { if (recActive) stop(); });   // user tự tắt chia sẻ → dừng
 }
 function stopCapture() {
   recActive = false; clearInterval(watchdog); watchdog = null;
@@ -148,28 +157,28 @@ function stopCapture() {
 
 // ── Start / Stop ──────────────────────────────────────────────────────────────────
 let running = false;
+function refreshStartBtn() { el.start.textContent = t(running ? 'btn.stop' : 'btn.start'); el.start.classList.toggle('on', running); }
 async function start() {
   if (running) return;
-  if (!S.apiKey || !S.apiKey.trim()) { setStatus('Nhập Gemini API key trước.', 'err'); el.settings.classList.remove('hidden'); return; }
+  if (!S.apiKey || !S.apiKey.trim()) { st('status.needKey', null, 'err'); el.settings.classList.remove('hidden'); return; }
   try {
     ensureGemCtx();                 // mở khoá AudioContext phát trong user-gesture
     live.start();
     await startCapture();
-    running = true;
-    el.start.textContent = '⏹ Dừng'; el.start.classList.add('on');
-    setStatus(S.source === 'mic' ? 'Đang nghe micro…' : 'Đang nghe âm thanh đã chọn…', 'run');
+    running = true; refreshStartBtn();
+    st(S.source === 'mic' ? 'status.listeningMic' : 'status.listeningAudio', null, 'run');
   } catch (e) {
     console.error(e); live.stop(); stopCapture();
-    if (e && e.name === 'NotAllowedError') setStatus('Đã huỷ chọn nguồn âm thanh.');
-    else setStatus('Lỗi thu âm: ' + (e.message || e.name || e), 'err');
+    if (e && e.name === 'NotAllowedError') st('status.canceled');
+    else st('status.captureErr', { err: e.message || e.name || e }, 'err');
   }
 }
 function stop() {
   if (!running) return;
   running = false;
   live.stop(); stopCapture(); clearAudio();
-  el.start.textContent = '▶ Bắt đầu'; el.start.classList.remove('on');
-  setStatus('Đã dừng.');
+  refreshStartBtn();
+  st('status.stopped');
 }
 
 // ── Tóm tắt ────────────────────────────────────────────────────────────────────────
@@ -187,8 +196,8 @@ async function summarizeTick() {
   try {
     const res = await summarizer.summarize({ prevSummary: summaryMd, captions: newCaps });
     if (res && res.ok) { summaryMd = res.markdown; renderSummary(); sumPrevCount = caps.length; sumLastTime = Date.now(); }
-    else if (res && res.error !== 'empty') setStatus('Tóm tắt: ' + res.error, 'err');
-  } catch (e) { setStatus('Tóm tắt lỗi: ' + e.message, 'err'); }
+    else if (res && res.error !== 'empty') st('status.summaryErr', { err: res.error }, 'err');
+  } catch (e) { st('status.summaryErr', { err: e.message }, 'err'); }
   finally { sumBusy = false; }
 }
 function openSummary() {
@@ -196,8 +205,8 @@ function openSummary() {
   if (!el.summaryWrap.style.height) el.summaryWrap.style.height = Math.round(window.innerHeight * 0.35) + 'px';
   summarizeTick(); clearInterval(sumTimer); sumTimer = setInterval(summarizeTick, SUM_POLL_MS);
 }
-function closeSummary() { sumPanelOpen = false; el.summaryWrap.classList.add('hidden'); el.vResizer.classList.add('hidden'); el.summaryToggle.classList.remove('active'); clearInterval(sumTimer); sumTimer = null; }
-function renderSummary() { el.summary.innerHTML = summaryMd ? md2html(summaryMd) : '<em class="muted">Chưa có tóm tắt.</em>'; }
+function closeSummary() { sumPanelOpen = false; el.summaryWrap.classList.add('hidden'); el.vResizer.classList.add('hidden'); el.summaryToggle.classList.remove('active'); el.sumEditBox.classList.add('hidden'); clearInterval(sumTimer); sumTimer = null; }
+function renderSummary() { el.summary.innerHTML = summaryMd ? md2html(summaryMd) : `<em class="muted">${t('summary.empty')}</em>`; }
 
 // Markdown → HTML gọn (heading, list, bảng GFM, bold/italic/code, hr).
 function md2html(md) {
@@ -230,29 +239,68 @@ function download(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 function exportTranscript() {
-  if (!captions.length) { setStatus('Chưa có nội dung để xuất.'); return; }
+  if (!captions.length) { st('status.noContent'); return; }
   const lines = captions.map(c => {
     const head = `[${c.ts || ''}] ${c.author || 'STT'}:`;
     if (c.original && c.original.trim()) return `${head}\n  • ${c.original}\n  → ${c.translated || ''}`;
     return `${head} ${c.translated || ''}`;
   });
-  const d = new Date().toISOString().slice(0, 10);
-  download(`transcript-${d}.txt`, lines.join('\n'));
+  download(`transcript-${new Date().toISOString().slice(0, 10)}.txt`, lines.join('\n'));
 }
 
-// ── UI build + wiring ──────────────────────────────────────────────────────────────
-function buildLangSelect() {
-  el.lang.innerHTML = '';
-  for (const L of LANG_ORDER) { const o = document.createElement('option'); o.value = L.code; o.textContent = `${L.flag} ${L.name}`; el.lang.appendChild(o); }
-  const t = document.createElement('option'); t.value = '__transcribe__'; t.textContent = '📝 Chép lời'; el.lang.appendChild(t);
-  el.lang.value = S.transcribeMode ? '__transcribe__' : S.langCode;
-}
+// ── UI build (cờ + dropdown ngôn ngữ + giọng) ───────────────────────────────────────
 function buildVoiceSelect() {
   el.voice.innerHTML = '';
-  const off = document.createElement('option'); off.value = '__off__'; off.textContent = '🔇 Tắt đọc'; el.voice.appendChild(off);
+  const off = document.createElement('option'); off.value = '__off__'; off.textContent = t('voice.off'); el.voice.appendChild(off);
   for (const v of GEM_VOICES) { const o = document.createElement('option'); o.value = v; o.textContent = '🔊 ' + v; el.voice.appendChild(o); }
   el.voice.value = S.geminiAudioOn ? S.geminiVoice : '__off__';
 }
+function buildTargetButton() {
+  el.targetBtn.innerHTML = S.transcribeMode
+    ? `<span>${t('lang.transcribe')}</span>`
+    : `<span class="flag">${flag(S.langCode)}</span><span>${langName(S.langCode)}</span>`;
+}
+function buildLangMenu() {
+  el.langMenu.innerHTML = '';
+  for (const L of I18N_LOCALES) {
+    const b = document.createElement('button'); b.type = 'button';
+    b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
+    if (L.code === currentLocale()) b.classList.add('sel');
+    b.addEventListener('click', () => { applyLocale(L.code); closeMenus(); });
+    el.langMenu.appendChild(b);
+  }
+}
+function buildTargetMenu() {
+  el.targetMenu.innerHTML = '';
+  for (const L of I18N_LOCALES) {
+    const b = document.createElement('button'); b.type = 'button';
+    b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
+    if (!S.transcribeMode && S.langCode === L.code) b.classList.add('sel');
+    b.addEventListener('click', () => { pickTarget(L.code, false); closeMenus(); });
+    el.targetMenu.appendChild(b);
+  }
+  const tb = document.createElement('button'); tb.type = 'button';
+  tb.innerHTML = `<span>${t('lang.transcribe')}</span>`;
+  if (S.transcribeMode) tb.classList.add('sel');
+  tb.addEventListener('click', () => { pickTarget(null, true); closeMenus(); });
+  el.targetMenu.appendChild(tb);
+}
+function pickTarget(code, transcribe) {
+  if (transcribe) { save({ transcribeMode: true }); live.onTranscribeModeChanged(); }
+  else { const wasT = S.transcribeMode; save({ langCode: code, transcribeMode: false }); wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged(); }
+  el.voice.disabled = S.transcribeMode;
+  buildTargetButton();
+}
+function closeMenus() { el.langMenu.classList.add('hidden'); el.targetMenu.classList.add('hidden'); }
+
+function applyLocale(code) {
+  setLocale(code); save({ uiLang: code });
+  applyI18n(document);
+  buildVoiceSelect(); buildTargetButton(); refreshStartBtn(); refreshCount(); renderSummary();
+  el.langBtn.innerHTML = `<span class="flag">${flag(code)}</span>`;
+  if (_lastStatus) st(_lastStatus.key, _lastStatus.vars, _lastStatus.cls);
+}
+
 // Kéo chỉnh chiều cao panel tóm tắt (resizer giữa list dịch và tóm tắt).
 function initResizer() {
   let startY = 0, startH = 0, dragging = false;
@@ -275,28 +323,29 @@ let keyTimer = null;
 async function checkKey() {
   const k = el.apikey.value.trim();
   if (!k) { el.keyStatus.textContent = ''; el.keyStatus.className = 'key-status'; return; }
-  el.keyStatus.textContent = 'Đang kiểm tra…'; el.keyStatus.className = 'key-status';
+  el.keyStatus.textContent = t('status.checking'); el.keyStatus.className = 'key-status';
   const r = await validateKey(k);
-  if (r.ok) { el.keyStatus.textContent = '✓ Key hợp lệ'; el.keyStatus.className = 'key-status ok'; }
-  else { el.keyStatus.textContent = r.error === 'invalid' ? '✕ Key không hợp lệ' : '✕ ' + r.error; el.keyStatus.className = 'key-status err'; }
+  if (r.ok) { el.keyStatus.textContent = t('status.keyOk'); el.keyStatus.className = 'key-status ok'; }
+  else { el.keyStatus.textContent = r.error === 'invalid' ? t('status.keyBad') : '✕ ' + r.error; el.keyStatus.className = 'key-status err'; }
 }
 
 function wire() {
   el.settingsBtn.addEventListener('click', () => el.settings.classList.toggle('hidden'));
-  el.popoutBtn.addEventListener('click', () => {                 // mở UI trong cửa sổ popup RỜI (không dính tab web)
+  el.popoutBtn.addEventListener('click', async () => {           // mở UI trong cửa sổ popup RỜI rồi ĐÓNG side panel hiện tại
     const page = (location.pathname.split('/').pop() || 'sidepanel.html');
-    try { chrome.windows.create({ url: chrome.runtime.getURL(page + '?popup=1'), type: 'popup', width: 460, height: 820, focused: true }); }
-    catch (e) { setStatus('Không mở được cửa sổ riêng: ' + (e && e.message), 'err'); }
+    try {
+      if (running) stop();                                       // nhả mic/loa trước khi đóng (cửa sổ rời tự chạy lại khi bấm ▶)
+      await chrome.windows.create({ url: chrome.runtime.getURL(page + '?popup=1'), type: 'popup', width: 460, height: 820, focused: true });
+      window.close();                                            // đóng Side Panel đang mở trong trình duyệt
+    } catch (e) { st('status.popoutErr', { err: e && e.message }, 'err'); }
   });
+  // Dropdown ngôn ngữ giao diện (cờ) + ngôn ngữ đích (cờ)
+  el.langBtn.addEventListener('click', (e) => { e.stopPropagation(); const show = el.langMenu.classList.contains('hidden'); closeMenus(); if (show) { buildLangMenu(); el.langMenu.classList.remove('hidden'); } });
+  el.targetBtn.addEventListener('click', (e) => { e.stopPropagation(); const show = el.targetMenu.classList.contains('hidden'); closeMenus(); if (show) { buildTargetMenu(); el.targetMenu.classList.remove('hidden'); } });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.dd')) closeMenus(); });
+
   el.apikey.addEventListener('input', () => { save({ apiKey: el.apikey.value.trim() }); clearTimeout(keyTimer); keyTimer = setTimeout(checkKey, 600); });
-  el.summaryExtra.addEventListener('input', () => save({ summaryExtra: el.summaryExtra.value }));
   el.source.addEventListener('change', () => save({ source: el.source.value }));
-  el.lang.addEventListener('change', () => {
-    const v = el.lang.value;
-    if (v === '__transcribe__') { save({ transcribeMode: true }); live.onTranscribeModeChanged(); }
-    else { const wasT = S.transcribeMode; save({ langCode: v, transcribeMode: false }); wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged(); }
-    el.voice.disabled = S.transcribeMode;
-  });
   el.voice.addEventListener('change', () => {
     const v = el.voice.value;
     if (v === '__off__') { save({ geminiAudioOn: false }); live.setAudioOn(false); }
@@ -308,27 +357,44 @@ function wire() {
   el.autoscroll.addEventListener('click', () => { autoScroll = !autoScroll; el.autoscroll.classList.toggle('active', autoScroll); if (autoScroll) el.list.scrollTop = el.list.scrollHeight; });
   el.list.addEventListener('scroll', () => { const near = el.list.scrollHeight - el.list.scrollTop - el.list.clientHeight < 40; autoScroll = near; el.autoscroll.classList.toggle('active', near); });
   el.summaryToggle.addEventListener('click', () => sumPanelOpen ? closeSummary() : openSummary());
-  el.sumCopy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(summaryMd || ''); setStatus('Đã copy tóm tắt.'); } catch (e) {} });
+  el.sumCopy.addEventListener('click', async () => { try { await navigator.clipboard.writeText(summaryMd || ''); st('status.copied'); } catch (e) {} });
   el.sumExport.addEventListener('click', () => { if (summaryMd) download(`summary-${new Date().toISOString().slice(0, 10)}.md`, summaryMd, 'text/markdown'); });
   el.sumFull.addEventListener('click', async () => {
-    if (running) { setStatus('Dừng ghi trước khi tạo báo cáo tổng thể.'); return; }
-    const caps = finalized(); if (!caps.length) { setStatus('Chưa có nội dung.'); return; }
-    setStatus('Đang tạo báo cáo tổng thể…');
+    if (running) { st('status.stopFirst'); return; }
+    const caps = finalized(); if (!caps.length) { st('status.noContent'); return; }
+    st('status.makingFull');
     const r = await summarizer.summarizeFull(caps);
-    if (r && r.ok) { summaryMd = r.markdown; renderSummary(); el.summaryWrap.classList.remove('hidden'); setStatus('Xong báo cáo tổng thể.'); }
-    else setStatus('Báo cáo lỗi: ' + (r && r.error), 'err');
+    if (r && r.ok) { summaryMd = r.markdown; renderSummary(); el.summaryWrap.classList.remove('hidden'); st('status.fullDone'); }
+    else st('status.fullErr', { err: r && r.error }, 'err');
+  });
+  // Bút chì: mở/đóng ô nhập yêu cầu tóm tắt
+  el.sumEdit.addEventListener('click', () => {
+    const show = el.sumEditBox.classList.contains('hidden');
+    el.sumEditBox.classList.toggle('hidden');
+    if (show) { el.summaryExtra.value = S.summaryExtra || ''; el.summaryExtra.focus(); }
+  });
+  // Lưu yêu cầu → áp dụng + tóm tắt lại NGAY (rỗng = về ngôn ngữ đích / ngôn ngữ chép lời)
+  el.sumExtraSave.addEventListener('click', async () => {
+    save({ summaryExtra: el.summaryExtra.value.trim() });
+    el.sumEditBox.classList.add('hidden');
+    summaryMd = ''; sumPrevCount = 0; sumLastTime = 0; renderSummary();
+    if (!sumPanelOpen) openSummary(); else await summarizeTick();
+    st('status.summaryApplied');
   });
 }
 
 // ── Init ────────────────────────────────────────────────────────────────────────
 (async function init() {
   await loadSettings();
+  setLocale(S.uiLang || 'vi');
   if (new URLSearchParams(location.search).get('popup') === '1') el.popoutBtn.style.display = 'none';   // đã là cửa sổ rời → ẩn nút tách
   if (S.source !== 'mic' && S.source !== 'screen') save({ source: 'screen' });   // migrate giá trị cũ ('tab')
-  el.apikey.value = S.apiKey; el.summaryExtra.value = S.summaryExtra;
-  el.source.value = S.source;
-  buildLangSelect(); buildVoiceSelect(); el.voice.disabled = S.transcribeMode;
+  el.apikey.value = S.apiKey; el.source.value = S.source;
+  buildVoiceSelect(); el.voice.disabled = S.transcribeMode;
+  buildTargetButton();
+  el.langBtn.innerHTML = `<span class="flag">${flag(S.uiLang)}</span>`;
+  applyI18n(document); refreshStartBtn(); refreshCount(); renderSummary();
   initResizer(); wire();
   if (S.apiKey) checkKey();
-  setStatus(S.apiKey ? 'Sẵn sàng. Bấm Bắt đầu.' : 'Nhập API key (⚙️) rồi bấm Bắt đầu.');
+  st(S.apiKey ? 'status.ready' : 'status.readyNoKey');
 })();
