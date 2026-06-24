@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+        content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:">
   <title>Caption Translator</title>
   <style>
     /* ============================================================
@@ -1123,6 +1123,30 @@
     .app-menu .menu-item:hover:not(:disabled) { background: var(--m3-hover) !important; color: var(--m3-on) !important; }
     .app-menu .menu-item:disabled { opacity: .4; cursor: default; }
     .app-menu .menu-item > span:first-child { width: 18px; text-align: center; }
+    /* App picker: nút "select" thu gọn + panel danh sách mở khi bấm (icon + tên app) */
+    .app-sel { display:flex; align-items:center; gap:7px; width:100%; padding:7px 10px; border:1px solid var(--m3-line-2); border-radius:8px; background:var(--m3-surf-3); color:var(--m3-on); font-size:12px; font-weight:600; cursor:pointer; }
+    .app-sel:hover { background:var(--m3-surf-4); }
+    .app-sel-cur { flex:1; min-width:0; display:flex; align-items:center; gap:7px; overflow:hidden; }
+    .app-sel-cur .app-nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .app-sel-chev { flex-shrink:0; color:var(--m3-on-3); font-size:10px; transition:transform var(--m3-t); }
+    .app-sel[aria-expanded="true"] .app-sel-chev { transform:rotate(180deg); }
+    /* Danh sách MỞ ĐÈ (floating) như dropdown select → KHÔNG giãn chiều cao panel setting */
+    .app-sel-wrap { position:relative; }
+    .app-list { position:absolute; top:calc(100% + 3px); left:0; right:0; z-index:70;
+      display:flex; flex-direction:column; gap:1px; max-height:240px; overflow-y:auto; padding:3px;
+      border:1px solid var(--m3-line); border-radius:8px; background:var(--m3-surf-2); box-shadow:var(--m3-pop); }
+    .app-btn { display:flex; align-items:center; gap:7px; width:100%; text-align:left; padding:5px 7px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--m3-on-2); font-size:11.5px; font-weight:600; cursor:pointer; }
+    .app-btn:hover { background:var(--m3-hover); color:var(--m3-on); }
+    .app-btn.active { background:var(--m3-accent-ctr); color:var(--m3-accent-on); box-shadow:0 0 0 1px var(--m3-accent); }
+    .app-ico { width:16px; height:16px; flex-shrink:0; border-radius:3px; object-fit:contain; }
+    .app-ico.fb { display:inline-flex; align-items:center; justify-content:center; font-size:12px; }
+    .app-txt { flex:1; min-width:0; display:flex; flex-direction:column; line-height:1.25; }
+    .app-nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .app-sub { color:var(--m3-on-4); font-weight:500; font-size:9.5px; white-space:normal; }
+    .app-btn.active .app-sub { color:var(--m3-accent-on); opacity:.85; }
+    /* Ghi chú nhỏ dưới ô chọn Nguồn (khuyến nghị theo mode) */
+    .app-menu .menu-row > span.menu-note { font-size:10.5px; font-weight:500; color:var(--m3-on-4); letter-spacing:0; line-height:1.5; }
+    .app-menu .menu-row > span.menu-note:empty { display:none; }
     /* Option "📝 Chép lời" trong popup đích: chip bình thường, cùng hàng với các cờ (như 中文) */
 
     /* ── Status bar: play (▶/⏹) bên trái; ⋮ menu đẩy sang phải cùng hàng; dot CHỈ hiện làm spinner khi đang load ── */
@@ -1267,14 +1291,21 @@
           <option value="system" data-i18n="capture.system">🔊 Audio hệ thống</option>
           <option value="mic" data-i18n="capture.mic">🎤 Microphone</option>
         </select>
+        <span class="menu-note" id="capture-note"></span>
       </div>
       <div class="menu-row" id="s-mic-row" style="display:none">
         <span data-i18n="settings.chooseMic">Chọn Microphone</span>
         <select id="s-mic-device"></select>
       </div>
       <div class="menu-row" id="s-process-row" style="display:none">
-        <span data-i18n="settings.audioProcess">Thu từ tiến trình</span>
-        <select id="s-process"><option value="" data-i18n="process.wholeSystem">Toàn hệ thống</option></select>
+        <span data-i18n="settings.audioProcess">Thu từ ứng dụng</span>
+        <div class="app-sel-wrap">
+          <button type="button" id="s-app-sel" class="app-sel" aria-haspopup="listbox" aria-expanded="false">
+            <span class="app-sel-cur"><span class="app-ico fb">🔊</span><span class="app-nm" data-i18n="process.wholeSystem">Toàn hệ thống</span></span>
+            <span class="app-sel-chev">▾</span>
+          </button>
+          <div id="s-app-list" class="app-list" style="display:none"></div>
+        </div>
       </div>
       <div class="menu-sep"></div>
 
@@ -1386,6 +1417,7 @@
       try { renderEmpty(); } catch (e) {}
       try { refreshTtsBtn(); } catch (e) {}
       try { setTgtDisplay(); } catch (e) {}   // giữ nút đích (cờ/📝) + tooltip đúng sau khi đổi ngôn ngữ UI
+      try { _renderApikeyStatus(); } catch (e) {}   // re-dịch trạng thái validate key (✓ Key hợp lệ…) theo ngôn ngữ mới
     }
     let _themePref = 'auto';
     const _mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -1480,8 +1512,8 @@
       try { setFlagActive(lqSrcPop, _srcLang); } catch (e) {}
       if (!s.srcLang) api.saveSettings({ srcLang: _srcLang });
       _currentSource = s.captureSource || 'system';
-      _audioProcessPid = s.audioProcessPid || '';
-      _audioProcessTitle = s.audioProcessTitle || '';
+      _audioProcessName = s.audioProcessName || '';
+      _audioProcessApp = s.audioProcessApp || '';
       try { renderEmpty(); } catch (e) {}
       _currentProvider = 'gemini-live';   // engine duy nhất giờ là Gemini Live Translate
       try {
@@ -1489,7 +1521,7 @@
         if (apk) { apk.value = s.apiKey || ''; if (apk.value) _validateApiKey(apk.value); }
         if (sCapture)  { sCapture.value = _currentSource; applyCaptureUI(_currentSource); }
         if (_currentSource === 'mic') loadMicDevices(s.micDeviceId || '');
-        if (_currentSource === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle);
+        if (_currentSource === 'system') loadAudioProcesses(_audioProcessName, _audioProcessApp);
         refreshTtsBtn();
         const _spi = document.getElementById('sp-prompt-input');
         if (_spi) _spi.value = s.summaryExtra || '';
@@ -1676,7 +1708,8 @@
     const sMicRow       = document.getElementById('s-mic-row');
     const sMicDevice    = document.getElementById('s-mic-device');
     const sProcessRow   = document.getElementById('s-process-row');
-    const sProcess      = document.getElementById('s-process');
+    const sProcess      = document.getElementById('s-app-list');
+    const sAppSel       = document.getElementById('s-app-sel');
     const providerRadio = document.getElementById('provider-radio');
 
     // Nguồn = mic → hiện ô chọn microphone. Ngôn ngữ nguồn (lq-src cạnh ▶):
@@ -1696,6 +1729,9 @@
         if (teams) { const p = document.getElementById('lq-src-pop'); if (p) p.classList.remove('open'); }
       }
       try { refreshTtsBtn(); } catch (e) {}   // đổi nguồn → cập nhật hiện/ẩn nút loa (en→vi)
+      // Ghi chú theo nguồn (đặt data-i18n động → applyI18n tự dịch lại khi đổi ngôn ngữ UI).
+      const noteEl = document.getElementById('capture-note');
+      if (noteEl) { const k = source === 'teams' ? 'note.teams' : (source === 'mic' ? 'note.mic' : 'note.system'); noteEl.setAttribute('data-i18n', k); noteEl.textContent = t(k); }
     }
 
     // provider radio (Online / Offline) → lưu ngay. Đồng bộ class .active (fallback nếu :has() không hỗ trợ).
@@ -1721,20 +1757,30 @@
       if (e.target && e.target.value) api.saveSettings({ provider: e.target.value });
     });
     // Gemini API key → lưu (debounce gõ) + VALIDATE khi rời ô (on-blur).
-    async function _validateApiKey(key) {
+    // Lưu trạng thái validate key (không phải text đã dịch) → re-render được khi đổi ngôn ngữ UI (applyI18n gọi lại).
+    let _apikeyState = null;   // null | 'checking' | 'valid' | { error }
+    function _renderApikeyStatus() {
       const st = document.getElementById('s-apikey-status'); if (!st) return;
+      if (_apikeyState === 'checking') { st.textContent = t('apikey.checking'); st.className = ''; }
+      else if (_apikeyState === 'valid') { st.textContent = t('apikey.valid'); st.className = 'ok'; }
+      else if (_apikeyState && _apikeyState.error !== undefined) {
+        const e = _apikeyState.error;
+        st.textContent = t('apikey.invalid') + (e && e !== 'invalid' ? ' (' + e + ')' : ''); st.className = 'bad';
+      } else { st.textContent = ''; st.className = ''; }
+    }
+    async function _validateApiKey(key) {
       const k = (key || '').trim();
-      if (!k) { st.textContent = ''; st.className = ''; return; }
-      st.textContent = t('apikey.checking'); st.className = '';
+      if (!k) { _apikeyState = null; _renderApikeyStatus(); return; }
+      _apikeyState = 'checking'; _renderApikeyStatus();
       let r = null; try { r = await api.validateGeminiKey(k); } catch (e) { r = { ok: false, error: e.message }; }
-      if (r && r.ok) { st.textContent = t('apikey.valid'); st.className = 'ok'; }
-      else { st.textContent = t('apikey.invalid') + (r && r.error && r.error !== 'invalid' ? ' (' + r.error + ')' : ''); st.className = 'bad'; }
+      _apikeyState = (r && r.ok) ? 'valid' : { error: r && r.error };
+      _renderApikeyStatus();
     }
     (function () {
       const apk = document.getElementById('s-apikey');
       if (!apk) return;
       let _t = null;
-      apk.addEventListener('input', () => { clearTimeout(_t); _t = setTimeout(() => api.saveSettings({ apiKey: apk.value.trim() }), 500); const st = document.getElementById('s-apikey-status'); if (st) { st.textContent = ''; st.className = ''; } });
+      apk.addEventListener('input', () => { clearTimeout(_t); _t = setTimeout(() => api.saveSettings({ apiKey: apk.value.trim() }), 500); _apikeyState = null; _renderApikeyStatus(); });
       apk.addEventListener('blur',  () => { clearTimeout(_t); const k = apk.value.trim(); api.saveSettings({ apiKey: k }); _validateApiKey(k); });
     })();
 
@@ -1753,9 +1799,12 @@
     }
 
     sCapture.addEventListener('change', () => {
+      _currentSource = sCapture.value;
       applyCaptureUI(sCapture.value);
       if (sCapture.value === 'mic') loadMicDevices(sMicDevice.value);
-      if (sCapture.value === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle);
+      if (sCapture.value === 'system') loadAudioProcesses(_audioProcessName, _audioProcessApp);
+      // Đổi nguồn → bỏ hint banner Teams/empty cũ còn sót, hiện empty đúng nguồn mới (không xoá nếu đã có caption).
+      try { if (listEl.querySelector('.entry')) listEl.querySelector('.hint-banner')?.remove(); else renderEmpty(true); } catch (e) {}
       api.saveSettings({ captureSource: sCapture.value, micDeviceId: sMicDevice.value });
     });
 
@@ -1763,31 +1812,71 @@
       api.saveSettings({ micDeviceId: sMicDevice.value });
     });
 
-    // ── Thu theo TIẾN TRÌNH (Audio hệ thống): "Toàn hệ thống" + danh sách tiến trình có cửa sổ ──
-    // Chọn 1 tiến trình → main thu chỉ tiến trình đó (Process Loopback) → KHÔNG thu tiếng TTS của app → hết feedback.
-    let _audioProcessPid = '', _audioProcessTitle = '';
-    async function loadAudioProcesses(curPid, curTitle) {
-      if (!sProcess) return;
-      let procs = [];
-      try { procs = await api.listAudioProcesses() || []; } catch (e) {}
-      // Giữ "Toàn hệ thống" + lựa chọn đã lưu (kể cả khi tiến trình đó không còn trong danh sách cửa sổ hiện tại).
-      const opts = [`<option value="">${esc(t('process.wholeSystem'))}</option>`];
-      const has = procs.some(p => p.pid === curPid);
-      if (curPid && !has) opts.push(`<option value="${esc(curPid)}">${esc(curTitle || ('PID ' + curPid))} ${esc(t('process.savedSuffix'))}</option>`);
-      for (const p of procs) opts.push(`<option value="${esc(p.pid)}">${esc(p.title)} — ${esc(p.pid)}</option>`);
-      sProcess.innerHTML = opts.join('');
-      sProcess.value = curPid || '';
+    // ── Thu theo ỨNG DỤNG (Audio hệ thống): "Toàn hệ thống" + danh sách APP có cửa sổ ──
+    // Chọn 1 APP → main thu CẢ CÂY tiến trình của app đó (mọi cửa sổ/tab/meeting con) → KHÔNG thu TTS của
+    // chính app dịch → hết feedback. Khoá lưu = TÊN exe (ổn định qua khởi động lại); PID resolve lúc bấm ▶.
+    let _audioProcessName = '', _audioProcessApp = '';
+    // 1 dòng app trong picker: icon + tên app (+ ghi chú phụ). data-app = TÊN SẠCH (không kèm hậu tố).
+    function _appBtn(name, label, iconHtml, active, sub) {
+      return '<button type="button" class="app-btn' + (active ? ' active' : '') + '" data-name="' + esc(name) + '" data-app="' + esc(label) + '">'
+        + iconHtml + '<span class="app-txt"><span class="app-nm">' + esc(label) + '</span>'
+        + (sub ? '<span class="app-sub">' + esc(sub) + '</span>' : '') + '</span></button>';
     }
-    if (sProcess) sProcess.addEventListener('change', () => {
-      _audioProcessPid = sProcess.value || '';
-      const sel = sProcess.options[sProcess.selectedIndex];
-      _audioProcessTitle = (_audioProcessPid && sel) ? sel.textContent.replace(/\s+—\s+\d+$/, '') : '';
-      api.saveSettings({ audioProcessPid: _audioProcessPid, audioProcessTitle: _audioProcessTitle });
+    // Cập nhật nút "select" thu gọn (icon + tên app đang chọn).
+    function _setAppSel(label, iconHtml) {
+      if (!sAppSel) return;
+      const cur = sAppSel.querySelector('.app-sel-cur');
+      if (cur) cur.innerHTML = iconHtml + '<span class="app-nm">' + esc(label) + '</span>';
+    }
+    function _closeAppList() { if (sProcess) sProcess.style.display = 'none'; if (sAppSel) sAppSel.setAttribute('aria-expanded', 'false'); }
+    async function loadAudioProcesses(curName, curApp) {
+      if (!sProcess) return;
+      let apps = [];
+      try { apps = await api.listAudioProcesses() || []; } catch (e) {}
+      const has = apps.some(a => a.name === curName);
+      // "Toàn hệ thống" (kèm cảnh báo gồm tiếng TTS) + app đã chọn (kể cả khi hiện không có cửa sổ) + danh sách app.
+      let h = _appBtn('', t('process.wholeSystem'), '<span class="app-ico fb">🔊</span>', !curName, t('process.wholeSystemHint'));
+      if (curName && !has) h += _appBtn(curName, curApp || curName, '<span class="app-ico fb">▣</span>', true, t('process.savedSuffix'));
+      for (const a of apps) {
+        const ico = a.icon ? '<img class="app-ico" src="' + esc(a.icon) + '" alt="">' : '<span class="app-ico fb">▣</span>';
+        h += _appBtn(a.name, a.app, ico, a.name === curName, '');
+      }
+      sProcess.innerHTML = h;
+      // Đồng bộ nút select thu gọn theo lựa chọn hiện tại.
+      let cLabel = t('process.wholeSystem'), cIco = '<span class="app-ico fb">🔊</span>';
+      if (curName) {
+        const a = apps.find(x => x.name === curName);
+        if (a) { cLabel = a.app; cIco = a.icon ? ('<img class="app-ico" src="' + esc(a.icon) + '" alt="">') : '<span class="app-ico fb">▣</span>'; }
+        else { cLabel = curApp || curName; cIco = '<span class="app-ico fb">▣</span>'; }
+      }
+      _setAppSel(cLabel, cIco);
+    }
+    if (sProcess) sProcess.addEventListener('click', (e) => {
+      const b = e.target.closest('.app-btn'); if (!b || !sProcess.contains(b)) return;
+      _audioProcessName = b.dataset.name || '';
+      _audioProcessApp = _audioProcessName ? (b.dataset.app || '') : '';
+      sProcess.querySelectorAll('.app-btn').forEach(x => x.classList.toggle('active', x === b));
+      const ic = b.querySelector('.app-ico');
+      _setAppSel(b.dataset.app || t('process.wholeSystem'), ic ? ic.outerHTML : '<span class="app-ico fb">🔊</span>');
+      _closeAppList();   // chọn xong → thu gọn lại như select
+      api.saveSettings({ audioProcessName: _audioProcessName, audioProcessApp: _audioProcessApp });
     });
-    // Mở menu ⋮ khi đang ở System → refresh danh sách tiến trình (app mới mở/đóng từ lần trước).
+    // Nút select → mở/đóng danh sách (mở thì refresh app đang chạy).
+    if (sAppSel) sAppSel.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = sProcess.style.display === 'none';
+      sProcess.style.display = open ? '' : 'none';
+      sAppSel.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) loadAudioProcesses(_audioProcessName, _audioProcessApp);
+    });
+    // Bấm ra ngoài → đóng danh sách (như select).
+    document.addEventListener('click', (e) => {
+      if (sProcess && sProcess.style.display !== 'none' && sAppSel && !sAppSel.contains(e.target) && !sProcess.contains(e.target)) _closeAppList();
+    });
+    // Mở menu ⋮ khi đang ở System → refresh danh sách app (app mới mở/đóng từ lần trước) + thu gọn danh sách.
     if (sProcess) {
       const _mb = document.getElementById('menu-btn');
-      _mb && _mb.addEventListener('click', () => { if (sCapture && sCapture.value === 'system') loadAudioProcesses(_audioProcessPid, _audioProcessTitle); });
+      _mb && _mb.addEventListener('click', () => { _closeAppList(); if (sCapture && sCapture.value === 'system') loadAudioProcesses(_audioProcessName, _audioProcessApp); });
     }
 
     // ── Header: đổi ngôn ngữ giao diện (🌐) + chế độ sáng/tối (🌙/☀️) — áp dụng + lưu NGAY (toggle trực tiếp) ──
@@ -1854,7 +1943,7 @@
     buildFlagRow(lqTgtPop, LANG_FLAG_ORDER, (code) => {
       lqTgtPop.classList.remove('open');
       if (code === '__transcribe__') {
-        if (!_transcribeMode) { _transcribeMode = true; api.saveSettings({ transcribeMode: true }); }
+        _transcribeMode = true; api.saveSettings({ transcribeMode: true });   // LUÔN lưu để re-sync main (kể cả khi UI đã hiển thị chép lời) → tránh desync dịch+TTS
         setTgtDisplay(); refreshTtsBtn();
         return;
       }
@@ -2425,7 +2514,7 @@
     async function summarizeTick() {
       if (!_sumPanelOpen || _sumBusy || _sumStopped) return;
       const caps = [...captionData.values()];
-      if (!caps.length) { spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT() + '</div>'; return; }
+      if (!caps.length) { spBody.innerHTML = '<div class="sp-placeholder" data-i18n="summary.autoHint">' + SP_HINT() + '</div>'; return; }
       if (caps.length < _sumPrevCount) _sumPrevCount = 0;   // đã bấm Xóa → coi như mới
       const newCount = caps.length - _sumPrevCount;
       // tóm tắt khi: đủ ≥SUM_MIN_NEW câu dịch mới (~2 phút), HOẶC lần đầu mở mà đã có nội dung.
@@ -2446,7 +2535,7 @@
           _sumStopped = true; clearInterval(_sumTimer); _sumTimer = null;
           spBody.innerHTML = '<div class="sp-error">' + t('summary.needKey') + '</div>';
         } else if (res && (res.error === 'empty' || res.error === 'empty-response')) {
-          spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT() + '</div>';
+          spBody.innerHTML = '<div class="sp-placeholder" data-i18n="summary.autoHint">' + SP_HINT() + '</div>';
         }
         // lỗi tạm khác (429/mạng) → tự thử lại vòng sau; KHÔNG ghi đè foot để giữ "Tóm tắt lúc …" gần nhất
         return;
@@ -2468,7 +2557,15 @@
       spPromptEditor.style.display = open ? '' : 'none';
       if (open && spPromptInput) spPromptInput.focus();
     });
-    const _spPromptSaveVal = (v) => { api.saveSettings({ summaryExtra: v }); if (spPromptBtn) spPromptBtn.classList.toggle('active', !!v); spPromptEditor.style.display = 'none'; };
+    const _spPromptSaveVal = (v) => {
+      api.saveSettings({ summaryExtra: v });   // lưu prompt riêng (main đọc state.summaryExtra ở vòng kế)
+      if (spPromptBtn) spPromptBtn.classList.toggle('active', !!v);
+      spPromptEditor.style.display = 'none';
+      // Áp NGAY: gọi tóm tắt lại nội dung hiện có theo prompt mới/mặc định (KHÔNG wipe — giữ bản cũ tới khi có kết quả).
+      // Các vòng rolling sau vẫn theo prompt hiện hành. _sumLastTime=0 để bỏ ngưỡng "đủ câu mới" → chạy ngay vòng này.
+      _sumStopped = false; _sumLastTime = 0;
+      setTimeout(() => { try { summarizeTick(); } catch (e) {} }, 0);   // sau khi save-settings tới main
+    };
     document.getElementById('sp-prompt-save')?.addEventListener('click', () => _spPromptSaveVal((spPromptInput.value || '').trim()));
     document.getElementById('sp-prompt-reset')?.addEventListener('click', () => { spPromptInput.value = ''; _spPromptSaveVal(''); });
 
@@ -2518,7 +2615,7 @@
     if (spCopyBtn) spCopyBtn.addEventListener('click', () => { if (_spMarkdown) api.copyToClipboard(_spMarkdown); });
     if (spClearBtn) spClearBtn.addEventListener('click', () => {
       _spMarkdown = ''; _spSetExportable(false); _sumPrevCount = 0; _sumLastTime = 0; _sumStopped = false;
-      spBody.innerHTML = '<div class="sp-placeholder">' + SP_HINT() + '</div>'; spFoot.textContent = '';
+      spBody.innerHTML = '<div class="sp-placeholder" data-i18n="summary.autoHint">' + SP_HINT() + '</div>'; spFoot.textContent = '';
     });
 
     sumGenerateBtn.addEventListener('click', async () => {

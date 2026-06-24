@@ -31,7 +31,10 @@ function _sys() {
   return `You are a translation engine. Translate the user's message into ${tgt} and SPEAK the translation aloud. `
     + `ALWAYS translate into ${tgt} ONLY — never any other language — regardless of conversation history. `
     + `Treat each message as an INDEPENDENT sentence. Speak ONLY the translation: no preface, no commentary, no `
-    + `original text. Preserve proper nouns, numbers, technical terms.`;
+    + `original text. Preserve proper nouns, numbers, technical terms. `
+    + `For Japanese input: keep technical terms, product/tool names and English loanwords written in KATAKANA in `
+    + `their original English (Latin) spelling instead of translating or transliterating them into ${tgt} `
+    + `(e.g. デプロイ→deploy, スケジュール→schedule, アジェンダ→agenda), so specialized terminology stays clear.`;
 }
 function _clean(s) {
   let t = (s || '').trim(); if (!t) return t;

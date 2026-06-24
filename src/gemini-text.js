@@ -30,32 +30,43 @@ const SUMMARY_CHAIN = [
 let _mod = null, _chain = null;
 async function _sdk() { return _mod || (_mod = await import('@google/genai')); }
 
+let _detLang = '';   // ngôn ngữ ĐA SỐ phát hiện từ transcript (chép lời); set khi build prompt, sticky qua các vòng rolling.
+
 function _sysSummary() {
-  const L = state.transcribeMode
-    ? 'the dominant language of the transcript (the language most lines are written in) — do NOT translate to any other language'
-    : state.targetLangLabel;
-  return `You output ONLY the meeting summary in ${L}, formatted as Markdown. No preface, no commentary, no code fences. `
+  if (!state.transcribeMode) {
+    return `You output ONLY the meeting summary in ${state.targetLangLabel}, formatted as Markdown. No preface, no commentary, no code fences. `
+      + `Keep IT/technical terms and proper nouns in their original form. Never invent content not in the transcript.`;
+  }
+  const L = _detLang || 'the dominant language of the transcript';
+  const ex = (state.summaryExtra || '').trim();
+  return `You output ONLY the meeting summary as Markdown. No preface, no commentary, no code fences. `
+    + `By DEFAULT, write the ENTIRE summary (including ALL section headings) in ${L}. `
+    + (ex ? `BUT the user's custom instructions below have the HIGHEST priority and OVERRIDE this default — if they ask for a specific output language or format, obey them. ` : '')
     + `Keep IT/technical terms and proper nouns in their original form. Never invent content not in the transcript.`;
 }
 
 // Ngôn ngữ ĐẦU RA của bản tóm tắt:
 //  - Dịch: theo ngôn ngữ ĐÍCH người dùng chọn (state.targetLangLabel).
-//  - Chép lời (transcribeMode): theo NGÔN NGỮ CHIẾM ĐA SỐ trong transcript (model tự nhận) — không dịch sang ngôn ngữ khác.
+//  - Chép lời (transcribeMode): theo NGÔN NGỮ ĐA SỐ phát hiện được từ transcript (_detLang) — KỂ CẢ tiêu đề mục.
 //    → sau họp, đổi đích sang 1 ngôn ngữ cụ thể (transcribeMode tắt) rồi bấm Tổng thể = tóm tắt lại theo ngôn ngữ đó.
 function _outLang() {
-  return state.transcribeMode ? 'ngôn ngữ được nói nhiều nhất trong transcript' : state.targetLangLabel;
+  return state.transcribeMode ? (_detLang || 'ngôn ngữ chiếm đa số trong transcript') : state.targetLangLabel;
 }
 function _transcribeNote() {
-  return state.transcribeMode
-    ? `\n\nLƯU Ý NGÔN NGỮ: Transcript là LỜI NÓI GỐC (có thể lẫn nhiều ngôn ngữ). Viết bản tóm tắt bằng CHÍNH ngôn ngữ chiếm ĐA SỐ trong transcript; TUYỆT ĐỐI KHÔNG dịch sang ngôn ngữ khác.`
-    : '';
+  if (!state.transcribeMode) return '';
+  const L = _outLang();
+  const ex = (state.summaryExtra || '').trim();
+  return `\n\nNGÔN NGỮ MẶC ĐỊNH = ${L}: viết TOÀN BỘ bản tóm tắt (KỂ CẢ tiêu đề mục) bằng ${L}; các nhãn tiếng Việt ở khung trên CHỈ là tham chiếu → DỊCH sang ${L}`
+    + (ex
+      ? `. NHƯNG nếu "YÊU CẦU RIÊNG TỪ NGƯỜI DÙNG" bên dưới yêu cầu KHÁC (kể cả đổi ngôn ngữ) thì THEO yêu cầu riêng — nó ƯU TIÊN CAO NHẤT.`
+      : `.`);
 }
 
 // Yêu cầu tóm tắt RIÊNG do người dùng gõ trên app → chèn thêm vào prompt (giữ NGUYÊN prompt gốc + quy tắc chống bịa).
 function _extraBlock() {
   const x = (state.summaryExtra || '').trim();
   if (!x) return '';
-  return `\n\n## YÊU CẦU RIÊNG TỪ NGƯỜI DÙNG (ưu tiên cao — vẫn TUÂN THỦ quy tắc chống bịa & giữ thuật ngữ):\n${x}`;
+  return `\n\n## YÊU CẦU RIÊNG TỪ NGƯỜI DÙNG (ƯU TIÊN CAO NHẤT — GHI ĐÈ mọi quy tắc & ngôn ngữ mặc định ở trên, kể cả tiêu đề mục; CHỈ giữ quy tắc chống bịa):\n${x}`;
 }
 
 const MAX_PREV_SUMMARY_CHARS = 6000;   // ~2K token: đủ giữ bản tóm tắt rolling nhiều mục mà vẫn nhẹ; cắt nếu phình
@@ -77,14 +88,41 @@ function _toLines(captions, cap) {
   return caps.map(c => `[${c.author || 'STT'}] ${_t(c)}`).join('\n');
 }
 
+// Text thô của transcript (không kèm [author]) để nhận diện ngôn ngữ.
+function _rawText(captions, cap) {
+  let caps = (captions || []).map(c => (c && (c.translated || c.original) || '')).filter(Boolean);
+  if (cap && caps.length > cap) caps = caps.slice(caps.length - cap);
+  return caps.join(' ');
+}
+// Nhận diện ngôn ngữ ĐA SỐ (ja/ko/zh/vi/en) theo ký tự → ép tóm tắt đúng ngôn ngữ transcript (chép lời).
+function _detectLangLabel(text) {
+  const s = String(text || ''); let ja = 0, ko = 0, han = 0, latin = 0, vi = 0;
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    if ((c >= 0x3040 && c <= 0x30ff) || (c >= 0x31f0 && c <= 0x31ff)) ja++;          // kana → riêng tiếng Nhật
+    else if (c >= 0xac00 && c <= 0xd7a3) ko++;                                        // hangul
+    else if (c >= 0x3400 && c <= 0x9fff) han++;                                       // chữ Hán
+    else if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) latin++;           // a-z
+    if (c >= 0x00c0 && c <= 0x1ef9 && !(c >= 0x41 && c <= 0x7a)) vi++;                // Latin có dấu → tiếng Việt
+  }
+  if (ja > 0) return 'tiếng Nhật (日本語)';
+  if (ko > 0) return 'tiếng Hàn (한국어)';
+  if (han > 0) return 'tiếng Trung (中文)';
+  if (vi > 0) return 'tiếng Việt';
+  if (latin > 0) return 'tiếng Anh (English)';
+  return '';
+}
+
 // ── ROLLING: bản tóm tắt GỌN, cập nhật cuốn chiếu ────────────────────────────────
 function _buildRollingPrompt(prevSummary, captions) {
   const lines = _toLines(captions, MAX_NEW_CAPTIONS);
+  if (state.transcribeMode) { const d = _detectLangLabel(_rawText(captions, MAX_NEW_CAPTIONS)); if (d) _detLang = d; }
   prevSummary = _trimPrev(prevSummary);
   const L = _outLang();
   const RULES =
     `Cấu trúc: ## Chủ đề chính · ## Điểm nổi bật / Vấn đề · ## Quyết định & việc cần làm (kèm người phụ trách/deadline nếu CÓ nói).\n`
     + `- GIỮ NGUYÊN thuật ngữ IT/tiếng Anh & tên riêng (bug, deploy, PR, API, sprint, merge, release...).\n`
+    + `- Từ KATAKANA tiếng Nhật (thường là từ mượn tiếng Anh: thuật ngữ chuyên ngành, tên sản phẩm/công cụ) → ghi BẰNG TIẾNG ANH gốc (vd デプロイ→deploy, スケジュール→schedule, アジェンダ→agenda), KHÔNG dịch/phiên âm sang ${L}.\n`
     + `- Dùng BẢNG Markdown khi có số liệu/lịch/so sánh.\n`
     + `- KHÔNG bịa; thiếu thông tin thì để trống hoặc ghi "Chưa xác định".`
     + _transcribeNote() + _extraBlock();
@@ -101,6 +139,7 @@ function _buildRollingPrompt(prevSummary, captions) {
 // ── TỔNG THỂ: prompt báo cáo chi tiết (giữ NGUYÊN VĂN) áp lên toàn transcript ─────
 function _buildFullReportPrompt(captions) {
   const lines = _toLines(captions);
+  if (state.transcribeMode) { const d = _detectLangLabel(_rawText(captions)); if (d) _detLang = d; }
   const L = _outLang();
   return `Bạn là trợ lý tổng hợp cuộc họp chuyên nghiệp. Hãy tạo báo cáo cuộc họp chi tiết dạng Markdown từ phần Transcript được cung cấp ở dưới cùng.
 
@@ -114,7 +153,8 @@ function _buildFullReportPrompt(captions) {
   4. Quyết định / Hành động tiếp theo (Bắt buộc kèm người phụ trách & deadline nếu có nhắc tới).
 
 ## QUY TẮC THUẬT NGỮ (TUÂN THỦ TUYỆT ĐỐI):
-- GIỮ NGUYÊN tiếng Anh / nguyên gốc, KHÔNG dịch sang ${L}: các thuật ngữ IT & kỹ thuật (bug, sprint, deploy, release, build, merge, PR, API, server, database, review, commit, branch, schedule, deadline, task, issue, ticket, repo, CI/CD, hotfix...), mọi từ tiếng Anh chuyên ngành và từ katakana, cùng tên riêng (người, công ty, sản phẩm, dự án, công cụ). Chỉ dịch phần diễn giải xung quanh.
+- GIỮ NGUYÊN tiếng Anh / nguyên gốc, KHÔNG dịch sang ${L}: các thuật ngữ IT & kỹ thuật (bug, sprint, deploy, release, build, merge, PR, API, server, database, review, commit, branch, schedule, deadline, task, issue, ticket, repo, CI/CD, hotfix...), mọi từ tiếng Anh chuyên ngành, cùng tên riêng (người, công ty, sản phẩm, dự án, công cụ). Chỉ dịch phần diễn giải xung quanh.
+- Riêng từ KATAKANA tiếng Nhật (phần lớn là từ mượn tiếng Anh) → KHÔI PHỤC về TIẾNG ANH gốc (vd デプロイ→deploy, スケジュール→schedule, アジェンダ→agenda, リリース→release), KHÔNG phiên âm hay dịch sang ${L} (giữ thuật ngữ chuyên ngành khỏi loạn nghĩa).
 
 ## QUY TẮC BẢNG:
 - Nếu nội dung có số liệu, mốc thời gian, lịch trình, so sánh, hoặc danh sách hạng mục nhiều thuộc tính → BẮT BUỘC trình bày bằng BẢNG Markdown. Ví dụ:

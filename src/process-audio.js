@@ -36,28 +36,68 @@ function isSupported() {
   catch { return false; }
 }
 
-// Liệt kê tiến trình có cửa sổ (để làm picker nguồn) qua PowerShell Get-Process.
-// KHÔNG dùng ProcessList.exe của gói: exe đó xuất tiêu đề theo codepage ANSI → tên tiếng Việt/CJK lỗi mã.
-// PS ép [Console]::OutputEncoding UTF-8 → tên đúng. Chỉ dùng exe của gói cho phần THU. Bỏ chính app dịch.
-function listProcesses() {
+// Đoạn PowerShell dò TIẾN TRÌNH GỐC: đi NGƯỢC cây cha (ParentProcessId) tới khi cha là tiến trình hệ thống
+// (explorer/services/...) → gốc = app cha. KHÔNG dùng "PID nhỏ nhất" vì PID bị tái dùng (con có thể PID < cha).
+const PS_ROOT_FN =
+  "$all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name; "
+  + "$parent=@{}; $nameById=@{}; "
+  + "foreach($p in $all){ $parent[[int]$p.ProcessId]=[int]$p.ParentProcessId; $nameById[[int]$p.ProcessId]=$p.Name }; "
+  + "$stop='explorer.exe','services.exe','svchost.exe','wininit.exe','userinit.exe','winlogon.exe','runtimebroker.exe'; "
+  + "function Get-Root($id){ $cur=[int]$id; for($i=0;$i -lt 12;$i++){ $par=$parent[$cur]; if(-not $par -or $par -eq 0){break}; $pn=$nameById[$par]; if(-not $pn -or ($stop -contains $pn.ToLower())){break}; $cur=$par }; return $cur }; ";
+
+// Liệt kê APP: gom MỌI tiến trình theo TIẾN TRÌNH GỐC → app đa-tiến-trình (Chrome nhiều tab; Teams + WebView2)
+// gộp về 1 entry, pid = GỐC để thu INCLUDE_TARGET_PROCESS_TREE phủ HẾT cửa sổ/tab/meeting con (không sót tiếng).
+// Vì chỉ thu app đó (cây riêng), KHÔNG bắt TTS của app dịch (cây khác) → hết feedback. Bỏ chính app dịch.
+// Trả: { name (ProcessName gốc), app (FileDescription), pid (gốc), title (1 tiêu đề mẫu), icon (PNG base64) }.
+function listApps() {
   return new Promise((resolve) => {
-    const ps = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object Id,ProcessName,MainWindowTitle | ConvertTo-Json -Compress";
+    const self = process.pid;
+    const ps = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue; "
+      + PS_ROOT_FN
+      + "function Get-IconB64($id){ try { $p=Get-Process -Id $id -ErrorAction SilentlyContinue; if(-not $p -or -not $p.Path){return $null}; "
+      + "$ico=[System.Drawing.Icon]::ExtractAssociatedIcon($p.Path); if(-not $ico){return $null}; "
+      + "$bmp=$ico.ToBitmap(); $ms=New-Object System.IO.MemoryStream; $bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png); "
+      + "$b=[Convert]::ToBase64String($ms.ToArray()); $ms.Dispose(); $bmp.Dispose(); $ico.Dispose(); return $b } catch { return $null } }; "
+      + "$wins = Get-Process | Where-Object { $_.MainWindowTitle -and $_.Id -ne " + self + " -and $_.MainWindowTitle -ne 'Caption Translator' }; "
+      + "$byRoot=@{}; "
+      + "foreach($w in $wins){ $root=Get-Root $w.Id; if(-not $byRoot.ContainsKey($root)){ "
+      + "$rp=Get-Process -Id $root -ErrorAction SilentlyContinue; $d=$null; if($rp){ try { $d=$rp.Description } catch {} }; if(-not $d){ try { $d=$w.Description } catch {} }; "
+      + "$nm= if($rp){$rp.ProcessName}else{$w.ProcessName}; "
+      + "$byRoot[$root]=[PSCustomObject]@{ name=$nm; app=$d; pid=$root; title=$w.MainWindowTitle; icon=(Get-IconB64 $root) } } }; "
+      + "@($byRoot.Values) | ConvertTo-Json -Compress";
     execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
-      { maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
-        if (err) { console.warn('[process-audio] list lỗi:', err.message); return resolve([]); }
+      { maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+        if (err) { console.warn('[process-audio] listApps lỗi:', err.message); return resolve([]); }
         let arr = [];
         try { const j = JSON.parse(stdout || '[]'); arr = Array.isArray(j) ? j : [j]; } catch { return resolve([]); }
-        const self = process.pid;
-        const out = [], seen = new Set();
+        const out = [];
         for (const p of arr) {
-          if (!p || !p.Id || !p.MainWindowTitle) continue;
-          if (p.Id === self) continue;
-          const title = String(p.MainWindowTitle).trim();
-          if (!title || title === 'Caption Translator') continue;   // bỏ chính app (tránh tự thu = feedback)
-          if (seen.has(p.Id)) continue; seen.add(p.Id);
-          out.push({ pid: String(p.Id), title, name: p.ProcessName ? String(p.ProcessName) : '' });
+          if (!p || !p.name || !p.pid) continue;
+          const name = String(p.name).trim(); if (!name) continue;
+          const app = (p.app ? String(p.app).trim() : '') || name;   // FileDescription → fallback ProcessName
+          const icon = p.icon ? ('data:image/png;base64,' + String(p.icon)) : '';
+          out.push({ name, app, pid: String(p.pid), title: p.title ? String(p.title).trim() : '', icon });
         }
+        out.sort((a, b) => a.app.localeCompare(b.app));
         resolve(out);
+      });
+  });
+}
+
+// PID GỐC hiện tại của app theo TÊN (đi ngược cây cha như listApps, KHÔNG trích icon → nhẹ). Mọi tiến trình của
+// 1 app đều quy về cùng gốc nên lấy tiến trình đầu tiên cùng tên rồi Get-Root. Dùng lúc bấm ▶ (PID đổi mỗi lần mở).
+function resolveRootPid(name) {
+  return new Promise((resolve) => {
+    const n = String(name || '').trim();
+    if (!/^[A-Za-z0-9._ -]{1,64}$/.test(n)) return resolve('');
+    const ps = PS_ROOT_FN
+      + "$x=@(Get-Process -Name '" + n.replace(/'/g, "''") + "' -ErrorAction SilentlyContinue); "
+      + "if($x.Count){ Get-Root $x[0].Id } else { '' }";
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+      { maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+        if (err) { console.warn('[process-audio] resolveRootPid lỗi:', err.message); return resolve(''); }
+        const pid = (stdout || '').trim();
+        resolve(/^\d+$/.test(pid) ? pid : '');
       });
   });
 }
@@ -125,4 +165,4 @@ function stop() {
 function isActive() { return !!_activePid; }
 function activePid() { return _activePid; }
 
-module.exports = { isSupported, listProcesses, start, stop, isActive, activePid };
+module.exports = { isSupported, listApps, resolveRootPid, start, stop, isActive, activePid };

@@ -33,6 +33,21 @@ function registerAll(app) {
   ipcMain.on('window-close',    () => { try { state.win?.close(); } catch {} });
   ipcMain.on('set-always-on-top', (_, v) => { state.pinned = v; state.win?.setAlwaysOnTop(v, v ? 'screen-saver' : 'normal'); if (v) state.win?.focus(); });
 
+  // Bắt đầu thu chế độ AUDIO: đã CHỌN APP (audioProcessName) → thu CÂY tiến trình gốc của app đó
+  // (INCLUDE_TARGET_PROCESS_TREE phủ hết cửa sổ/meeting con; loại TTS của chính app → hết feedback).
+  // "Toàn hệ thống" ("") → loopback toàn hệ thống ở renderer. PID resolve LÚC THU (PID đổi mỗi lần app mở lại).
+  function startAudioCaptureForSource() {
+    const appName = Store.get('audioProcessName', '');
+    if (appName && state.captureSource === 'system' && processAudio.isSupported()) {
+      processAudio.resolveRootPid(appName).then(pid => {
+        if (state.audioPaused) return;   // đã ⏹ trong lúc resolve
+        if (!(pid && processAudio.start(pid))) send('start-audio-capture', { source: state.captureSource });
+      }).catch(() => { if (!state.audioPaused) send('start-audio-capture', { source: state.captureSource }); });
+    } else {
+      send('start-audio-capture', { source: state.captureSource });
+    }
+  }
+
   // ── ▶/⏹ ──
   ipcMain.on('toggle-captions', (_, desired) => {
     // CHẾ ĐỘ AUDIO (system/mic) → gemini-3.5-live-translate (audio-in)
@@ -48,9 +63,7 @@ function registerAll(app) {
         return;
       }
       try { geminiLive.start(); } catch {}   // ▶
-      const pid = Store.get('audioProcessPid', '');
-      if (pid && state.captureSource === 'system' && processAudio.isSupported() && processAudio.start(pid)) { /* thu theo tiến trình */ }
-      else send('start-audio-capture', { source: state.captureSource });
+      startAudioCaptureForSource();
       send('cc-state', { active: true });
       send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
       return;
@@ -92,8 +105,8 @@ function registerAll(app) {
 
   // ── Liệt kê tiến trình để thu theo tiến trình (Process Loopback, khử feedback TTS) ──
   ipcMain.handle('list-audio-processes', async () => {
-    try { return processAudio.isSupported() ? await processAudio.listProcesses() : []; }
-    catch (e) { console.warn('[list-audio-processes] lỗi:', e.message); return []; }
+    try { return processAudio.isSupported() ? await processAudio.listApps() : []; }
+    catch (e) { console.warn('[list-audio-apps] lỗi:', e.message); return []; }
   });
 
   // ── Validate Gemini API key (on-blur ô nhập key) ──
@@ -114,8 +127,8 @@ function registerAll(app) {
     geminiVoice:       Store.get('geminiVoice',       'Achernar'),
     transcribeMode:    Store.get('transcribeMode',    false),
     summaryExtra:      Store.get('summaryExtra',      ''),
-    audioProcessPid:   Store.get('audioProcessPid',   ''),
-    audioProcessTitle: Store.get('audioProcessTitle', ''),
+    audioProcessName:  Store.get('audioProcessName',  ''),
+    audioProcessApp:   Store.get('audioProcessApp',   ''),
   }));
 
   ipcMain.on('save-settings', (_, s) => {
@@ -131,16 +144,15 @@ function registerAll(app) {
       state.captureSource = s.captureSource;
       Store.set('captureSource', s.captureSource);
     }
-    if (s.micDeviceId       !== undefined) { Store.set('micDeviceId', s.micDeviceId); }
-    if (s.audioProcessTitle !== undefined) { Store.set('audioProcessTitle', s.audioProcessTitle || ''); }
-    if (s.audioProcessPid   !== undefined) {
-      const next = s.audioProcessPid || '';
-      const changed = next !== Store.get('audioProcessPid', '');
-      Store.set('audioProcessPid', next);
-      if (changed && state.captureSource === 'system' && !state.audioPaused) {   // đổi tiến trình khi đang thu → restart nguồn
+    if (s.micDeviceId      !== undefined) { Store.set('micDeviceId', s.micDeviceId); }
+    if (s.audioProcessApp  !== undefined) { Store.set('audioProcessApp', s.audioProcessApp || ''); }
+    if (s.audioProcessName !== undefined) {
+      const next = s.audioProcessName || '';
+      const changed = next !== Store.get('audioProcessName', '');
+      Store.set('audioProcessName', next);
+      if (changed && state.captureSource === 'system' && !state.audioPaused) {   // đổi APP khi đang thu → restart nguồn
         if (processAudio.isActive()) processAudio.stop(); else send('stop-audio-capture', {});
-        if (next && processAudio.isSupported() && processAudio.start(next)) { /* thu theo tiến trình */ }
-        else send('start-audio-capture', { source: state.captureSource });
+        startAudioCaptureForSource();
       }
     }
     if (s.geminiAudioOn !== undefined) { Store.set('geminiAudioOn', !!s.geminiAudioOn); state.geminiAudioOn = !!s.geminiAudioOn; try { geminiLive.setAudioOn(!!s.geminiAudioOn); } catch {} }
