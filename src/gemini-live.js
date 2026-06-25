@@ -101,6 +101,13 @@ function _splitVI(s) {
   const tail = s.slice(start).trim(); if (tail) out.push(tail);
   return out;
 }
+// Gom transcript BỀN VỮNG: model 3.x có thể gửi BẢN ĐẦY ĐỦ tích luỹ (không phải delta thuần) → cứ "+=" sẽ LẶP.
+// next bao trùm prev (prefix mở rộng / y hệt) ⇒ THAY; ngược lại coi là delta ⇒ NỐI. An toàn cho cả 2 kiểu.
+function _mergeTrans(prev, next) {
+  if (!next) return prev;
+  if (!prev || next.startsWith(prev)) return next;
+  return prev + next;
+}
 // Mỗi câu dịch → 1 caption-live (id riêng). Câu cuối còn dở = partial; các câu trước = đã chốt.
 function _emitVI(turnDone) {
   const sents = _splitVI(_transAcc);
@@ -151,7 +158,7 @@ function _onMessage(gen, m) {
     const ot = state.transcribeMode
       ? (sc.inputTranscription && sc.inputTranscription.text)
       : (sc.outputTranscription && sc.outputTranscription.text);
-    if (typeof ot === 'string' && ot) { _transAcc += ot; changed = true; }
+    if (typeof ot === 'string' && ot) { const mg = _mergeTrans(_transAcc, ot); if (mg !== _transAcc) { _transAcc = mg; changed = true; } }
     // Audio TTS: GOM khúc, phát TRỌN một lần khi câu đọc xong (không phát mảnh → hết vụn/đọc-đuổi/méo đuôi).
     // Chép lời KHÔNG phát giọng (model vẫn sinh TTS do echo=true nhưng ta BỎ — tránh ồn + vọng thừa).
     const parts = (sc.modelTurn && sc.modelTurn.parts) || sc.parts;

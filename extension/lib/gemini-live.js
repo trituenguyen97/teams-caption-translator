@@ -10,8 +10,11 @@ const PARTIAL_DEBOUNCE_MS = 120;
 const TR_SENT_END = /[.!?。．！？]\s*$/;
 const SETTLE_MS = 450;
 const LONG_IDLE_MS = 2500;
-const AUDIO_FLUSH_SAMPLES = (24000 * 0.4) | 0;   // ~0.4s
-const AUDIO_IDLE_MS = 200;
+// Phát TTS THEO CÂU: gom audio tới khi BẢN DỊCH gặp dấu KẾT CÂU ( . ! ? ) — hoặc audio nghỉ — rồi phát cả câu → "đủ câu mới đọc".
+const AUDIO_MAX_SAMPLES = (24000 * 3) | 0;     // trần an toàn 3s: không gặp dấu kết câu/nghỉ vẫn phát (chống kẹt)
+const AUDIO_IDLE_MS = 250;                     // audio ngừng ~0.25s (model nghỉ cuối câu) → phát nốt
+const AUDIO_BREAK_GRACE_MS = 160;              // gặp dấu kết câu → chờ chút cho đuôi audio của câu tới rồi phát
+const TR_BREAK = /[.!?。．！？]/;                // KẾT CÂU (khớp _splitVI); KHÔNG gồm phẩy → đọc trọn câu. Ngoại lệ . kẹp số (thập phân) xử lý trong _audioBreakOnText
 
 function _b64ToBytes(b64) {
   const bin = atob(b64); const n = bin.length; const u = new Uint8Array(n);
@@ -42,7 +45,7 @@ export function createLiveTranslator(opts) {
   let _handle = null, _voiceCfgFailed = false;
   let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
   let _lineBase = 1, _transAcc = '';
-  let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null;
+  let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
 
   const isConfigured = () => !!(st().apiKey && String(st().apiKey).trim());
 
@@ -58,6 +61,13 @@ export function createLiveTranslator(opts) {
     }
     const tail = s.slice(start).trim(); if (tail) out.push(tail);
     return out;
+  }
+  // Gom transcript BỀN VỮNG: model 3.x có thể gửi BẢN ĐẦY ĐỦ tích luỹ (không phải delta thuần) → cứ "+=" sẽ LẶP.
+  // next bao trùm prev (là prefix mở rộng / hoặc y hệt) ⇒ THAY; ngược lại coi là delta ⇒ NỐI. An toàn cho cả 2 kiểu.
+  function _mergeTrans(prev, next) {
+    if (!next) return prev;
+    if (!prev || next.startsWith(prev)) return next;
+    return prev + next;
   }
   function _emitVI(turnDone) {
     const sents = _splitVI(_transAcc);
@@ -77,23 +87,37 @@ export function createLiveTranslator(opts) {
   }
 
   // ── Audio TTS: gom ~0.4s rồi phát trọn 1 lần ──
-  function _flushAudio() {
+  function _flushAudio(reason) {
     clearTimeout(_audioIdleTimer); _audioIdleTimer = null;
+    clearTimeout(_audioBreakTimer); _audioBreakTimer = null;
     if (!_audioBuf.length) return;
     let total = 0; for (const b of _audioBuf) total += b.length;
     const merged = new Uint8Array(total); let off = 0;
     for (const b of _audioBuf) { merged.set(b, off); off += b.length; }
+    // DEBUG: 'break'=đủ câu (text kết câu) | 'idle'=model nghỉ | 'turn'=hết lượt | 'max'=trần 3s. text tail cho thấy lúc phát text đã đủ câu chưa.
+    console.log(`[tts] phát (${reason || '?'}) ${((total >> 1) / 24000).toFixed(2)}s | text: "…${(_transAcc || '').slice(-45)}"`);
     _audioBuf = []; _audioSamples = 0;
     onAudio({ b64: _bytesToB64(merged), sampleRate: 24000 });
   }
   function _bufAudio(b64) {
     const bytes = _b64ToBytes(b64);
     _audioBuf.push(bytes); _audioSamples += bytes.length >> 1;
+    if (_audioSamples >= AUDIO_MAX_SAMPLES) { _flushAudio('max'); return; }   // trần an toàn 3s
     clearTimeout(_audioIdleTimer);
-    if (_audioSamples >= AUDIO_FLUSH_SAMPLES) { _flushAudio(); return; }
-    _audioIdleTimer = setTimeout(_flushAudio, AUDIO_IDLE_MS);
+    _audioIdleTimer = setTimeout(() => _flushAudio('idle'), AUDIO_IDLE_MS);   // nghỉ tự nhiên (cuối câu) → phát nốt
   }
-  function _resetAudio() { clearTimeout(_audioIdleTimer); _audioIdleTimer = null; _audioBuf = []; _audioSamples = 0; }
+  // Khi BẢN DỊCH chạm dấu ngắt (không phải . , kẹp số thập phân/tiền) → hẹn phát CỤM audio đã gom.
+  function _audioBreakOnText() {
+    const s = (_transAcc || '').replace(/\s+$/, '');
+    if (!s) return;
+    const c = s[s.length - 1];
+    if (!TR_BREAK.test(c)) return;
+    if ((c === '.' || c === ',') && /\d/.test(s[s.length - 2] || '')) return;   // . , kẹp số → chưa chắc ngắt → đợi ký tự kế
+    if (!_audioBuf.length) return;
+    clearTimeout(_audioBreakTimer);
+    _audioBreakTimer = setTimeout(() => _flushAudio('break'), AUDIO_BREAK_GRACE_MS);
+  }
+  function _resetAudio() { clearTimeout(_audioIdleTimer); _audioIdleTimer = null; clearTimeout(_audioBreakTimer); _audioBreakTimer = null; _audioBuf = []; _audioSamples = 0; }
 
   function _onMessage(gen, m) {
     if (gen !== _gen) return;
@@ -107,7 +131,7 @@ export function createLiveTranslator(opts) {
       const ot = transcribe
         ? (sc.inputTranscription && sc.inputTranscription.text)
         : (sc.outputTranscription && sc.outputTranscription.text);
-      if (typeof ot === 'string' && ot) { _transAcc += ot; changed = true; }
+      if (typeof ot === 'string' && ot) { const mg = _mergeTrans(_transAcc, ot); if (mg !== _transAcc) { _transAcc = mg; changed = true; } }
       const parts = (sc.modelTurn && sc.modelTurn.parts) || sc.parts;
       if (!transcribe && parts && st().geminiAudioOn !== false) {
         for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
@@ -116,8 +140,9 @@ export function createLiveTranslator(opts) {
         clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emitVI(false), PARTIAL_DEBOUNCE_MS);
         const ended = TR_SENT_END.test(_transAcc || '');
         clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, ended ? SETTLE_MS : LONG_IDLE_MS);
+        if (!transcribe && st().geminiAudioOn !== false) _audioBreakOnText();   // bản dịch chạm dấu ngắt → phát cụm TTS
       }
-      if (sc.turnComplete) _flush();
+      if (sc.turnComplete) { _flush(); _flushAudio('turn'); }   // hết lượt → chốt text + phát nốt audio còn lại
     } catch (e) { console.warn('[live] msg lỗi:', e && e.message); }
   }
 

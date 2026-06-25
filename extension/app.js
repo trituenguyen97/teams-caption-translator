@@ -65,7 +65,7 @@ function upsertRow(e) {
     el.list.appendChild(row); rowById.set(e.id, row);
   }
   row.classList.toggle('partial', !!e.partial);
-  row.querySelector('.who').textContent = e.author || 'STT';
+  row.querySelector('.who').textContent = e.author || 'Speaker';
   row.querySelector('.ts').textContent = e.ts || '';
   row.querySelector('.entry-text').textContent = e.translated || e.original || '';
   refreshCount();
@@ -78,7 +78,9 @@ function clearList() {
 
 // ── TTS playback (gapless + trần độ trễ — port từ app.html bản đã vá) ─────────────
 let _gemCtx = null, _gemPlayhead = 0, _gemNodes = [];
-const _GEM_LEAD = 0.18, _GEM_SOFT_LEAD = 0.6, _GEM_HARD_LEAD = 1.8;
+// Engine giờ gom audio THEO CỤM (tới dấu ngắt) rồi gửi nguyên cụm → mỗi buffer đã trọn vẹn, KHÔNG cần pre-roll lớn.
+// LEAD nhỏ để các cụm nối SÁT nhau (LEAD lớn → khoảng lặng giữa các cụm). Tăng nhẹ nếu cụm đầu bị cắt mở đầu.
+const _GEM_LEAD = 0.25, _GEM_SOFT_LEAD = 1.0, _GEM_HARD_LEAD = 2.5;
 function ensureGemCtx() {
   if (!_gemCtx || _gemCtx.state === 'closed') { _gemCtx = new (window.AudioContext || window.webkitAudioContext)(); _gemPlayhead = 0; _gemNodes = []; }
   if (_gemCtx.state === 'suspended') _gemCtx.resume().catch(() => {});
@@ -101,7 +103,7 @@ function playAudio({ b64, sampleRate }) {
       _gemPlayhead = resumeAt;
     }
     const lead = _gemPlayhead - ctx.currentTime;
-    const spd = lead > _GEM_SOFT_LEAD ? Math.min(1.12, 1 + (lead - _GEM_SOFT_LEAD) * 0.5) : 1.0;
+    const spd = lead > _GEM_SOFT_LEAD ? Math.min(1.06, 1 + (lead - _GEM_SOFT_LEAD) * 0.3) : 1.0;   // tăng tốc bù NHẸ (≤1.06) → đỡ gợn/rè
     const buf = ctx.createBuffer(1, n, sampleRate || 24000);
     buf.getChannelData(0).set(f32);
     const node = ctx.createBufferSource();
@@ -116,22 +118,54 @@ function playAudio({ b64, sampleRate }) {
 
 // ── Audio capture (mic / màn hình-tab-cửa sổ) → PCM f32 @16k ──────────────────────
 let recActive = false, audioCtx = null, srcNode = null, procNode = null, zeroGain = null, rawStream = null, watchdog = null, lastTs = 0;
+const MIC_GATE_RMS = 0.004, MIC_GATE_HANG_MS = 700;   // cổng VAD-lite cho mic: bỏ khung im lặng để model khỏi dịch tạp âm / lặp lại
+let micVoiceUntil = 0;
 async function startCapture() {
   let stream;
   if (S.source === 'mic') {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    try {
+      // AGC tắt: tránh khuếch đại im lặng thành tạp âm khiến model dịch sai/lặp. Giữ EC+NS để sạch tiếng.
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }, video: false,
+      });
+    } catch (e) {
+      // Side panel / popup KHÔNG hiện được hộp thoại xin quyền mic → ném NotAllowedError như "đã hủy".
+      // Mở 1 cửa sổ THẬT để người dùng cấp quyền; cấp xong (lưu theo origin) thì side panel dùng mic được.
+      if (e && (e.name === 'NotAllowedError' || e.name === 'NotFoundError' || e.name === 'SecurityError')) {
+        // Mở TAB thật (có thanh địa chỉ) — cửa sổ 'popup' KHÔNG có omnibox nên hộp thoại quyền không hiện được.
+        // Cấp đến TỪ nút Bắt đầu → cấp xong tự đóng tab + tự Bắt đầu (xem listener 'mic-granted' trong wire()).
+        _autoStartAfterGrant = true;
+        try { const tab = await chrome.tabs.create({ url: chrome.runtime.getURL('mic-perm.html'), active: true }); _micPermTabId = tab && tab.id; }
+        catch (_) { try { await chrome.windows.create({ url: chrome.runtime.getURL('mic-perm.html'), type: 'normal', width: 520, height: 420, focused: true }); } catch (__) {} }
+        const pe = new Error('mic-perm'); pe.name = 'MicPermNeeded'; throw pe;
+      }
+      throw e;
+    }
   } else {
     // Hiện popup chọn của trình duyệt: Tab trình duyệt / Cửa sổ (app) / Toàn màn hình.
     // getDisplayMedia bắt buộc có video để hiện picker → ta lấy stream rồi BỎ track video, chỉ giữ audio.
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      audio: {
+        echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+        // Chrome 141+ (Win/macOS): gỡ tiếng do CHÍNH side panel này phát (TTS) khỏi system audio capture
+        // → chống TTS vọng lại ở TẦNG AUDIO (trước khi tới Gemini). No-op nếu nguồn không có system audio
+        // hoặc trình duyệt cũ chưa hỗ trợ (constraint "ideal" nên bị bỏ qua, KHÔNG ném lỗi).
+        restrictOwnAudio: true,
+      },
+      systemAudio: 'include',         // hiện rõ tuỳ chọn "chia sẻ âm thanh hệ thống" trong picker
+      selfBrowserSurface: 'exclude',  // ẩn chính tab/panel của extension khỏi danh sách chọn
     });
     stream.getVideoTracks().forEach(t => t.stop());
   }
   rawStream = stream;
   const tracks = stream.getAudioTracks();
   if (!tracks.length) throw new Error("nguồn không có audio — chọn 'Tab' hoặc tick 'Chia sẻ âm thanh' khi chọn Toàn màn hình (cửa sổ app thường không có audio)");
+  // Xác minh trình duyệt có THẬT SỰ áp dụng restrictOwnAudio không (undefined = chưa hỗ trợ / không có system audio)
+  if (S.source !== 'mic' && tracks[0] && tracks[0].getSettings) {
+    const aset = tracks[0].getSettings();
+    console.log('[capture] restrictOwnAudio =', aset.restrictOwnAudio, '— true = đang gỡ TTS của panel khỏi audio thu; undefined = trình duyệt chưa hỗ trợ');
+  }
   recActive = true;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
   if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
@@ -139,11 +173,28 @@ async function startCapture() {
   srcNode = audioCtx.createMediaStreamSource(new MediaStream(tracks));
   procNode = audioCtx.createScriptProcessor(4096, 1, 1);
   zeroGain = audioCtx.createGain(); zeroGain.gain.value = 0;
-  procNode.onaudioprocess = (e) => { if (!recActive) return; lastTs = Date.now(); live.pushAudio(new Float32Array(e.inputBuffer.getChannelData(0))); };
+  procNode.onaudioprocess = (e) => {
+    if (!recActive) return;
+    lastTs = Date.now();
+    const ch = e.inputBuffer.getChannelData(0);
+    if (S.source === 'mic') {                 // CỔNG IM LẶNG: chỉ gửi khi có tiếng (+ giữ 700ms sau câu) → giảm dịch lặp/sai
+      let sum = 0; for (let i = 0; i < ch.length; i++) sum += ch[i] * ch[i];
+      if (Math.sqrt(sum / ch.length) >= MIC_GATE_RMS) micVoiceUntil = lastTs + MIC_GATE_HANG_MS;
+      if (lastTs > micVoiceUntil) return;     // im lặng kéo dài → KHÔNG gửi khung này
+    }
+    live.pushAudio(new Float32Array(ch));
+  };
   srcNode.connect(procNode); procNode.connect(zeroGain); zeroGain.connect(audioCtx.destination);
   lastTs = Date.now(); clearInterval(watchdog);
   watchdog = setInterval(() => { if (recActive && audioCtx && Date.now() - lastTs > 3000) audioCtx.resume().catch(() => {}); }, 2000);
   tracks[0].addEventListener('ended', () => { if (recActive) stop(); });   // user tự tắt chia sẻ → dừng
+  // AUTO-PiP (trick): TAB + mic (getUserMedia) → đăng ký handler để Chrome TỰ mở PiP khi rời tab (không cần bấm 📌).
+  if (_isPopup && S.source === 'mic' && 'mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setActionHandler('enterpictureinpicture', () => { if (!_inPip) { _pipAuto = true; openPip(); } });
+      navigator.mediaSession.playbackState = 'playing';
+    } catch (_) {}
+  }
 }
 function stopCapture() {
   recActive = false; clearInterval(watchdog); watchdog = null;
@@ -153,10 +204,13 @@ function stopCapture() {
   try { if (audioCtx) audioCtx.close(); } catch (e) {}
   procNode = srcNode = zeroGain = audioCtx = null;
   rawStream?.getTracks().forEach(t => t.stop()); rawStream = null;
+  try { if ('mediaSession' in navigator) { navigator.mediaSession.setActionHandler('enterpictureinpicture', null); navigator.mediaSession.playbackState = 'none'; } } catch (_) {}
 }
 
 // ── Start / Stop ──────────────────────────────────────────────────────────────────
 let running = false;
+let _micPermTabId = null;        // tab xin quyền mic đang mở (cấp xong → đóng tab)
+let _autoStartAfterGrant = false; // chỉ TỰ Bắt đầu sau khi cấp khi việc cấp đến từ nút Bắt đầu (không phải lúc mở extension)
 function refreshStartBtn() { el.start.textContent = t(running ? 'btn.stop' : 'btn.start'); el.start.classList.toggle('on', running); }
 async function start() {
   if (running) return;
@@ -169,7 +223,8 @@ async function start() {
     st(S.source === 'mic' ? 'status.listeningMic' : 'status.listeningAudio', null, 'run');
   } catch (e) {
     console.error(e); live.stop(); stopCapture();
-    if (e && e.name === 'NotAllowedError') st('status.canceled');
+    if (e && e.name === 'MicPermNeeded') st('status.micPermNeeded', null, 'err');
+    else if (e && e.name === 'NotAllowedError') st('status.canceled');
     else st('status.captureErr', { err: e.message || e.name || e }, 'err');
   }
 }
@@ -180,16 +235,45 @@ function stop() {
   refreshStartBtn(); refreshSpin();
   st('status.stopped');
 }
+// Đóng CHÍNH context này: nếu là 1 TAB → chrome.tabs.remove; nếu là side panel/cửa sổ → window.close().
+function closeSelf() {
+  try {
+    chrome.tabs.getCurrent((tab) => {
+      if (tab && tab.id != null) { try { chrome.tabs.remove(tab.id); } catch (_) { window.close(); } }
+      else window.close();
+    });
+  } catch (_) { window.close(); }
+}
+// Kiểm tra quyền mic mà KHÔNG bật capture.
+async function _micPermState() {
+  try { return (await navigator.permissions.query({ name: 'microphone' })).state; } catch (_) { return 'unknown'; }
+}
+// Chủ động xin quyền mic (lúc MỞ extension / chọn nguồn Micro) — KHÔNG tự Bắt đầu.
+// Tab có thanh địa chỉ → bật hộp thoại trực tiếp; side panel không bật được → mở tab mic-perm.
+async function ensureMicPermission() {
+  const s = await _micPermState();
+  if (s === 'granted' || s === 'unknown') return;     // đã cấp / không kiểm tra được → thôi
+  _autoStartAfterGrant = false;
+  if (_isPopup) {
+    try { const ms = await navigator.mediaDevices.getUserMedia({ audio: true }); ms.getTracks().forEach(t => t.stop()); st('status.micGranted', null, 'run'); }
+    catch (_) { st('status.micPermHint', null, 'err'); }
+  } else {
+    try { const tab = await chrome.tabs.create({ url: chrome.runtime.getURL('mic-perm.html'), active: true }); _micPermTabId = tab && tab.id; st('status.micPermNeeded', null, 'err'); } catch (_) {}
+  }
+}
 
 // ── Tóm tắt ────────────────────────────────────────────────────────────────────────
 let summaryMd = '', sumPrevCount = 0, sumBusy = false, sumTimer = null, sumPanelOpen = false, sumLastTime = 0;
 const SUM_MIN_NEW = 24, SUM_POLL_MS = 12000, SUM_MAX_CAPS_PER_CALL = 25;
+const SUM_MIN_FIRST = 8, SUM_MIN_FIRST_CHARS = 400;   // tóm tắt LẦN ĐẦU chỉ khi ĐỦ nội dung → chống LLM bịa lúc mới có 1-2 câu
 const finalized = () => captions.filter(c => !c.partial);
 async function summarizeTick() {
   if (sumBusy) return;
   const caps = finalized();
   const newCount = caps.length - sumPrevCount;
-  if (!((newCount >= SUM_MIN_NEW) || (sumLastTime === 0 && caps.length > 0))) return;
+  const firstChars = caps.reduce((n, c) => n + ((c.translated || c.original || '').length), 0);
+  const firstReady = sumLastTime === 0 && caps.length >= SUM_MIN_FIRST && firstChars >= SUM_MIN_FIRST_CHARS;
+  if (!((newCount >= SUM_MIN_NEW) || firstReady)) return;
   sumBusy = true; refreshSpin();
   let newCaps = caps.slice(sumPrevCount);
   if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
@@ -234,8 +318,23 @@ function md2html(md) {
   while (i < lines.length) {
     const ln = lines[i];
     if (/^\s*#{1,6}\s+/.test(ln)) { const m = ln.match(/^\s*(#{1,6})\s+(.*)$/); const lv = Math.min(m[1].length, 3); out.push(`<h${lv}>${inline(m[2].replace(/\*\*/g, ''))}</h${lv}>`); i++; continue; }
-    if (/^\s*([-*+])\s+/.test(ln)) { out.push('<ul>'); while (i < lines.length && /^\s*([-*+])\s+/.test(lines[i])) { out.push('<li>' + inline(lines[i].replace(/^\s*([-*+])\s+/, '')) + '</li>'); i++; } out.push('</ul>'); continue; }
-    if (/^\s*\d+\.\s+/.test(ln)) { out.push('<ol>'); while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { out.push('<li>' + inline(lines[i].replace(/^\s*\d+\.\s+/, '')) + '</li>'); i++; } out.push('</ol>'); continue; }
+    if (/^(\s*)([-*+]|\d+[.)])\s+/.test(ln)) {   // LIST có LỒNG NHAU: thụt sâu hơn cha → <ul> con bên trong <li> cha
+      const listRe = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+      const stack = [];   // mỗi mức = { indent, tag }
+      while (i < lines.length) {
+        const m = lines[i].match(listRe);
+        if (!m) break;
+        const indent = m[1].replace(/\t/g, '  ').length;
+        const tag = /^\d/.test(m[2]) ? 'ol' : 'ul';
+        const li = '<li>' + inline(m[3]);
+        if (!stack.length || indent > stack[stack.length - 1].indent) { out.push('<' + tag + '>'); stack.push({ indent, tag }); out.push(li); }   // sâu hơn → mở list con
+        else if (indent === stack[stack.length - 1].indent) { out.push('</li>'); out.push(li); }                                                  // cùng mức → li mới
+        else { while (stack.length > 1 && indent < stack[stack.length - 1].indent) out.push('</li></' + stack.pop().tag + '>'); out.push('</li>'); out.push(li); }  // nông hơn → đóng list con
+        i++;
+      }
+      while (stack.length) out.push('</li></' + stack.pop().tag + '>');
+      continue;
+    }
     if (ln.includes('|') && i + 1 < lines.length && isSep(lines[i + 1])) {
       const cells = r => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
       const head = cells(ln); i += 2; out.push('<table><thead><tr>' + head.map(h => '<th>' + inline(h) + '</th>').join('') + '</tr></thead><tbody>');
@@ -347,7 +446,19 @@ async function checkKey() {
 }
 
 // Ghim: mở UI trong cửa sổ Document Picture-in-Picture (LUÔN TRÊN CÙNG, nổi trên app khác).
-let _pipHolder = null;
+// PiP chỉ mở được từ context TOP-LEVEL (tab) — side panel không phải top-level nên KHÔNG ghim được từ đó.
+let _pipHolder = null, _inPip = false, _myWindowId = null, _pipAuto = false, _autoReturning = false;
+const _isPopup = new URLSearchParams(location.search).get('popup') === '1';
+const _prevTabId = (() => { const v = new URLSearchParams(location.search).get('prev'); return v != null ? parseInt(v, 10) : null; })();
+function _setPipReturnMode(on) {   // trong PiP: nút 📌 đổi thành 🔙 "đưa về side panel"
+  el.pipBtn.textContent = on ? '🔙' : '📌';
+  el.pipBtn.title = t(on ? 'pip.return' : 'pip.title');
+}
+function returnFromPip() {          // 🔙: đưa về dạng SIDE PANEL + đóng tab. (best-effort: nếu Chrome từ chối gesture thì chỉ đóng như X)
+  if (_myWindowId != null) { try { chrome.sidePanel.open({ windowId: _myWindowId }); } catch (_) {} }   // mở lại side panel ĐỒNG BỘ trong gesture click
+  const w = window.documentPictureInPicture && window.documentPictureInPicture.window;
+  if (w) w.close();                // → pagehide → stop + đóng tab
+}
 async function openPip() {
   if (!('documentPictureInPicture' in window)) { st('status.pipUnsupported', null, 'err'); return; }
   try {
@@ -358,29 +469,55 @@ async function openPip() {
       try { const css = Array.from(sheet.cssRules).map(r => r.cssText).join(''); const s = pip.document.createElement('style'); s.textContent = css; pip.document.head.appendChild(s); }
       catch (_) { if (sheet.href) { const l = pip.document.createElement('link'); l.rel = 'stylesheet'; l.href = sheet.href; pip.document.head.appendChild(l); } }
     }
-    // chuyển toàn bộ UI sang PiP (JS/AudioContext vẫn sống ở context này = opener)
+    // chuyển toàn bộ UI sang PiP (JS/AudioContext vẫn sống ở context này = tab opener)
     const moved = [];
     while (document.body.firstChild) { const n = document.body.firstChild; moved.push(n); pip.document.body.appendChild(n); }
-    const prevPip = el.pipBtn.style.display, prevPop = el.popoutBtn.style.display;
-    el.pipBtn.style.display = 'none'; el.popoutBtn.style.display = 'none';   // tránh mở chồng / popout đóng opener
+    const prevPop = el.popoutBtn.style.display;
+    el.popoutBtn.style.display = 'none';     // trong PiP không tách tiếp
+    _inPip = true; _setPipReturnMode(true);  // nút 📌 → 🔙
     _pipHolder = document.createElement('div'); _pipHolder.className = 'pip-holder'; _pipHolder.textContent = t('pip.active'); document.body.appendChild(_pipHolder);
-    pip.addEventListener('pagehide', () => {                                   // đóng PiP → đưa UI về lại side panel
+    if (!_pipAuto && _prevTabId != null) { try { chrome.tabs.update(_prevTabId, { active: true }); } catch (_) {} }   // (THỦ CÔNG) trả focus về tab nội dung; AUTO thì user đã rời tab sẵn
+    pip.addEventListener('pagehide', () => {
       if (_pipHolder) { _pipHolder.remove(); _pipHolder = null; }
-      for (const n of moved) document.body.appendChild(n);
-      el.pipBtn.style.display = prevPip; el.popoutBtn.style.display = prevPop;
+      if (_autoReturning) {                  // AUTO quay lại tab → THU UI VỀ TAB (không dừng, không đóng)
+        for (const n of moved) document.body.appendChild(n);
+        el.popoutBtn.style.display = prevPop;
+        _inPip = false; _pipAuto = false; _autoReturning = false; _setPipReturnMode(false);
+      } else {                               // 🔙 (đã mở side panel) hoặc X → dừng + đóng tab opener
+        try { stop(); } catch (_) {}
+        closeSelf();
+      }
     });
   } catch (e) { st('status.pipErr', { err: e && e.message }, 'err'); }
+}
+// AUTO-PiP: thu PiP về tab khi quay lại tab extension (chỉ cho PiP mở TỰ ĐỘNG, giống Meet).
+function softReturnFromPip() {
+  _autoReturning = true;
+  const w = window.documentPictureInPicture && window.documentPictureInPicture.window;
+  if (w) w.close(); else _autoReturning = false;
 }
 
 function wire() {
   el.settingsBtn.addEventListener('click', () => el.settings.classList.toggle('hidden'));
-  el.pipBtn.addEventListener('click', openPip);
-  el.popoutBtn.addEventListener('click', async () => {           // mở UI trong cửa sổ popup RỜI rồi ĐÓNG side panel hiện tại
+  el.pipBtn.addEventListener('click', () => { if (_inPip) returnFromPip(); else { _pipAuto = false; openPip(); } });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && _inPip && _pipAuto) softReturnFromPip(); });   // AUTO-PiP: quay lại tab → thu PiP về tab
+  // Trang xin quyền mic báo về "đã cấp" → đóng tab đó + TỰ Bắt đầu (đúng ý: đồng ý là chạy luôn).
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === 'mic-granted') {
+      if (_micPermTabId != null) { try { chrome.tabs.remove(_micPermTabId); } catch (_) {} _micPermTabId = null; }
+      if (_autoStartAfterGrant && !running && S.source === 'mic') start();   // chỉ tự chạy nếu cấp đến từ nút Bắt đầu
+      else if (!running) st('status.micGranted', null, 'run');
+      _autoStartAfterGrant = false;
+    }
+  });
+  el.popoutBtn.addEventListener('click', async () => {           // mở UI trong 1 TAB của cửa sổ hiện tại rồi ĐÓNG side panel
     const page = (location.pathname.split('/').pop() || 'sidepanel.html');
     try {
-      if (running) stop();                                       // nhả mic/loa trước khi đóng (cửa sổ rời tự chạy lại khi bấm ▶)
-      await chrome.windows.create({ url: chrome.runtime.getURL(page + '?popup=1'), type: 'popup', width: 460, height: 820, focused: true });
-      window.close();                                            // đóng Side Panel đang mở trong trình duyệt
+      if (running) stop();                                       // nhả mic/loa trước khi đóng (tab mới tự chạy lại khi bấm ▶)
+      let prev = '';
+      try { const [act] = await chrome.tabs.query({ active: true, currentWindow: true }); if (act && act.id != null) prev = '&prev=' + act.id; } catch (_) {}   // nhớ tab nội dung để trả focus sau khi bật PiP
+      await chrome.tabs.create({ url: chrome.runtime.getURL(page + '?popup=1' + prev), active: true });   // TAB → bấm 📌 trong tab để PiP
+      window.close();                                            // đóng Side Panel đang mở
     } catch (e) { st('status.popoutErr', { err: e && e.message }, 'err'); }
   });
   // Dropdown ngôn ngữ giao diện (cờ) + ngôn ngữ đích (cờ)
@@ -389,7 +526,7 @@ function wire() {
   document.addEventListener('click', (e) => { if (!e.target.closest('.dd')) closeMenus(); });
 
   el.apikey.addEventListener('input', () => { save({ apiKey: el.apikey.value.trim() }); clearTimeout(keyTimer); keyTimer = setTimeout(checkKey, 600); });
-  el.source.addEventListener('change', () => save({ source: el.source.value }));
+  el.source.addEventListener('change', () => { save({ source: el.source.value }); if (el.source.value === 'mic') ensureMicPermission(); });   // chọn Micro → xin quyền luôn
   el.voice.addEventListener('change', () => {
     const v = el.voice.value;
     if (v === '__off__') { save({ geminiAudioOn: false }); live.setAudioOn(false); }
@@ -434,7 +571,13 @@ function wire() {
 (async function init() {
   await loadSettings();
   setLocale(S.uiLang || 'vi');
-  if (new URLSearchParams(location.search).get('popup') === '1') el.popoutBtn.style.display = 'none';   // đã là cửa sổ rời → ẩn nút tách
+  // Ghim (PiP) chỉ mở được từ context TOP-LEVEL (tab); side panel không phải top-level → ẩn nút ghim ở side panel.
+  if (_isPopup) {
+    el.popoutBtn.style.display = 'none';                                                                // đã ở tab riêng → ẩn nút tách
+    try { chrome.tabs.getCurrent((tab) => { if (tab) _myWindowId = tab.windowId; }); } catch (_) {}     // nhớ cửa sổ để 🔙 mở lại side panel đúng chỗ
+  } else {
+    el.pipBtn.style.display = 'none';                                                                   // side panel → ẩn nút ghim (📌)
+  }
   if (S.source !== 'mic' && S.source !== 'screen') save({ source: 'screen' });   // migrate giá trị cũ ('tab')
   el.apikey.value = S.apiKey; el.source.value = S.source;
   buildVoiceSelect(); el.voice.disabled = S.transcribeMode;
@@ -444,4 +587,5 @@ function wire() {
   initResizer(); wire();
   if (S.apiKey) checkKey();
   st(S.apiKey ? 'status.ready' : 'status.readyNoKey');
+  if (S.source === 'mic') ensureMicPermission();   // mở extension + đang chọn Micro + chưa cấp quyền → xử lý cấp luôn
 })();

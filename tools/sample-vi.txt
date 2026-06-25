@@ -1,0 +1,1 @@
+Xin chào mọi người. Hôm nay chúng ta sẽ xem lại tiến độ dự án. Phần backend đã hoàn thành tám mươi phần trăm. Chúng ta cần hoàn tất việc deploy trước thứ Sáu tuần này. Mọi người có câu hỏi gì không?

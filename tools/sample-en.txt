@@ -1,0 +1,1 @@
+Hello everyone. Today we will review the project progress. The backend is eighty percent complete. We need to finish the deployment before Friday this week. Does anyone have any questions?

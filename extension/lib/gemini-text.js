@@ -83,11 +83,12 @@ export function createSummarizer({ getState }) {
     prevSummary = _trimPrev(prevSummary);
     const L = _outLang();
     const RULES =
-      `Cấu trúc: ## Chủ đề chính · ## Điểm nổi bật / Vấn đề · ## Quyết định & việc cần làm (kèm người phụ trách/deadline nếu CÓ nói).\n`
+      `Cấu trúc (CHỈ thêm mục NÀO CÓ nội dung THẬT, BỎ mục rỗng): ## Chủ đề chính · ## Điểm nổi bật / Vấn đề · ## Quyết định & việc cần làm (người phụ trách/deadline CHỈ ghi khi transcript NÓI RÕ).\n`
       + `- GIỮ NGUYÊN thuật ngữ IT/tiếng Anh & tên riêng (bug, deploy, PR, API, sprint, merge, release...).\n`
       + `- Từ KATAKANA tiếng Nhật (thường là từ mượn tiếng Anh) → ghi BẰNG TIẾNG ANH gốc (デプロイ→deploy...), KHÔNG dịch sang ${L}.\n`
       + `- Dùng BẢNG Markdown khi có số liệu/lịch/so sánh.\n`
-      + `- KHÔNG bịa; thiếu thông tin thì để trống hoặc ghi "Chưa xác định".`
+      + `- TUYỆT ĐỐI KHÔNG BỊA: chỉ tóm tắt nội dung CÓ THẬT trong transcript dưới đây. KHÔNG tự nghĩ ra chủ đề/quyết định/người phụ trách/deadline/con số không xuất hiện trong transcript.\n`
+      + `- Nếu transcript QUÁ NGẮN / chưa đủ ý → CHỈ ghi 1-2 câu mô tả nội dung thực tế (hoặc đúng 1 dòng "Chưa đủ nội dung để tóm tắt"); KHÔNG tạo bảng/mục rỗng, KHÔNG dựng cuộc họp tưởng tượng.`
       + _transcribeNote() + _extraBlock();
     if (prevSummary && prevSummary.trim()) {
       return `Bạn đang duy trì BẢN TÓM TẮT cuộc họp ĐANG DIỄN RA (Markdown, ${L}). Dưới đây là bản tóm tắt hiện tại và `
