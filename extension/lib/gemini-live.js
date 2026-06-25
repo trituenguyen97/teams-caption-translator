@@ -42,7 +42,7 @@ export function createLiveTranslator(opts) {
   const onStatus = opts.onStatus || (() => {});
 
   let _started = false, _session = null, _connecting = null, _gen = 0;
-  let _handle = null, _voiceCfgFailed = false;
+  let _handle = null;
   let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
   let _lineBase = 1, _transAcc = '';
   let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
@@ -157,9 +157,9 @@ export function createLiveTranslator(opts) {
       contextWindowCompression: { slidingWindow: {} },
       sessionResumption: _handle ? { handle: _handle } : {},
     };
-    // THỬ NGHIỆM: gửi giọng đọc mong muốn. Model live-translate có thể BỎ QUA (giọng cố định), hỗ trợ, hoặc TỪ CHỐI.
-    // Nếu kết nối lỗi khi có speechConfig → _voiceCfgFailed=true (xem _ensure) → lần sau BỎ speechConfig, KHÔNG để hỏng dịch.
-    if (!st().transcribeMode && st().geminiVoice && !_voiceCfgFailed) {
+    // Giọng đọc đầu ra — docs xác nhận LiveConnectConfig.speechConfig áp dụng cho cả engine dịch.
+    // Đổi giọng → onVoiceChanged() mở phiên mới với voiceName mới.
+    if (!st().transcribeMode && st().geminiVoice) {
       config.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: st().geminiVoice } } };
     }
     return ai.live.connect({
@@ -179,11 +179,7 @@ export function createLiveTranslator(opts) {
     if (_connecting) return _connecting;
     _connecting = (async () => {
       try { _session = await _connect(); }
-      catch (e) {
-        console.warn('[live] connect lỗi:', e && e.message);
-        if (!_voiceCfgFailed && !st().transcribeMode && st().geminiVoice) { _voiceCfgFailed = true; console.warn('[live] có thể do speechConfig → lần sau kết nối KHÔNG kèm voice'); }
-        _session = null; onStatus({ error: e && e.message }); if (_started) _scheduleReconnect();
-      }
+      catch (e) { console.warn('[live] connect lỗi:', e && e.message); _session = null; onStatus({ error: e && e.message }); if (_started) _scheduleReconnect(); }
       finally { _connecting = null; }
       return _session;
     })();
@@ -219,8 +215,8 @@ export function createLiveTranslator(opts) {
   }
   function onTargetLangChanged() { if (_started) { _handle = null; _transAcc = ''; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
   function onTranscribeModeChanged() { onTargetLangChanged(); }
-  function onVoiceChanged() {   // đổi giọng → reconnect PHIÊN MỚI (bỏ resume) để áp dụng speechConfig mới (nếu model hỗ trợ)
-    if (!_started || st().geminiAudioOn === false) return;
+  function onVoiceChanged() {   // đổi giọng → mở PHIÊN MỚI (bỏ resume) để áp dụng speechConfig giọng mới ngay
+    if (!_started) return;
     _handle = null; _resetAudio(); _closeSession(); _ensure().catch(() => {});
   }
   function setAudioOn(on) { if (!on) { _resetAudio(); onClear(); } }

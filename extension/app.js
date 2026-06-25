@@ -80,13 +80,16 @@ function clearList() {
 let _gemCtx = null, _gemPlayhead = 0, _gemNodes = [];
 // Engine giờ gom audio THEO CỤM (tới dấu ngắt) rồi gửi nguyên cụm → mỗi buffer đã trọn vẹn, KHÔNG cần pre-roll lớn.
 // LEAD nhỏ để các cụm nối SÁT nhau (LEAD lớn → khoảng lặng giữa các cụm). Tăng nhẹ nếu cụm đầu bị cắt mở đầu.
-const _GEM_LEAD = 0.25, _GEM_SOFT_LEAD = 1.0, _GEM_HARD_LEAD = 2.5;
+const _GEM_LEAD = 0.4, _GEM_SOFT_LEAD = 1.0, _GEM_HARD_LEAD = 2.5;   // đệm 0.4s: chống underrun (hụt/ngắt) GIỮA câu khi gói audio Gemini về không đều
+const _GEM_START_LEAD = 0.2;   // ĐỆM ĐỘNG: cụm MỞ ĐẦU mỗi lượt (sau khoảng lặng) chỉ mồi 0.2s → vào nhanh, câu ngắn đỡ trễ/khựng
+let _gemSpeed = 1.0;   // tốc độ phát hiện tại — đổi theo HYSTERESIS (không tính lại mỗi gói) → hết rung cao độ
+let _gemLastEnd = 0;   // mốc kết thúc cụm cuối (giây, đồng hồ AudioContext) → đo "đã cạn bao lâu" để chọn LEAD động
 function ensureGemCtx() {
   if (!_gemCtx || _gemCtx.state === 'closed') { _gemCtx = new (window.AudioContext || window.webkitAudioContext)(); _gemPlayhead = 0; _gemNodes = []; }
   if (_gemCtx.state === 'suspended') _gemCtx.resume().catch(() => {});
   return _gemCtx;
 }
-function clearAudio() { for (const n of _gemNodes) { try { n.onended = null; n.stop(); } catch (e) {} } _gemNodes = []; _gemPlayhead = 0; }
+function clearAudio() { for (const n of _gemNodes) { try { n.onended = null; n.stop(); } catch (e) {} } _gemNodes = []; _gemPlayhead = 0; _gemSpeed = 1.0; _gemLastEnd = 0; }
 function playAudio({ b64, sampleRate }) {
   try {
     if (!S.geminiAudioOn || !b64) return;
@@ -100,17 +103,23 @@ function playAudio({ b64, sampleRate }) {
         if ((nd._s || 0) > now + 0.005) { try { nd.onended = null; nd.stop(); } catch (e) {} const i = _gemNodes.indexOf(nd); if (i >= 0) _gemNodes.splice(i, 1); }
         else if ((nd._e || 0) > resumeAt) resumeAt = nd._e;
       }
-      _gemPlayhead = resumeAt;
+      _gemPlayhead = resumeAt; _gemSpeed = 1.0;
     }
     const lead = _gemPlayhead - ctx.currentTime;
-    const spd = lead > _GEM_SOFT_LEAD ? Math.min(1.06, 1 + (lead - _GEM_SOFT_LEAD) * 0.3) : 1.0;   // tăng tốc bù NHẸ (≤1.06) → đỡ gợn/rè
+    // HYSTERESIS: bật bù tốc khi backlog > SOFT, tắt khi đã rút xuống < SOFT/2 → tốc độ ỔN ĐỊNH, không rung cao độ mỗi gói.
+    if (lead > _GEM_SOFT_LEAD) _gemSpeed = 1.06;
+    else if (lead < _GEM_SOFT_LEAD * 0.5) _gemSpeed = 1.0;
+    const spd = _gemSpeed;
     const buf = ctx.createBuffer(1, n, sampleRate || 24000);
     buf.getChannelData(0).set(f32);
     const node = ctx.createBufferSource();
     node.buffer = buf; node.playbackRate.value = spd; node.connect(ctx.destination);
-    if (_gemPlayhead < ctx.currentTime + 0.02) _gemPlayhead = ctx.currentTime + _GEM_LEAD;
+    if (_gemPlayhead < ctx.currentTime + 0.02) {   // queue cạn → ĐỆM ĐỘNG: nghỉ lâu (cụm mở đầu) mồi NHANH 0.2s; hụt giữa câu mồi DÀY 0.4s
+      const idle = ctx.currentTime - _gemLastEnd;
+      _gemPlayhead = ctx.currentTime + (idle > 0.35 ? _GEM_START_LEAD : _GEM_LEAD);
+    }
     const startAt = _gemPlayhead; node.start(startAt);
-    _gemPlayhead = startAt + buf.duration / spd; node._s = startAt; node._e = _gemPlayhead;
+    _gemPlayhead = startAt + buf.duration / spd; node._s = startAt; node._e = _gemPlayhead; _gemLastEnd = _gemPlayhead;
     _gemNodes.push(node);
     node.onended = () => { const i = _gemNodes.indexOf(node); if (i >= 0) _gemNodes.splice(i, 1); };
   } catch (e) { console.warn('[tts] play lỗi:', e && e.message); }
@@ -533,7 +542,7 @@ function wire() {
     else {
       const changed = v !== S.geminiVoice;
       save({ geminiAudioOn: true, geminiVoice: v }); live.setAudioOn(true);
-      if (changed && running) live.onVoiceChanged();   // THỬ: reconnect để đổi giọng ngay (model preview có thể bỏ qua)
+      if (changed && running) live.onVoiceChanged();   // đổi giọng → reconnect áp dụng voiceName mới (~1.5s)
     }
   });
   el.start.addEventListener('click', () => running ? stop() : start());

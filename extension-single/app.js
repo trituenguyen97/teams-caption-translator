@@ -20816,8 +20816,10 @@
   var TR_SENT_END = /[.!?。．！？]\s*$/;
   var SETTLE_MS = 450;
   var LONG_IDLE_MS = 2500;
-  var AUDIO_FLUSH_SAMPLES = 24e3 * 0.4 | 0;
-  var AUDIO_IDLE_MS = 200;
+  var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
+  var AUDIO_IDLE_MS = 250;
+  var AUDIO_BREAK_GRACE_MS = 160;
+  var TR_BREAK = /[.!?。．！？]/;
   function _b64ToBytes(b64) {
     const bin = atob(b64);
     const n = bin.length;
@@ -20857,10 +20859,10 @@
     const onStatus = opts.onStatus || (() => {
     });
     let _started = false, _session = null, _connecting = null, _gen = 0;
-    let _handle = null, _voiceCfgFailed = false;
+    let _handle = null;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
     let _lineBase = 1, _transAcc = "";
-    let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null;
+    let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
     function _splitVI(s) {
       s = s || "";
@@ -20878,6 +20880,11 @@
       const tail = s.slice(start3).trim();
       if (tail) out.push(tail);
       return out;
+    }
+    function _mergeTrans(prev, next) {
+      if (!next) return prev;
+      if (!prev || next.startsWith(prev)) return next;
+      return prev + next;
     }
     function _emitVI(turnDone) {
       const sents = _splitVI(_transAcc);
@@ -20898,9 +20905,11 @@
       }
       _transAcc = "";
     }
-    function _flushAudio() {
+    function _flushAudio(reason) {
       clearTimeout(_audioIdleTimer);
       _audioIdleTimer = null;
+      clearTimeout(_audioBreakTimer);
+      _audioBreakTimer = null;
       if (!_audioBuf.length) return;
       let total = 0;
       for (const b of _audioBuf) total += b.length;
@@ -20910,6 +20919,7 @@
         merged.set(b, off);
         off += b.length;
       }
+      console.log(`[tts] ph\xE1t (${reason || "?"}) ${((total >> 1) / 24e3).toFixed(2)}s | text: "\u2026${(_transAcc || "").slice(-45)}"`);
       _audioBuf = [];
       _audioSamples = 0;
       onAudio({ b64: _bytesToB64(merged), sampleRate: 24e3 });
@@ -20918,16 +20928,28 @@
       const bytes = _b64ToBytes(b64);
       _audioBuf.push(bytes);
       _audioSamples += bytes.length >> 1;
-      clearTimeout(_audioIdleTimer);
-      if (_audioSamples >= AUDIO_FLUSH_SAMPLES) {
-        _flushAudio();
+      if (_audioSamples >= AUDIO_MAX_SAMPLES) {
+        _flushAudio("max");
         return;
       }
-      _audioIdleTimer = setTimeout(_flushAudio, AUDIO_IDLE_MS);
+      clearTimeout(_audioIdleTimer);
+      _audioIdleTimer = setTimeout(() => _flushAudio("idle"), AUDIO_IDLE_MS);
+    }
+    function _audioBreakOnText() {
+      const s = (_transAcc || "").replace(/\s+$/, "");
+      if (!s) return;
+      const c = s[s.length - 1];
+      if (!TR_BREAK.test(c)) return;
+      if ((c === "." || c === ",") && /\d/.test(s[s.length - 2] || "")) return;
+      if (!_audioBuf.length) return;
+      clearTimeout(_audioBreakTimer);
+      _audioBreakTimer = setTimeout(() => _flushAudio("break"), AUDIO_BREAK_GRACE_MS);
     }
     function _resetAudio() {
       clearTimeout(_audioIdleTimer);
       _audioIdleTimer = null;
+      clearTimeout(_audioBreakTimer);
+      _audioBreakTimer = null;
       _audioBuf = [];
       _audioSamples = 0;
     }
@@ -20946,8 +20968,11 @@
         let changed = false;
         const ot = transcribe ? sc.inputTranscription && sc.inputTranscription.text : sc.outputTranscription && sc.outputTranscription.text;
         if (typeof ot === "string" && ot) {
-          _transAcc += ot;
-          changed = true;
+          const mg = _mergeTrans(_transAcc, ot);
+          if (mg !== _transAcc) {
+            _transAcc = mg;
+            changed = true;
+          }
         }
         const parts = sc.modelTurn && sc.modelTurn.parts || sc.parts;
         if (!transcribe && parts && st2().geminiAudioOn !== false) {
@@ -20963,8 +20988,12 @@
           const ended = TR_SENT_END.test(_transAcc || "");
           clearTimeout(_flushTimer);
           _flushTimer = setTimeout(_flush, ended ? SETTLE_MS : LONG_IDLE_MS);
+          if (!transcribe && st2().geminiAudioOn !== false) _audioBreakOnText();
         }
-        if (sc.turnComplete) _flush();
+        if (sc.turnComplete) {
+          _flush();
+          _flushAudio("turn");
+        }
       } catch (e) {
         console.warn("[live] msg l\u1ED7i:", e && e.message);
       }
@@ -20980,7 +21009,7 @@
         contextWindowCompression: { slidingWindow: {} },
         sessionResumption: _handle ? { handle: _handle } : {}
       };
-      if (!st2().transcribeMode && st2().geminiVoice && !_voiceCfgFailed) {
+      if (!st2().transcribeMode && st2().geminiVoice) {
         config.speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: st2().geminiVoice } } };
       }
       return ai.live.connect({
@@ -21008,10 +21037,6 @@
           _session = await _connect();
         } catch (e) {
           console.warn("[live] connect l\u1ED7i:", e && e.message);
-          if (!_voiceCfgFailed && !st2().transcribeMode && st2().geminiVoice) {
-            _voiceCfgFailed = true;
-            console.warn("[live] c\xF3 th\u1EC3 do speechConfig \u2192 l\u1EA7n sau k\u1EBFt n\u1ED1i KH\xD4NG k\xE8m voice");
-          }
           _session = null;
           onStatus({ error: e && e.message });
           if (_started) _scheduleReconnect();
@@ -21098,7 +21123,7 @@
       onTargetLangChanged();
     }
     function onVoiceChanged() {
-      if (!_started || st2().geminiAudioOn === false) return;
+      if (!_started) return;
       _handle = null;
       _resetAudio();
       _closeSession();
@@ -21213,11 +21238,12 @@ ${x}`;
       }
       prevSummary = _trimPrev(prevSummary);
       const L = _outLang();
-      const RULES = `C\u1EA5u tr\xFAc: ## Ch\u1EE7 \u0111\u1EC1 ch\xEDnh \xB7 ## \u0110i\u1EC3m n\u1ED5i b\u1EADt / V\u1EA5n \u0111\u1EC1 \xB7 ## Quy\u1EBFt \u0111\u1ECBnh & vi\u1EC7c c\u1EA7n l\xE0m (k\xE8m ng\u01B0\u1EDDi ph\u1EE5 tr\xE1ch/deadline n\u1EBFu C\xD3 n\xF3i).
+      const RULES = `C\u1EA5u tr\xFAc (CH\u1EC8 th\xEAm m\u1EE5c N\xC0O C\xD3 n\u1ED9i dung TH\u1EACT, B\u1ECE m\u1EE5c r\u1ED7ng): ## Ch\u1EE7 \u0111\u1EC1 ch\xEDnh \xB7 ## \u0110i\u1EC3m n\u1ED5i b\u1EADt / V\u1EA5n \u0111\u1EC1 \xB7 ## Quy\u1EBFt \u0111\u1ECBnh & vi\u1EC7c c\u1EA7n l\xE0m (ng\u01B0\u1EDDi ph\u1EE5 tr\xE1ch/deadline CH\u1EC8 ghi khi transcript N\xD3I R\xD5).
 - GI\u1EEE NGUY\xCAN thu\u1EADt ng\u1EEF IT/ti\u1EBFng Anh & t\xEAn ri\xEAng (bug, deploy, PR, API, sprint, merge, release...).
 - T\u1EEB KATAKANA ti\u1EBFng Nh\u1EADt (th\u01B0\u1EDDng l\xE0 t\u1EEB m\u01B0\u1EE3n ti\u1EBFng Anh) \u2192 ghi B\u1EB0NG TI\u1EBENG ANH g\u1ED1c (\u30C7\u30D7\u30ED\u30A4\u2192deploy...), KH\xD4NG d\u1ECBch sang ${L}.
 - D\xF9ng B\u1EA2NG Markdown khi c\xF3 s\u1ED1 li\u1EC7u/l\u1ECBch/so s\xE1nh.
-- KH\xD4NG b\u1ECBa; thi\u1EBFu th\xF4ng tin th\xEC \u0111\u1EC3 tr\u1ED1ng ho\u1EB7c ghi "Ch\u01B0a x\xE1c \u0111\u1ECBnh".` + _transcribeNote() + _extraBlock();
+- TUY\u1EC6T \u0110\u1ED0I KH\xD4NG B\u1ECAA: ch\u1EC9 t\xF3m t\u1EAFt n\u1ED9i dung C\xD3 TH\u1EACT trong transcript d\u01B0\u1EDBi \u0111\xE2y. KH\xD4NG t\u1EF1 ngh\u0129 ra ch\u1EE7 \u0111\u1EC1/quy\u1EBFt \u0111\u1ECBnh/ng\u01B0\u1EDDi ph\u1EE5 tr\xE1ch/deadline/con s\u1ED1 kh\xF4ng xu\u1EA5t hi\u1EC7n trong transcript.
+- N\u1EBFu transcript QU\xC1 NG\u1EAEN / ch\u01B0a \u0111\u1EE7 \xFD \u2192 CH\u1EC8 ghi 1-2 c\xE2u m\xF4 t\u1EA3 n\u1ED9i dung th\u1EF1c t\u1EBF (ho\u1EB7c \u0111\xFAng 1 d\xF2ng "Ch\u01B0a \u0111\u1EE7 n\u1ED9i dung \u0111\u1EC3 t\xF3m t\u1EAFt"); KH\xD4NG t\u1EA1o b\u1EA3ng/m\u1EE5c r\u1ED7ng, KH\xD4NG d\u1EF1ng cu\u1ED9c h\u1ECDp t\u01B0\u1EDFng t\u01B0\u1EE3ng.` + _transcribeNote() + _extraBlock();
       if (prevSummary && prevSummary.trim()) {
         return `B\u1EA1n \u0111ang duy tr\xEC B\u1EA2N T\xD3M T\u1EAET cu\u1ED9c h\u1ECDp \u0110ANG DI\u1EC4N RA (Markdown, ${L}). D\u01B0\u1EDBi \u0111\xE2y l\xE0 b\u1EA3n t\xF3m t\u1EAFt hi\u1EC7n t\u1EA1i v\xE0 C\xC1C C\xC2U M\u1EDAI. H\xE3y C\u1EACP NH\u1EACT: g\u1ED9p \xFD m\u1EDBi v\xE0o \u0111\xFAng m\u1EE5c, g\u1ED9p \xFD tr\xF9ng cho c\xF4 \u0111\u1ECDng, KH\xD4NG \u0111\u1EC3 ph\xECnh d\xE0i. Tr\u1EA3 v\u1EC1 TO\xC0N B\u1ED8 b\u1EA3n t\xF3m t\u1EAFt \u0111\xE3 c\u1EADp nh\u1EADt, CH\u1EC8 Markdown, kh\xF4ng l\u1EDDi d\u1EABn.
 
@@ -21419,7 +21445,7 @@ ${lines}`;
       "settings.source": "Ngu\u1ED3n \xE2m thanh",
       "settings.targetLang": "Ng\xF4n ng\u1EEF \u0111\xEDch",
       "uilang.title": "Ng\xF4n ng\u1EEF giao di\u1EC7n",
-      "popout.title": "T\xE1ch ra c\u1EEDa s\u1ED5 ri\xEAng",
+      "popout.title": "M\u1EDF trong tab ri\xEAng",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} Micro",
       "source.screen": "\u{1F50A} \xC2m thanh (tab / m\xE0n h\xECnh / c\u1EEDa s\u1ED5)",
@@ -21466,6 +21492,10 @@ ${lines}`;
       "pip.active": "\u0110ang hi\u1EC3n th\u1ECB \u1EDF c\u1EEDa s\u1ED5 ghim (PiP). \u0110\xF3ng PiP \u0111\u1EC3 \u0111\u01B0a n\u1ED9i dung v\u1EC1 \u0111\xE2y.",
       "status.pipUnsupported": "Tr\xECnh duy\u1EC7t kh\xF4ng h\u1ED7 tr\u1EE3 Document Picture-in-Picture.",
       "status.pipErr": "L\u1ED7i m\u1EDF PiP: {err}",
+      "pip.return": "Quay v\u1EC1 c\u1EEDa s\u1ED5 g\u1ED1c",
+      "status.micPermNeeded": '\u0110ang xin quy\u1EC1n micro \u1EDF c\u1EEDa s\u1ED5 v\u1EEBa m\u1EDF \u2014 ch\u1ECDn "Cho ph\xE9p" r\u1ED3i b\u1EA5m B\u1EAFt \u0111\u1EA7u l\u1EA1i.',
+      "status.micGranted": "\u2705 \u0110\xE3 c\u1EA5p quy\u1EC1n micro.",
+      "status.micPermHint": "\u{1F3A4} Micro ch\u01B0a \u0111\u01B0\u1EE3c c\u1EA5p quy\u1EC1n \u2014 b\u1EA5m B\u1EAFt \u0111\u1EA7u \u0111\u1EC3 c\u1EA5p.",
       "status.summaryApplied": "\u0110\xE3 \xE1p d\u1EE5ng y\xEAu c\u1EA7u & t\xF3m t\u1EAFt l\u1EA1i.",
       "status.noKeyShort": "Thi\u1EBFu API key.",
       "status.geminiErr": "Gemini: {err}"
@@ -21476,7 +21506,7 @@ ${lines}`;
       "settings.source": "Audio source",
       "settings.targetLang": "Target language",
       "uilang.title": "Interface language",
-      "popout.title": "Pop out to a separate window",
+      "popout.title": "Open in a separate tab",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} Microphone",
       "source.screen": "\u{1F50A} Audio (tab / screen / window)",
@@ -21523,6 +21553,10 @@ ${lines}`;
       "pip.active": "Now shown in the pinned (PiP) window. Close PiP to bring it back here.",
       "status.pipUnsupported": "Browser does not support Document Picture-in-Picture.",
       "status.pipErr": "PiP error: {err}",
+      "pip.return": "Return to original window",
+      "status.micPermNeeded": 'Requesting mic permission in the opened window \u2014 choose "Allow", then press Start again.',
+      "status.micGranted": "\u2705 Microphone permission granted.",
+      "status.micPermHint": "\u{1F3A4} Microphone not granted yet \u2014 press Start to grant.",
       "status.summaryApplied": "Instructions applied & re-summarized.",
       "status.noKeyShort": "Missing API key.",
       "status.geminiErr": "Gemini: {err}"
@@ -21533,7 +21567,7 @@ ${lines}`;
       "settings.source": "\u97F3\u58F0\u30BD\u30FC\u30B9",
       "settings.targetLang": "\u7FFB\u8A33\u5148\u306E\u8A00\u8A9E",
       "uilang.title": "\u8868\u793A\u8A00\u8A9E",
-      "popout.title": "\u5225\u30A6\u30A3\u30F3\u30C9\u30A6\u3067\u958B\u304F",
+      "popout.title": "\u5225\u30BF\u30D6\u3067\u958B\u304F",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} \u30DE\u30A4\u30AF",
       "source.screen": "\u{1F50A} \u97F3\u58F0\uFF08\u30BF\u30D6 / \u753B\u9762 / \u30A6\u30A3\u30F3\u30C9\u30A6\uFF09",
@@ -21580,6 +21614,10 @@ ${lines}`;
       "pip.active": "\u56FA\u5B9A\uFF08PiP\uFF09\u30A6\u30A3\u30F3\u30C9\u30A6\u306B\u8868\u793A\u4E2D\u3002PiP \u3092\u9589\u3058\u308B\u3068\u3053\u3053\u306B\u623B\u308A\u307E\u3059\u3002",
       "status.pipUnsupported": "\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u306F Document Picture-in-Picture \u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u305B\u3093\u3002",
       "status.pipErr": "PiP \u30A8\u30E9\u30FC: {err}",
+      "pip.return": "\u5143\u306E\u30A6\u30A3\u30F3\u30C9\u30A6\u306B\u623B\u3059",
+      "status.micPermNeeded": "\u958B\u3044\u305F\u30A6\u30A3\u30F3\u30C9\u30A6\u3067\u30DE\u30A4\u30AF\u6A29\u9650\u3092\u30EA\u30AF\u30A8\u30B9\u30C8\u4E2D \u2014 \u300C\u8A31\u53EF\u300D\u3092\u9078\u3093\u3067\u304B\u3089\u300C\u958B\u59CB\u300D\u3092\u62BC\u3057\u76F4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "status.micGranted": "\u2705 \u30DE\u30A4\u30AF\u6A29\u9650\u3092\u8A31\u53EF\u3057\u307E\u3057\u305F\u3002",
+      "status.micPermHint": "\u{1F3A4} \u30DE\u30A4\u30AF\u672A\u8A31\u53EF \u2014\u300C\u958B\u59CB\u300D\u3067\u8A31\u53EF\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "status.summaryApplied": "\u6307\u793A\u3092\u9069\u7528\u3057\u3066\u518D\u8981\u7D04\u3057\u307E\u3057\u305F\u3002",
       "status.noKeyShort": "API \u30AD\u30FC\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
       "status.geminiErr": "Gemini: {err}"
@@ -21590,7 +21628,7 @@ ${lines}`;
       "settings.source": "\uC624\uB514\uC624 \uC18C\uC2A4",
       "settings.targetLang": "\uB300\uC0C1 \uC5B8\uC5B4",
       "uilang.title": "\uD45C\uC2DC \uC5B8\uC5B4",
-      "popout.title": "\uBCC4\uB3C4 \uCC3D\uC73C\uB85C \uC5F4\uAE30",
+      "popout.title": "\uBCC4\uB3C4 \uD0ED\uC73C\uB85C \uC5F4\uAE30",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} \uB9C8\uC774\uD06C",
       "source.screen": "\u{1F50A} \uC624\uB514\uC624 (\uD0ED / \uD654\uBA74 / \uCC3D)",
@@ -21637,6 +21675,10 @@ ${lines}`;
       "pip.active": "\uACE0\uC815(PiP) \uCC3D\uC5D0 \uD45C\uC2DC \uC911\uC785\uB2C8\uB2E4. PiP\uB97C \uB2EB\uC73C\uBA74 \uC5EC\uAE30\uB85C \uB3CC\uC544\uC635\uB2C8\uB2E4.",
       "status.pipUnsupported": "\uC774 \uBE0C\uB77C\uC6B0\uC800\uB294 Document Picture-in-Picture\uB97C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.",
       "status.pipErr": "PiP \uC624\uB958: {err}",
+      "pip.return": "\uC6D0\uB798 \uCC3D\uC73C\uB85C \uBCF5\uADC0",
+      "status.micPermNeeded": '\uC5F4\uB9B0 \uCC3D\uC5D0\uC11C \uB9C8\uC774\uD06C \uAD8C\uD55C \uC694\uCCAD \uC911 \u2014 "\uD5C8\uC6A9"\uC744 \uC120\uD0DD\uD55C \uB4A4 \uB2E4\uC2DC \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.',
+      "status.micGranted": "\u2705 \uB9C8\uC774\uD06C \uAD8C\uD55C\uC774 \uD5C8\uC6A9\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
+      "status.micPermHint": "\u{1F3A4} \uB9C8\uC774\uD06C \uBBF8\uD5C8\uC6A9 \u2014 \uC2DC\uC791\uC744 \uB20C\uB7EC \uD5C8\uC6A9\uD558\uC138\uC694.",
       "status.summaryApplied": "\uC9C0\uC2DC\uB97C \uC801\uC6A9\uD558\uACE0 \uB2E4\uC2DC \uC694\uC57D\uD588\uC2B5\uB2C8\uB2E4.",
       "status.noKeyShort": "API \uD0A4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.",
       "status.geminiErr": "Gemini: {err}"
@@ -21647,7 +21689,7 @@ ${lines}`;
       "settings.source": "\u97F3\u9891\u6765\u6E90",
       "settings.targetLang": "\u76EE\u6807\u8BED\u8A00",
       "uilang.title": "\u754C\u9762\u8BED\u8A00",
-      "popout.title": "\u5728\u5355\u72EC\u7A97\u53E3\u4E2D\u6253\u5F00",
+      "popout.title": "\u5728\u5355\u72EC\u6807\u7B7E\u9875\u4E2D\u6253\u5F00",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} \u9EA6\u514B\u98CE",
       "source.screen": "\u{1F50A} \u97F3\u9891\uFF08\u6807\u7B7E\u9875 / \u5C4F\u5E55 / \u7A97\u53E3\uFF09",
@@ -21694,6 +21736,10 @@ ${lines}`;
       "pip.active": "\u5DF2\u5728\u60AC\u6D6E(PiP)\u7A97\u53E3\u663E\u793A\u3002\u5173\u95ED PiP \u53EF\u6062\u590D\u5230\u6B64\u5904\u3002",
       "status.pipUnsupported": "\u6D4F\u89C8\u5668\u4E0D\u652F\u6301 Document Picture-in-Picture\u3002",
       "status.pipErr": "PiP \u9519\u8BEF\uFF1A{err}",
+      "pip.return": "\u8FD4\u56DE\u539F\u7A97\u53E3",
+      "status.micPermNeeded": '\u6B63\u5728\u65B0\u7A97\u53E3\u8BF7\u6C42\u9EA6\u514B\u98CE\u6743\u9650 \u2014 \u9009\u62E9"\u5141\u8BB8"\u540E\u8BF7\u91CD\u65B0\u70B9\u51FB\u5F00\u59CB\u3002',
+      "status.micGranted": "\u2705 \u5DF2\u6388\u4E88\u9EA6\u514B\u98CE\u6743\u9650\u3002",
+      "status.micPermHint": "\u{1F3A4} \u9EA6\u514B\u98CE\u672A\u6388\u6743 \u2014 \u70B9\u51FB\u5F00\u59CB\u4EE5\u6388\u4E88\u3002",
       "status.summaryApplied": "\u5DF2\u5E94\u7528\u8981\u6C42\u5E76\u91CD\u65B0\u6458\u8981\u3002",
       "status.noKeyShort": "\u7F3A\u5C11 API \u5BC6\u94A5\u3002",
       "status.geminiErr": "Gemini\uFF1A{err}"
@@ -21831,7 +21877,7 @@ ${lines}`;
       rowById.set(e.id, row);
     }
     row.classList.toggle("partial", !!e.partial);
-    row.querySelector(".who").textContent = e.author || "STT";
+    row.querySelector(".who").textContent = e.author || "Speaker";
     row.querySelector(".ts").textContent = e.ts || "";
     row.querySelector(".entry-text").textContent = e.translated || e.original || "";
     refreshCount();
@@ -21851,9 +21897,12 @@ ${lines}`;
   var _gemCtx = null;
   var _gemPlayhead = 0;
   var _gemNodes = [];
-  var _GEM_LEAD = 0.18;
-  var _GEM_SOFT_LEAD = 0.6;
-  var _GEM_HARD_LEAD = 1.8;
+  var _GEM_LEAD = 0.4;
+  var _GEM_SOFT_LEAD = 1;
+  var _GEM_HARD_LEAD = 2.5;
+  var _GEM_START_LEAD = 0.2;
+  var _gemSpeed = 1;
+  var _gemLastEnd = 0;
   function ensureGemCtx() {
     if (!_gemCtx || _gemCtx.state === "closed") {
       _gemCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -21874,6 +21923,8 @@ ${lines}`;
     }
     _gemNodes = [];
     _gemPlayhead = 0;
+    _gemSpeed = 1;
+    _gemLastEnd = 0;
   }
   function playAudio({ b64, sampleRate }) {
     try {
@@ -21903,21 +21954,28 @@ ${lines}`;
           } else if ((nd._e || 0) > resumeAt) resumeAt = nd._e;
         }
         _gemPlayhead = resumeAt;
+        _gemSpeed = 1;
       }
       const lead = _gemPlayhead - ctx.currentTime;
-      const spd = lead > _GEM_SOFT_LEAD ? Math.min(1.12, 1 + (lead - _GEM_SOFT_LEAD) * 0.5) : 1;
+      if (lead > _GEM_SOFT_LEAD) _gemSpeed = 1.06;
+      else if (lead < _GEM_SOFT_LEAD * 0.5) _gemSpeed = 1;
+      const spd = _gemSpeed;
       const buf = ctx.createBuffer(1, n, sampleRate || 24e3);
       buf.getChannelData(0).set(f32);
       const node = ctx.createBufferSource();
       node.buffer = buf;
       node.playbackRate.value = spd;
       node.connect(ctx.destination);
-      if (_gemPlayhead < ctx.currentTime + 0.02) _gemPlayhead = ctx.currentTime + _GEM_LEAD;
+      if (_gemPlayhead < ctx.currentTime + 0.02) {
+        const idle = ctx.currentTime - _gemLastEnd;
+        _gemPlayhead = ctx.currentTime + (idle > 0.35 ? _GEM_START_LEAD : _GEM_LEAD);
+      }
       const startAt = _gemPlayhead;
       node.start(startAt);
       _gemPlayhead = startAt + buf.duration / spd;
       node._s = startAt;
       node._e = _gemPlayhead;
+      _gemLastEnd = _gemPlayhead;
       _gemNodes.push(node);
       node.onended = () => {
         const i = _gemNodes.indexOf(node);
@@ -21935,20 +21993,61 @@ ${lines}`;
   var rawStream = null;
   var watchdog = null;
   var lastTs = 0;
+  var MIC_GATE_RMS = 4e-3;
+  var MIC_GATE_HANG_MS = 700;
+  var micVoiceUntil = 0;
   async function startCapture() {
     let stream;
     if (S.source === "mic") {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+          video: false
+        });
+      } catch (e) {
+        if (e && (e.name === "NotAllowedError" || e.name === "NotFoundError" || e.name === "SecurityError")) {
+          _autoStartAfterGrant = true;
+          try {
+            const tab = await chrome.tabs.create({ url: chrome.runtime.getURL("mic-perm.html"), active: true });
+            _micPermTabId = tab && tab.id;
+          } catch (_) {
+            try {
+              await chrome.windows.create({ url: chrome.runtime.getURL("mic-perm.html"), type: "normal", width: 520, height: 420, focused: true });
+            } catch (__) {
+            }
+          }
+          const pe = new Error("mic-perm");
+          pe.name = "MicPermNeeded";
+          throw pe;
+        }
+        throw e;
+      }
     } else {
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          // Chrome 141+ (Win/macOS): gỡ tiếng do CHÍNH side panel này phát (TTS) khỏi system audio capture
+          // → chống TTS vọng lại ở TẦNG AUDIO (trước khi tới Gemini). No-op nếu nguồn không có system audio
+          // hoặc trình duyệt cũ chưa hỗ trợ (constraint "ideal" nên bị bỏ qua, KHÔNG ném lỗi).
+          restrictOwnAudio: true
+        },
+        systemAudio: "include",
+        // hiện rõ tuỳ chọn "chia sẻ âm thanh hệ thống" trong picker
+        selfBrowserSurface: "exclude"
+        // ẩn chính tab/panel của extension khỏi danh sách chọn
       });
       stream.getVideoTracks().forEach((t2) => t2.stop());
     }
     rawStream = stream;
     const tracks = stream.getAudioTracks();
     if (!tracks.length) throw new Error("ngu\u1ED3n kh\xF4ng c\xF3 audio \u2014 ch\u1ECDn 'Tab' ho\u1EB7c tick 'Chia s\u1EBB \xE2m thanh' khi ch\u1ECDn To\xE0n m\xE0n h\xECnh (c\u1EEDa s\u1ED5 app th\u01B0\u1EDDng kh\xF4ng c\xF3 audio)");
+    if (S.source !== "mic" && tracks[0] && tracks[0].getSettings) {
+      const aset = tracks[0].getSettings();
+      console.log("[capture] restrictOwnAudio =", aset.restrictOwnAudio, "\u2014 true = \u0111ang g\u1EE1 TTS c\u1EE7a panel kh\u1ECFi audio thu; undefined = tr\xECnh duy\u1EC7t ch\u01B0a h\u1ED7 tr\u1EE3");
+    }
     recActive = true;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16e3 });
     if (audioCtx.state === "suspended") {
@@ -21968,7 +22067,14 @@ ${lines}`;
     procNode.onaudioprocess = (e) => {
       if (!recActive) return;
       lastTs = Date.now();
-      live.pushAudio(new Float32Array(e.inputBuffer.getChannelData(0)));
+      const ch = e.inputBuffer.getChannelData(0);
+      if (S.source === "mic") {
+        let sum = 0;
+        for (let i = 0; i < ch.length; i++) sum += ch[i] * ch[i];
+        if (Math.sqrt(sum / ch.length) >= MIC_GATE_RMS) micVoiceUntil = lastTs + MIC_GATE_HANG_MS;
+        if (lastTs > micVoiceUntil) return;
+      }
+      live.pushAudio(new Float32Array(ch));
     };
     srcNode.connect(procNode);
     procNode.connect(zeroGain);
@@ -21982,6 +22088,18 @@ ${lines}`;
     tracks[0].addEventListener("ended", () => {
       if (recActive) stop();
     });
+    if (_isPopup && S.source === "mic" && "mediaSession" in navigator) {
+      try {
+        navigator.mediaSession.setActionHandler("enterpictureinpicture", () => {
+          if (!_inPip) {
+            _pipAuto = true;
+            openPip();
+          }
+        });
+        navigator.mediaSession.playbackState = "playing";
+      } catch (_) {
+      }
+    }
   }
   function stopCapture() {
     recActive = false;
@@ -22009,8 +22127,17 @@ ${lines}`;
     procNode = srcNode = zeroGain = audioCtx = null;
     rawStream?.getTracks().forEach((t2) => t2.stop());
     rawStream = null;
+    try {
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.setActionHandler("enterpictureinpicture", null);
+        navigator.mediaSession.playbackState = "none";
+      }
+    } catch (_) {
+    }
   }
   var running = false;
+  var _micPermTabId = null;
+  var _autoStartAfterGrant = false;
   function refreshStartBtn() {
     el.start.textContent = t(running ? "btn.stop" : "btn.start");
     el.start.classList.toggle("on", running);
@@ -22034,7 +22161,8 @@ ${lines}`;
       console.error(e);
       live.stop();
       stopCapture();
-      if (e && e.name === "NotAllowedError") st("status.canceled");
+      if (e && e.name === "MicPermNeeded") st("status.micPermNeeded", null, "err");
+      else if (e && e.name === "NotAllowedError") st("status.canceled");
       else st("status.captureErr", { err: e.message || e.name || e }, "err");
     }
   }
@@ -22048,6 +22176,49 @@ ${lines}`;
     refreshSpin();
     st("status.stopped");
   }
+  function closeSelf() {
+    try {
+      chrome.tabs.getCurrent((tab) => {
+        if (tab && tab.id != null) {
+          try {
+            chrome.tabs.remove(tab.id);
+          } catch (_) {
+            window.close();
+          }
+        } else window.close();
+      });
+    } catch (_) {
+      window.close();
+    }
+  }
+  async function _micPermState() {
+    try {
+      return (await navigator.permissions.query({ name: "microphone" })).state;
+    } catch (_) {
+      return "unknown";
+    }
+  }
+  async function ensureMicPermission() {
+    const s = await _micPermState();
+    if (s === "granted" || s === "unknown") return;
+    _autoStartAfterGrant = false;
+    if (_isPopup) {
+      try {
+        const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
+        ms.getTracks().forEach((t2) => t2.stop());
+        st("status.micGranted", null, "run");
+      } catch (_) {
+        st("status.micPermHint", null, "err");
+      }
+    } else {
+      try {
+        const tab = await chrome.tabs.create({ url: chrome.runtime.getURL("mic-perm.html"), active: true });
+        _micPermTabId = tab && tab.id;
+        st("status.micPermNeeded", null, "err");
+      } catch (_) {
+      }
+    }
+  }
   var summaryMd = "";
   var sumPrevCount = 0;
   var sumBusy = false;
@@ -22057,12 +22228,16 @@ ${lines}`;
   var SUM_MIN_NEW = 24;
   var SUM_POLL_MS = 12e3;
   var SUM_MAX_CAPS_PER_CALL = 25;
+  var SUM_MIN_FIRST = 8;
+  var SUM_MIN_FIRST_CHARS = 400;
   var finalized = () => captions.filter((c) => !c.partial);
   async function summarizeTick() {
     if (sumBusy) return;
     const caps = finalized();
     const newCount = caps.length - sumPrevCount;
-    if (!(newCount >= SUM_MIN_NEW || sumLastTime === 0 && caps.length > 0)) return;
+    const firstChars = caps.reduce((n, c) => n + (c.translated || c.original || "").length, 0);
+    const firstReady = sumLastTime === 0 && caps.length >= SUM_MIN_FIRST && firstChars >= SUM_MIN_FIRST_CHARS;
+    if (!(newCount >= SUM_MIN_NEW || firstReady)) return;
     sumBusy = true;
     refreshSpin();
     let newCaps = caps.slice(sumPrevCount);
@@ -22148,22 +22323,30 @@ ${lines}`;
         i++;
         continue;
       }
-      if (/^\s*([-*+])\s+/.test(ln)) {
-        out.push("<ul>");
-        while (i < lines.length && /^\s*([-*+])\s+/.test(lines[i])) {
-          out.push("<li>" + inline(lines[i].replace(/^\s*([-*+])\s+/, "")) + "</li>");
+      if (/^(\s*)([-*+]|\d+[.)])\s+/.test(ln)) {
+        const listRe = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+        const stack = [];
+        while (i < lines.length) {
+          const m = lines[i].match(listRe);
+          if (!m) break;
+          const indent = m[1].replace(/\t/g, "  ").length;
+          const tag = /^\d/.test(m[2]) ? "ol" : "ul";
+          const li = "<li>" + inline(m[3]);
+          if (!stack.length || indent > stack[stack.length - 1].indent) {
+            out.push("<" + tag + ">");
+            stack.push({ indent, tag });
+            out.push(li);
+          } else if (indent === stack[stack.length - 1].indent) {
+            out.push("</li>");
+            out.push(li);
+          } else {
+            while (stack.length > 1 && indent < stack[stack.length - 1].indent) out.push("</li></" + stack.pop().tag + ">");
+            out.push("</li>");
+            out.push(li);
+          }
           i++;
         }
-        out.push("</ul>");
-        continue;
-      }
-      if (/^\s*\d+\.\s+/.test(ln)) {
-        out.push("<ol>");
-        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-          out.push("<li>" + inline(lines[i].replace(/^\s*\d+\.\s+/, "")) + "</li>");
-          i++;
-        }
-        out.push("</ol>");
+        while (stack.length) out.push("</li></" + stack.pop().tag + ">");
         continue;
       }
       if (ln.includes("|") && i + 1 < lines.length && isSep(lines[i + 1])) {
@@ -22344,6 +22527,29 @@ ${lines}`;
     }
   }
   var _pipHolder = null;
+  var _inPip = false;
+  var _myWindowId = null;
+  var _pipAuto = false;
+  var _autoReturning = false;
+  var _isPopup = new URLSearchParams(location.search).get("popup") === "1";
+  var _prevTabId = (() => {
+    const v = new URLSearchParams(location.search).get("prev");
+    return v != null ? parseInt(v, 10) : null;
+  })();
+  function _setPipReturnMode(on) {
+    el.pipBtn.textContent = on ? "\u{1F519}" : "\u{1F4CC}";
+    el.pipBtn.title = t(on ? "pip.return" : "pip.title");
+  }
+  function returnFromPip() {
+    if (_myWindowId != null) {
+      try {
+        chrome.sidePanel.open({ windowId: _myWindowId });
+      } catch (_) {
+      }
+    }
+    const w = window.documentPictureInPicture && window.documentPictureInPicture.window;
+    if (w) w.close();
+  }
   async function openPip() {
     if (!("documentPictureInPicture" in window)) {
       st("status.pipUnsupported", null, "err");
@@ -22376,34 +22582,87 @@ ${lines}`;
         moved.push(n);
         pip.document.body.appendChild(n);
       }
-      const prevPip = el.pipBtn.style.display, prevPop = el.popoutBtn.style.display;
-      el.pipBtn.style.display = "none";
+      const prevPop = el.popoutBtn.style.display;
       el.popoutBtn.style.display = "none";
+      _inPip = true;
+      _setPipReturnMode(true);
       _pipHolder = document.createElement("div");
       _pipHolder.className = "pip-holder";
       _pipHolder.textContent = t("pip.active");
       document.body.appendChild(_pipHolder);
+      if (!_pipAuto && _prevTabId != null) {
+        try {
+          chrome.tabs.update(_prevTabId, { active: true });
+        } catch (_) {
+        }
+      }
       pip.addEventListener("pagehide", () => {
         if (_pipHolder) {
           _pipHolder.remove();
           _pipHolder = null;
         }
-        for (const n of moved) document.body.appendChild(n);
-        el.pipBtn.style.display = prevPip;
-        el.popoutBtn.style.display = prevPop;
+        if (_autoReturning) {
+          for (const n of moved) document.body.appendChild(n);
+          el.popoutBtn.style.display = prevPop;
+          _inPip = false;
+          _pipAuto = false;
+          _autoReturning = false;
+          _setPipReturnMode(false);
+        } else {
+          try {
+            stop();
+          } catch (_) {
+          }
+          closeSelf();
+        }
       });
     } catch (e) {
       st("status.pipErr", { err: e && e.message }, "err");
     }
   }
+  function softReturnFromPip() {
+    _autoReturning = true;
+    const w = window.documentPictureInPicture && window.documentPictureInPicture.window;
+    if (w) w.close();
+    else _autoReturning = false;
+  }
   function wire() {
     el.settingsBtn.addEventListener("click", () => el.settings.classList.toggle("hidden"));
-    el.pipBtn.addEventListener("click", openPip);
+    el.pipBtn.addEventListener("click", () => {
+      if (_inPip) returnFromPip();
+      else {
+        _pipAuto = false;
+        openPip();
+      }
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && _inPip && _pipAuto) softReturnFromPip();
+    });
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === "mic-granted") {
+        if (_micPermTabId != null) {
+          try {
+            chrome.tabs.remove(_micPermTabId);
+          } catch (_) {
+          }
+          _micPermTabId = null;
+        }
+        if (_autoStartAfterGrant && !running && S.source === "mic") start();
+        else if (!running) st("status.micGranted", null, "run");
+        _autoStartAfterGrant = false;
+      }
+    });
     el.popoutBtn.addEventListener("click", async () => {
       const page = location.pathname.split("/").pop() || "sidepanel.html";
       try {
         if (running) stop();
-        await chrome.windows.create({ url: chrome.runtime.getURL(page + "?popup=1"), type: "popup", width: 460, height: 820, focused: true });
+        let prev = "";
+        try {
+          const [act] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (act && act.id != null) prev = "&prev=" + act.id;
+        } catch (_) {
+        }
+        await chrome.tabs.create({ url: chrome.runtime.getURL(page + "?popup=1" + prev), active: true });
         window.close();
       } catch (e) {
         st("status.popoutErr", { err: e && e.message }, "err");
@@ -22435,7 +22694,10 @@ ${lines}`;
       clearTimeout(keyTimer);
       keyTimer = setTimeout(checkKey, 600);
     });
-    el.source.addEventListener("change", () => save({ source: el.source.value }));
+    el.source.addEventListener("change", () => {
+      save({ source: el.source.value });
+      if (el.source.value === "mic") ensureMicPermission();
+    });
     el.voice.addEventListener("change", () => {
       const v = el.voice.value;
       if (v === "__off__") {
@@ -22512,7 +22774,17 @@ ${lines}`;
   (async function init() {
     await loadSettings();
     setLocale(S.uiLang || "vi");
-    if (new URLSearchParams(location.search).get("popup") === "1") el.popoutBtn.style.display = "none";
+    if (_isPopup) {
+      el.popoutBtn.style.display = "none";
+      try {
+        chrome.tabs.getCurrent((tab) => {
+          if (tab) _myWindowId = tab.windowId;
+        });
+      } catch (_) {
+      }
+    } else {
+      el.pipBtn.style.display = "none";
+    }
     if (S.source !== "mic" && S.source !== "screen") save({ source: "screen" });
     el.apikey.value = S.apiKey;
     el.source.value = S.source;
@@ -22528,5 +22800,6 @@ ${lines}`;
     wire();
     if (S.apiKey) checkKey();
     st(S.apiKey ? "status.ready" : "status.readyNoKey");
+    if (S.source === "mic") ensureMicPermission();
   })();
 })();
