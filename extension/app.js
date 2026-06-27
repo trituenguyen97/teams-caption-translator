@@ -87,6 +87,8 @@ function upsertRow(e) {
       if (l.t) { const d = document.createElement('div'); d.className = 'entry-text'; d.textContent = l.t; body.appendChild(d); }
     }
   }
+  // "Chỉ dịch": hàng chưa có bản dịch (dịch đang về / model gộp câu) → ẩn cho gọn; có dịch thì hiện lại
+  row.style.display = (lay === 'translation' && !body.childNodes.length) ? 'none' : '';
   refreshCount();
   if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
 }

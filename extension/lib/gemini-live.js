@@ -6,8 +6,9 @@ import { bcp47 } from './langs.js';
 
 const MODEL = 'gemini-3.5-live-translate-preview';
 const RECONNECT_MS = 1500;
-const LONG_IDLE_MS = 2500;     // nói liên tục không có turnComplete → sau ~2.5s im thì chốt entry hiện tại, sang entry mới
-const INPUT_GRACE_MS = 700;    // sau turnComplete chờ ~0.7s cho transcript về nốt rồi mới chốt
+const LONG_IDLE_MS = 2500;     // nghỉ ~2.5s không có turnComplete → quét lại để chốt nốt các cặp đã đủ dấu chấm (KHÔNG ép ngắt câu đang dở)
+const INPUT_GRACE_MS = 700;    // sau turnComplete chờ ~0.7s cho transcript về nốt rồi mới chốt hẳn câu cuối
+const TR_SENT_END = /[.!?。．！？]\s*$/;   // chuỗi KẾT THÚC bằng dấu kết câu → câu đã trọn (khớp _splitVI)
 // Phát TTS THEO CÂU: gom audio tới khi BẢN DỊCH gặp dấu KẾT CÂU ( . ! ? ) — hoặc audio nghỉ — rồi phát cả câu → "đủ câu mới đọc".
 const AUDIO_MAX_SAMPLES = (24000 * 3) | 0;     // trần an toàn 3s: không gặp dấu kết câu/nghỉ vẫn phát (chống kẹt)
 const AUDIO_IDLE_MS = 250;                     // audio ngừng ~0.25s (model nghỉ cuối câu) → phát nốt
@@ -42,7 +43,8 @@ export function createLiveTranslator(opts) {
   let _started = false, _session = null, _connecting = null, _gen = 0;
   let _handle = null;
   let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-  let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false, _inSeen = '', _outSeen = '';   // _inAcc=GỐC, _outAcc=DỊCH; _inSeen/_outSeen=phần đã chốt vào entry trước (chống lặp khi stream cumulative)
+  let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false, _doneRows = 0;   // _lineBase=id hàng ĐẦU của lượt; mỗi câu GỐC=1 hàng (id=_lineBase+i); _doneRows=số hàng đã chốt đủ cặp (khỏi vẽ lại)
+  const _rowTs = {};   // id hàng → mốc thời gian (đặt 1 lần lúc câu gốc có dấu chấm → "dòng thời gian" cố định)
   let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
 
   const isConfigured = () => !!(st().apiKey && String(st().apiKey).trim());
@@ -69,33 +71,48 @@ export function createLiveTranslator(opts) {
   }
   // So sánh đã-chuẩn-hoá để dedupe khi lời gốc ≈ bản dịch (người nói đúng ngôn ngữ đích → khỏi hiện 2 dòng trùng).
   function _norm(s) { return (s || '').replace(/[\s。、，．！？!?.,]+/g, '').toLowerCase(); }
-  // Gửi 1 entry song ngữ (lines = [{o,t}]); dedupe khi gốc≈dịch (nói tiếng đích).
-  function _send(id, lines, turnDone) {
+  // Đếm câu HOÀN CHỈNH (đã có dấu kết câu); câu cuối chưa có dấu chấm → CHƯA tính (không tự ngắt khi chưa có dấu chấm).
+  function _doneCount(s) { s = (s || '').trim(); if (!s) return 0; const segs = _splitVI(s); return TR_SENT_END.test(s) ? segs.length : Math.max(0, segs.length - 1); }
+  // Gửi 1 entry song ngữ (lines = [{o,t}]); dedupe khi gốc≈dịch (nói tiếng đích). ts cố định theo hàng (giữ "dòng thời gian").
+  function _send(id, lines, turnDone, ts) {
     lines = lines.map(l => { let o = (l.o || '').trim(); const tt = (l.t || '').trim(); if (o && tt && _norm(o) === _norm(tt)) o = ''; return { o, t: tt }; }).filter(l => l.o || l.t);
     if (!lines.length) return false;
     const original = lines.map(l => l.o).filter(Boolean).join('\n');
     const translated = lines.map(l => l.t).filter(Boolean).join('\n');
-    onCaption({ id, author: 'STT', lines, original, translated, isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
+    onCaption({ id, author: 'STT', lines, original, translated, isPartial: !turnDone, ts: ts || _ts(), tsMs: Date.now() });
     return true;
   }
-  // Hiển thị TRỰC TIẾP bản dịch của live-translate (realtime, không gọi thêm API). Mỗi luồng (gốc/dịch) TỰ xuống dòng
-  // tại dấu kết câu — ĐỘC LẬP, không ép ghép cặp. 1 entry / lượt nói; nghỉ lâu giữa lượt → chốt entry rồi sang entry mới.
-  // _inSeen/_outSeen = phần đã chốt vào entry trước trong CÙNG lượt → strip prefix để KHỎI lặp khi model gửi cumulative.
+  // Hiển thị TRỰC TIẾP bản dịch của live-translate (realtime). MỖI CÂU GỐC có dấu chấm = 1 HÀNG riêng (id=_lineBase+i, có mốc
+  // thời gian cố định); câu DỊCH tương ứng RÁP vào đúng hàng đó (gốc trái / dịch phải KHỚP HÀNG).
+  // KHÔNG tự ngắt khi chưa có dấu chấm: câu gốc đang dở = dòng live (partial); chỉ chốt thành hàng khi có dấu kết câu (hoặc hết LƯỢT).
   function _pump(final) {
     const transcribe = !!st().transcribeMode;
-    const inNew = _inAcc.startsWith(_inSeen) ? _inAcc.slice(_inSeen.length) : _inAcc;
-    const outNew = _outAcc.startsWith(_outSeen) ? _outAcc.slice(_outSeen.length) : _outAcc;
-    const oLines = _splitVI(inNew).join('\n');     // gốc: mỗi câu (gặp . ! ? 。…) một dòng; câu đang dở ở dòng cuối
-    const o = transcribe ? '' : oLines;
-    const tt = transcribe ? oLines : _splitVI(outNew).join('\n');   // dịch: tự xuống dòng theo dấu chấm của CHÍNH nó
-    if (o || tt) _send(_lineBase, [{ o, t: tt }], final);   // 1 entry: gốc-nhiều-dòng + dịch-nhiều-dòng (không pair)
-    if (final) {
-      if (o || tt) _lineBase++;            // vừa chốt nội dung → sang entry mới
-      _inSeen = _inAcc; _outSeen = _outAcc;
-      if (_turnEnded) { _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; _turnEnded = false; }   // hết LƯỢT thật → reset hẳn
+    const jaAll = _splitVI(_inAcc);
+    const viAll = transcribe ? jaAll : _splitVI(_outAcc);
+    const n = jaAll.length;                            // số dòng gốc (gồm câu đang dở ở cuối)
+    const turnEnd = final && _turnEnded;               // hết LƯỢT thật → mới được chốt cả câu cuối chưa có dấu chấm
+    if (n) {
+      const jaDone = _doneCount(_inAcc);               // số câu gốc ĐÃ có dấu chấm
+      const viDone = transcribe ? jaDone : _doneCount(_outAcc);
+      for (let i = _doneRows; i < n; i++) {
+        const id = _lineBase + i, last = (i === n - 1);
+        const gocDone = turnEnd ? true : (i < jaDone);   // hàng chỉ "chốt" khi gốc có dấu chấm (idle KHÔNG ép ngắt câu dở)
+        const o = transcribe ? '' : (jaAll[i] || '');
+        // dịch của hàng i; dòng CUỐI gom mọi câu dịch dư (model tách nhiều câu hơn gốc) để không mất chữ
+        const t = transcribe ? (jaAll[i] || '') : (last ? viAll.slice(i).join('\n') : (viAll[i] || ''));
+        if (gocDone && !_rowTs[id]) _rowTs[id] = _ts();  // đặt mốc thời gian 1 lần khi câu gốc chốt
+        _send(id, transcribe ? [{ o: '', t }] : [{ o, t }], gocDone, _rowTs[id]);
+      }
+      _doneRows = turnEnd ? n : Math.min(jaDone, viDone, n - 1);   // hàng < đây đã đủ cặp & ổn định → khỏi vẽ lại (chừa hàng cuối)
+    }
+    if (turnEnd) {                                     // sang LƯỢT mới: id tiếp sau các hàng lượt này
+      _lineBase += n; _inAcc = ''; _outAcc = ''; _turnEnded = false; _doneRows = 0; _clearRowTs();
     }
   }
   function _flush() { clearTimeout(_emitTimer); clearTimeout(_flushTimer); _pump(true); }
+  function _clearRowTs() { for (const k in _rowTs) delete _rowTs[k]; }
+  // Đóng CỨNG lượt hiện tại (stop / đổi ngôn ngữ giữa lượt): chừa id cho các hàng đã hiện để KHỎI đè khi sang lượt mới.
+  function _endTurnHard() { _lineBase += _splitVI(_inAcc).length; _inAcc = ''; _outAcc = ''; _turnEnded = false; _doneRows = 0; _clearRowTs(); }
 
   // ── Audio TTS: gom ~0.4s rồi phát trọn 1 lần ──
   function _flushAudio(reason) {
@@ -211,7 +228,7 @@ export function createLiveTranslator(opts) {
   function start() {
     if (_started) return;
     if (!isConfigured()) { onStatus({ error: 'no-key' }); return; }
-    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; _resetAudio();
+    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _doneRows = 0; _clearRowTs(); _resetAudio();
     _ensure().catch(() => {});
     console.log('[live] start');
   }
@@ -219,12 +236,12 @@ export function createLiveTranslator(opts) {
     _started = false;
     clearTimeout(_reconnectTimer); clearTimeout(_emitTimer); clearTimeout(_flushTimer);
     if (_inAcc || _outAcc) _flush();
-    _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; _handle = null; _resetAudio();
+    _endTurnHard(); _handle = null; _resetAudio();
     _closeSession();
     onClear();
     console.log('[live] stop');
   }
-  function onTargetLangChanged() { if (_started) { _handle = null; _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
+  function onTargetLangChanged() { if (_started) { _handle = null; _endTurnHard(); clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
   function onTranscribeModeChanged() { onTargetLangChanged(); }
   function onVoiceChanged() {   // đổi giọng → mở PHIÊN MỚI (bỏ resume) để áp dụng speechConfig giọng mới ngay
     if (!_started) return;

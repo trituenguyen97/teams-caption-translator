@@ -20814,6 +20814,7 @@
   var RECONNECT_MS = 1500;
   var LONG_IDLE_MS = 2500;
   var INPUT_GRACE_MS = 700;
+  var TR_SENT_END = /[.!?。．！？]\s*$/;
   var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
   var AUDIO_IDLE_MS = 250;
   var AUDIO_BREAK_GRACE_MS = 160;
@@ -20859,7 +20860,8 @@
     let _started = false, _session = null, _connecting = null, _gen = 0;
     let _handle = null;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _inSeen = "", _outSeen = "";
+    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _doneRows = 0;
+    const _rowTs = {};
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
     function _splitVI(s) {
@@ -20887,7 +20889,13 @@
     function _norm(s) {
       return (s || "").replace(/[\s。、，．！？!?.,]+/g, "").toLowerCase();
     }
-    function _send(id, lines, turnDone) {
+    function _doneCount(s) {
+      s = (s || "").trim();
+      if (!s) return 0;
+      const segs = _splitVI(s);
+      return TR_SENT_END.test(s) ? segs.length : Math.max(0, segs.length - 1);
+    }
+    function _send(id, lines, turnDone, ts) {
       lines = lines.map((l) => {
         let o = (l.o || "").trim();
         const tt = (l.t || "").trim();
@@ -20897,34 +20905,52 @@
       if (!lines.length) return false;
       const original = lines.map((l) => l.o).filter(Boolean).join("\n");
       const translated = lines.map((l) => l.t).filter(Boolean).join("\n");
-      onCaption({ id, author: "STT", lines, original, translated, isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
+      onCaption({ id, author: "STT", lines, original, translated, isPartial: !turnDone, ts: ts || _ts(), tsMs: Date.now() });
       return true;
     }
     function _pump(final) {
       const transcribe = !!st2().transcribeMode;
-      const inNew = _inAcc.startsWith(_inSeen) ? _inAcc.slice(_inSeen.length) : _inAcc;
-      const outNew = _outAcc.startsWith(_outSeen) ? _outAcc.slice(_outSeen.length) : _outAcc;
-      const oLines = _splitVI(inNew).join("\n");
-      const o = transcribe ? "" : oLines;
-      const tt = transcribe ? oLines : _splitVI(outNew).join("\n");
-      if (o || tt) _send(_lineBase, [{ o, t: tt }], final);
-      if (final) {
-        if (o || tt) _lineBase++;
-        _inSeen = _inAcc;
-        _outSeen = _outAcc;
-        if (_turnEnded) {
-          _inAcc = "";
-          _outAcc = "";
-          _inSeen = "";
-          _outSeen = "";
-          _turnEnded = false;
+      const jaAll = _splitVI(_inAcc);
+      const viAll = transcribe ? jaAll : _splitVI(_outAcc);
+      const n = jaAll.length;
+      const turnEnd = final && _turnEnded;
+      if (n) {
+        const jaDone = _doneCount(_inAcc);
+        const viDone = transcribe ? jaDone : _doneCount(_outAcc);
+        for (let i = _doneRows; i < n; i++) {
+          const id = _lineBase + i, last = i === n - 1;
+          const gocDone = turnEnd ? true : i < jaDone;
+          const o = transcribe ? "" : jaAll[i] || "";
+          const t2 = transcribe ? jaAll[i] || "" : last ? viAll.slice(i).join("\n") : viAll[i] || "";
+          if (gocDone && !_rowTs[id]) _rowTs[id] = _ts();
+          _send(id, transcribe ? [{ o: "", t: t2 }] : [{ o, t: t2 }], gocDone, _rowTs[id]);
         }
+        _doneRows = turnEnd ? n : Math.min(jaDone, viDone, n - 1);
+      }
+      if (turnEnd) {
+        _lineBase += n;
+        _inAcc = "";
+        _outAcc = "";
+        _turnEnded = false;
+        _doneRows = 0;
+        _clearRowTs();
       }
     }
     function _flush() {
       clearTimeout(_emitTimer);
       clearTimeout(_flushTimer);
       _pump(true);
+    }
+    function _clearRowTs() {
+      for (const k in _rowTs) delete _rowTs[k];
+    }
+    function _endTurnHard() {
+      _lineBase += _splitVI(_inAcc).length;
+      _inAcc = "";
+      _outAcc = "";
+      _turnEnded = false;
+      _doneRows = 0;
+      _clearRowTs();
     }
     function _flushAudio(reason) {
       clearTimeout(_audioIdleTimer);
@@ -21119,8 +21145,8 @@
       _handle = null;
       _inAcc = "";
       _outAcc = "";
-      _inSeen = "";
-      _outSeen = "";
+      _doneRows = 0;
+      _clearRowTs();
       _resetAudio();
       _ensure().catch(() => {
       });
@@ -21132,10 +21158,7 @@
       clearTimeout(_emitTimer);
       clearTimeout(_flushTimer);
       if (_inAcc || _outAcc) _flush();
-      _inAcc = "";
-      _outAcc = "";
-      _inSeen = "";
-      _outSeen = "";
+      _endTurnHard();
       _handle = null;
       _resetAudio();
       _closeSession();
@@ -21145,10 +21168,7 @@
     function onTargetLangChanged() {
       if (_started) {
         _handle = null;
-        _inAcc = "";
-        _outAcc = "";
-        _inSeen = "";
-        _outSeen = "";
+        _endTurnHard();
         clearTimeout(_emitTimer);
         clearTimeout(_flushTimer);
         _resetAudio();
@@ -21868,6 +21888,7 @@ ${lines}`;
         }
       }
     }
+    row.style.display = lay === "translation" && !body.childNodes.length ? "none" : "";
     refreshCount();
     if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
   }
