@@ -8,7 +8,7 @@ import { I18N_LOCALES, flag, t, setLocale, currentLocale, applyI18n } from './li
 // ── State + lưu trữ ────────────────────────────────────────────────────────────
 const DEFAULTS = {
   apiKey: '', langCode: 'vi', transcribeMode: false, geminiVoice: DEFAULT_VOICE,
-  geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi', showOriginal: false,
+  geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi', layout: 'translation',
 };
 const S = { ...DEFAULTS };
 async function loadSettings() { const got = await chrome.storage.local.get(DEFAULTS); Object.assign(S, got); }
@@ -21,8 +21,8 @@ const el = {
   langBtn: $('lang-btn'), langMenu: $('lang-menu'),
   apikey: $('apikey'), keyStatus: $('key-status'), source: $('source'),
   targetBtn: $('target-btn'), targetMenu: $('target-menu'),
-  voice: $('voice'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
-  autoscroll: $('autoscroll'), origBtn: $('orig-btn'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
+  voiceBtn: $('voice-btn'), voiceMenu: $('voice-menu'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
+  autoscroll: $('autoscroll'), layoutPick: $('layout-pick'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
   summaryWrap: $('summary-wrap'), summary: $('summary'), sumSpin: $('sum-spin'),
   sumEdit: $('sum-edit'), sumEditBox: $('sum-edit-box'), summaryExtra: $('summary-extra'), sumExtraSave: $('sum-extra-save'),
   sumFull: $('sum-full'), sumCopy: $('sum-copy'), sumExport: $('sum-export'),
@@ -74,15 +74,24 @@ function upsertRow(e) {
   row.querySelector('.ts').textContent = e.ts || '';
   const body = row.querySelector('.entry-body');
   const lines = (e.lines && e.lines.length) ? e.lines : [{ o: e.original || '', t: e.translated || '' }];
+  const lay = S.layout || 'translation';
+  body.className = 'entry-body' + (lay === 'columns' ? ' cols' : '');
   body.innerHTML = '';
-  for (const l of lines) {   // mặc định CHỈ dịch; bật "Gốc" → kèm câu gốc (mờ). Tắt gốc thì KHÔNG bao giờ hiện ja.
-    if (S.showOriginal && l.o) { const d = document.createElement('div'); d.className = 'entry-orig'; d.textContent = l.o; body.appendChild(d); }
-    if (l.t) { const d = document.createElement('div'); d.className = 'entry-text'; d.textContent = l.t; body.appendChild(d); }
+  for (const l of lines) {
+    if (lay === 'columns') {   // 2 cột: gốc trái | dịch phải
+      const o = document.createElement('div'); o.className = 'col-o'; o.textContent = l.o || '';
+      const tt = document.createElement('div'); tt.className = 'col-t'; tt.textContent = l.t || '';
+      body.appendChild(o); body.appendChild(tt);
+    } else {
+      if (lay === 'stacked' && l.o) { const d = document.createElement('div'); d.className = 'entry-orig'; d.textContent = l.o; body.appendChild(d); }
+      if (l.t) { const d = document.createElement('div'); d.className = 'entry-text'; d.textContent = l.t; body.appendChild(d); }
+    }
   }
   refreshCount();
   if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
 }
-function reRenderAll() { for (const e of captions) upsertRow(e); }   // áp dụng lại khi bật/tắt hiện gốc
+function reRenderAll() { for (const e of captions) upsertRow(e); }   // áp dụng lại khi đổi layout
+function setLayoutActive() { el.layoutPick.querySelectorAll('.lay-opt').forEach(b => b.classList.toggle('active', b.dataset.layout === S.layout)); }
 function clearList() {
   captions.length = 0; byId.clear(); rowById.clear(); el.list.innerHTML = ''; refreshCount();
   summaryMd = ''; sumPrevCount = 0; sumLastTime = 0; renderSummary();
@@ -386,16 +395,30 @@ function exportTranscript() {
 }
 
 // ── UI build (cờ + dropdown ngôn ngữ + giọng) ───────────────────────────────────────
-function buildVoiceSelect() {
-  el.voice.innerHTML = '';
-  const off = document.createElement('option'); off.value = '__off__'; off.textContent = t('voice.off'); el.voice.appendChild(off);
-  for (const v of GEM_VOICES) { const o = document.createElement('option'); o.value = v; o.textContent = '🔊 ' + v; el.voice.appendChild(o); }
-  el.voice.value = S.geminiAudioOn ? S.geminiVoice : '__off__';
+function buildVoiceButton() {
+  el.voiceBtn.textContent = S.geminiAudioOn ? '🔊' : '🔇';
+  el.voiceBtn.style.display = S.transcribeMode ? 'none' : '';   // chép lời → không có TTS
 }
-function buildTargetButton() {
-  el.targetBtn.innerHTML = S.transcribeMode
-    ? `<span>${t('lang.transcribe')}</span>`
-    : `<span class="flag">${flag(S.langCode)}</span><span>${langName(S.langCode)}</span>`;
+function buildVoiceMenu() {
+  el.voiceMenu.innerHTML = '';
+  const off = document.createElement('button'); off.type = 'button'; off.textContent = t('voice.off');
+  if (!S.geminiAudioOn) off.classList.add('sel');
+  off.addEventListener('click', () => { save({ geminiAudioOn: false }); live.setAudioOn(false); buildVoiceButton(); closeMenus(); });
+  el.voiceMenu.appendChild(off);
+  for (const v of GEM_VOICES) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = '🔊 ' + v;
+    if (S.geminiAudioOn && S.geminiVoice === v) b.classList.add('sel');
+    b.addEventListener('click', () => {
+      const changed = v !== S.geminiVoice;
+      save({ geminiAudioOn: true, geminiVoice: v }); live.setAudioOn(true);
+      if (changed && running) live.onVoiceChanged();   // đổi giọng → reconnect áp dụng ngay (~1.5s)
+      buildVoiceButton(); closeMenus();
+    });
+    el.voiceMenu.appendChild(b);
+  }
+}
+function buildTargetButton() {   // toolbar: gọn — chỉ cờ (hoặc 📝 khi chép lời)
+  el.targetBtn.innerHTML = S.transcribeMode ? '<span>📝</span>' : `<span class="flag">${flag(S.langCode)}</span>`;
 }
 function buildLangMenu() {
   el.langMenu.innerHTML = '';
@@ -425,15 +448,15 @@ function buildTargetMenu() {
 function pickTarget(code, transcribe) {
   if (transcribe) { save({ transcribeMode: true }); live.onTranscribeModeChanged(); }
   else { const wasT = S.transcribeMode; save({ langCode: code, transcribeMode: false }); wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged(); }
-  el.voice.disabled = S.transcribeMode;
+  buildVoiceButton();   // chép lời → ẩn nút giọng
   buildTargetButton();
 }
-function closeMenus() { el.langMenu.classList.add('hidden'); el.targetMenu.classList.add('hidden'); }
+function closeMenus() { el.langMenu.classList.add('hidden'); el.targetMenu.classList.add('hidden'); el.voiceMenu.classList.add('hidden'); }
 
 function applyLocale(code) {
   setLocale(code); save({ uiLang: code });
   applyI18n(document);
-  buildVoiceSelect(); buildTargetButton(); refreshStartBtn(); refreshCount(); renderSummary();
+  buildVoiceButton(); buildTargetButton(); refreshStartBtn(); refreshCount(); renderSummary();
   el.langBtn.innerHTML = GLOBE;
   if (_lastStatus) st(_lastStatus.key, _lastStatus.vars, _lastStatus.cls);
 }
@@ -548,19 +571,11 @@ function wire() {
 
   el.apikey.addEventListener('input', () => { save({ apiKey: el.apikey.value.trim() }); clearTimeout(keyTimer); keyTimer = setTimeout(checkKey, 600); });
   el.source.addEventListener('change', () => { save({ source: el.source.value }); if (el.source.value === 'mic') ensureMicPermission(); });   // chọn Micro → xin quyền luôn
-  el.voice.addEventListener('change', () => {
-    const v = el.voice.value;
-    if (v === '__off__') { save({ geminiAudioOn: false }); live.setAudioOn(false); }
-    else {
-      const changed = v !== S.geminiVoice;
-      save({ geminiAudioOn: true, geminiVoice: v }); live.setAudioOn(true);
-      if (changed && running) live.onVoiceChanged();   // đổi giọng → reconnect áp dụng voiceName mới (~1.5s)
-    }
-  });
+  el.voiceBtn.addEventListener('click', (e) => { e.stopPropagation(); const show = el.voiceMenu.classList.contains('hidden'); closeMenus(); if (show) { buildVoiceMenu(); el.voiceMenu.classList.remove('hidden'); } });
   el.start.addEventListener('click', () => running ? stop() : start());
   el.clear.addEventListener('click', clearList);
   el.export.addEventListener('click', exportTranscript);
-  el.origBtn.addEventListener('click', () => { save({ showOriginal: !S.showOriginal }); el.origBtn.classList.toggle('active', S.showOriginal); reRenderAll(); });
+  el.layoutPick.addEventListener('click', (ev) => { const b = ev.target.closest('.lay-opt'); if (!b) return; save({ layout: b.dataset.layout }); setLayoutActive(); reRenderAll(); });
   el.autoscroll.addEventListener('click', () => { autoScroll = !autoScroll; el.autoscroll.classList.toggle('active', autoScroll); if (autoScroll) el.list.scrollTop = el.list.scrollHeight; });
   el.list.addEventListener('scroll', () => { const near = el.list.scrollHeight - el.list.scrollTop - el.list.clientHeight < 40; autoScroll = near; el.autoscroll.classList.toggle('active', near); });
   el.summaryToggle.addEventListener('click', () => sumPanelOpen ? closeSummary() : openSummary());
@@ -603,8 +618,8 @@ function wire() {
   }
   if (S.source !== 'mic' && S.source !== 'screen') save({ source: 'screen' });   // migrate giá trị cũ ('tab')
   el.apikey.value = S.apiKey; el.source.value = S.source;
-  el.origBtn.classList.toggle('active', S.showOriginal);
-  buildVoiceSelect(); el.voice.disabled = S.transcribeMode;
+  setLayoutActive();
+  buildVoiceButton();
   buildTargetButton();
   el.langBtn.innerHTML = GLOBE;
   applyI18n(document); refreshStartBtn(); refreshCount(); renderSummary();

@@ -21481,6 +21481,10 @@ ${lines}`;
       settings: "C\xE0i \u0111\u1EB7t",
       "settings.apiKey": "Gemini API key",
       "settings.source": "Ngu\u1ED3n \xE2m thanh",
+      "settings.layout": "Giao di\u1EC7n d\u1ECBch",
+      "layout.translation": "Ch\u1EC9 b\u1EA3n d\u1ECBch",
+      "layout.stacked": "G\u1ED1c tr\xEAn, d\u1ECBch d\u01B0\u1EDBi",
+      "layout.columns": "G\u1ED1c tr\xE1i, d\u1ECBch ph\u1EA3i",
       "settings.targetLang": "Ng\xF4n ng\u1EEF \u0111\xEDch",
       "uilang.title": "Ng\xF4n ng\u1EEF giao di\u1EC7n",
       "popout.title": "M\u1EDF trong tab ri\xEAng",
@@ -21489,6 +21493,7 @@ ${lines}`;
       "source.screen": "\u{1F50A} \xC2m thanh (tab / m\xE0n h\xECnh / c\u1EEDa s\u1ED5)",
       "lang.transcribe": "\u{1F4DD} Ch\xE9p l\u1EDDi",
       "voice.off": "\u{1F507} T\u1EAFt \u0111\u1ECDc",
+      "voice.title": "Gi\u1ECDng \u0111\u1ECDc",
       "btn.start": "\u25B6 B\u1EAFt \u0111\u1EA7u",
       "btn.stop": "\u23F9 D\u1EEBng",
       "footer.auto": "\u2193 Auto",
@@ -21544,6 +21549,10 @@ ${lines}`;
       settings: "Settings",
       "settings.apiKey": "Gemini API key",
       "settings.source": "Audio source",
+      "settings.layout": "Translation layout",
+      "layout.translation": "Translation only",
+      "layout.stacked": "Original top, translation below",
+      "layout.columns": "Original left, translation right",
       "settings.targetLang": "Target language",
       "uilang.title": "Interface language",
       "popout.title": "Open in a separate tab",
@@ -21552,6 +21561,7 @@ ${lines}`;
       "source.screen": "\u{1F50A} Audio (tab / screen / window)",
       "lang.transcribe": "\u{1F4DD} Transcribe",
       "voice.off": "\u{1F507} Voice off",
+      "voice.title": "Voice",
       "btn.start": "\u25B6 Start",
       "btn.stop": "\u23F9 Stop",
       "footer.auto": "\u2193 Auto",
@@ -21607,6 +21617,10 @@ ${lines}`;
       settings: "\u8A2D\u5B9A",
       "settings.apiKey": "Gemini API \u30AD\u30FC",
       "settings.source": "\u97F3\u58F0\u30BD\u30FC\u30B9",
+      "settings.layout": "\u8868\u793A\u30EC\u30A4\u30A2\u30A6\u30C8",
+      "layout.translation": "\u8A33\u306E\u307F",
+      "layout.stacked": "\u539F\u6587(\u4E0A)/\u8A33(\u4E0B)",
+      "layout.columns": "\u539F\u6587(\u5DE6)/\u8A33(\u53F3)",
       "settings.targetLang": "\u7FFB\u8A33\u5148\u306E\u8A00\u8A9E",
       "uilang.title": "\u8868\u793A\u8A00\u8A9E",
       "popout.title": "\u5225\u30BF\u30D6\u3067\u958B\u304F",
@@ -21615,6 +21629,7 @@ ${lines}`;
       "source.screen": "\u{1F50A} \u97F3\u58F0\uFF08\u30BF\u30D6 / \u753B\u9762 / \u30A6\u30A3\u30F3\u30C9\u30A6\uFF09",
       "lang.transcribe": "\u{1F4DD} \u6587\u5B57\u8D77\u3053\u3057",
       "voice.off": "\u{1F507} \u8AAD\u307F\u4E0A\u3052\u30AA\u30D5",
+      "voice.title": "\u8AAD\u307F\u4E0A\u3052\u97F3\u58F0",
       "btn.start": "\u25B6 \u958B\u59CB",
       "btn.stop": "\u23F9 \u505C\u6B62",
       "footer.auto": "\u2193 \u81EA\u52D5",
@@ -21702,7 +21717,7 @@ ${lines}`;
     source: "mic",
     summaryExtra: "",
     uiLang: "vi",
-    showOriginal: false
+    layout: "translation"
   };
   var S = { ...DEFAULTS };
   async function loadSettings() {
@@ -21726,13 +21741,14 @@ ${lines}`;
     source: $("source"),
     targetBtn: $("target-btn"),
     targetMenu: $("target-menu"),
-    voice: $("voice"),
+    voiceBtn: $("voice-btn"),
+    voiceMenu: $("voice-menu"),
     start: $("start"),
     status: $("status"),
     list: $("list"),
     count: $("count"),
     autoscroll: $("autoscroll"),
-    origBtn: $("orig-btn"),
+    layoutPick: $("layout-pick"),
     summaryToggle: $("summary-toggle"),
     export: $("export"),
     clear: $("clear"),
@@ -21756,7 +21772,6 @@ ${lines}`;
     { code: "ko", name: "\uD55C\uAD6D\uC5B4" },
     { code: "zh-CN", name: "\u4E2D\u6587" }
   ];
-  var langName = (c) => (TARGET_LANGS.find((l) => l.code === c) || {}).name || c;
   var GLOBE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/><path d="M4.8 7.5h14.4M4.8 16.5h14.4"/></svg>';
   var _lastStatus = null;
   function st(key, vars, cls) {
@@ -21813,19 +21828,32 @@ ${lines}`;
     row.querySelector(".ts").textContent = e.ts || "";
     const body = row.querySelector(".entry-body");
     const lines = e.lines && e.lines.length ? e.lines : [{ o: e.original || "", t: e.translated || "" }];
+    const lay = S.layout || "translation";
+    body.className = "entry-body" + (lay === "columns" ? " cols" : "");
     body.innerHTML = "";
     for (const l of lines) {
-      if (S.showOriginal && l.o) {
-        const d = document.createElement("div");
-        d.className = "entry-orig";
-        d.textContent = l.o;
-        body.appendChild(d);
-      }
-      if (l.t) {
-        const d = document.createElement("div");
-        d.className = "entry-text";
-        d.textContent = l.t;
-        body.appendChild(d);
+      if (lay === "columns") {
+        const o = document.createElement("div");
+        o.className = "col-o";
+        o.textContent = l.o || "";
+        const tt = document.createElement("div");
+        tt.className = "col-t";
+        tt.textContent = l.t || "";
+        body.appendChild(o);
+        body.appendChild(tt);
+      } else {
+        if (lay === "stacked" && l.o) {
+          const d = document.createElement("div");
+          d.className = "entry-orig";
+          d.textContent = l.o;
+          body.appendChild(d);
+        }
+        if (l.t) {
+          const d = document.createElement("div");
+          d.className = "entry-text";
+          d.textContent = l.t;
+          body.appendChild(d);
+        }
       }
     }
     refreshCount();
@@ -21833,6 +21861,9 @@ ${lines}`;
   }
   function reRenderAll() {
     for (const e of captions) upsertRow(e);
+  }
+  function setLayoutActive() {
+    el.layoutPick.querySelectorAll(".lay-opt").forEach((b) => b.classList.toggle("active", b.dataset.layout === S.layout));
   }
   function clearList() {
     captions.length = 0;
@@ -22348,22 +22379,41 @@ ${lines}`;
     });
     download(`transcript-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.txt`, lines.join("\n"));
   }
-  function buildVoiceSelect() {
-    el.voice.innerHTML = "";
-    const off = document.createElement("option");
-    off.value = "__off__";
+  function buildVoiceButton() {
+    el.voiceBtn.textContent = S.geminiAudioOn ? "\u{1F50A}" : "\u{1F507}";
+    el.voiceBtn.style.display = S.transcribeMode ? "none" : "";
+  }
+  function buildVoiceMenu() {
+    el.voiceMenu.innerHTML = "";
+    const off = document.createElement("button");
+    off.type = "button";
     off.textContent = t("voice.off");
-    el.voice.appendChild(off);
+    if (!S.geminiAudioOn) off.classList.add("sel");
+    off.addEventListener("click", () => {
+      save({ geminiAudioOn: false });
+      live.setAudioOn(false);
+      buildVoiceButton();
+      closeMenus();
+    });
+    el.voiceMenu.appendChild(off);
     for (const v of GEM_VOICES) {
-      const o = document.createElement("option");
-      o.value = v;
-      o.textContent = "\u{1F50A} " + v;
-      el.voice.appendChild(o);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "\u{1F50A} " + v;
+      if (S.geminiAudioOn && S.geminiVoice === v) b.classList.add("sel");
+      b.addEventListener("click", () => {
+        const changed = v !== S.geminiVoice;
+        save({ geminiAudioOn: true, geminiVoice: v });
+        live.setAudioOn(true);
+        if (changed && running) live.onVoiceChanged();
+        buildVoiceButton();
+        closeMenus();
+      });
+      el.voiceMenu.appendChild(b);
     }
-    el.voice.value = S.geminiAudioOn ? S.geminiVoice : "__off__";
   }
   function buildTargetButton() {
-    el.targetBtn.innerHTML = S.transcribeMode ? `<span>${t("lang.transcribe")}</span>` : `<span class="flag">${flag(S.langCode)}</span><span>${langName(S.langCode)}</span>`;
+    el.targetBtn.innerHTML = S.transcribeMode ? "<span>\u{1F4DD}</span>" : `<span class="flag">${flag(S.langCode)}</span>`;
   }
   function buildLangMenu() {
     el.langMenu.innerHTML = "";
@@ -22411,18 +22461,19 @@ ${lines}`;
       save({ langCode: code, transcribeMode: false });
       wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged();
     }
-    el.voice.disabled = S.transcribeMode;
+    buildVoiceButton();
     buildTargetButton();
   }
   function closeMenus() {
     el.langMenu.classList.add("hidden");
     el.targetMenu.classList.add("hidden");
+    el.voiceMenu.classList.add("hidden");
   }
   function applyLocale(code) {
     setLocale(code);
     save({ uiLang: code });
     applyI18n(document);
-    buildVoiceSelect();
+    buildVoiceButton();
     buildTargetButton();
     refreshStartBtn();
     refreshCount();
@@ -22649,24 +22700,23 @@ ${lines}`;
       save({ source: el.source.value });
       if (el.source.value === "mic") ensureMicPermission();
     });
-    el.voice.addEventListener("change", () => {
-      const v = el.voice.value;
-      if (v === "__off__") {
-        save({ geminiAudioOn: false });
-        live.setAudioOn(false);
-      } else {
-        const changed = v !== S.geminiVoice;
-        save({ geminiAudioOn: true, geminiVoice: v });
-        live.setAudioOn(true);
-        if (changed && running) live.onVoiceChanged();
+    el.voiceBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const show = el.voiceMenu.classList.contains("hidden");
+      closeMenus();
+      if (show) {
+        buildVoiceMenu();
+        el.voiceMenu.classList.remove("hidden");
       }
     });
     el.start.addEventListener("click", () => running ? stop() : start());
     el.clear.addEventListener("click", clearList);
     el.export.addEventListener("click", exportTranscript);
-    el.origBtn.addEventListener("click", () => {
-      save({ showOriginal: !S.showOriginal });
-      el.origBtn.classList.toggle("active", S.showOriginal);
+    el.layoutPick.addEventListener("click", (ev) => {
+      const b = ev.target.closest(".lay-opt");
+      if (!b) return;
+      save({ layout: b.dataset.layout });
+      setLayoutActive();
       reRenderAll();
     });
     el.autoscroll.addEventListener("click", () => {
@@ -22745,9 +22795,8 @@ ${lines}`;
     if (S.source !== "mic" && S.source !== "screen") save({ source: "screen" });
     el.apikey.value = S.apiKey;
     el.source.value = S.source;
-    el.origBtn.classList.toggle("active", S.showOriginal);
-    buildVoiceSelect();
-    el.voice.disabled = S.transcribeMode;
+    setLayoutActive();
+    buildVoiceButton();
     buildTargetButton();
     el.langBtn.innerHTML = GLOBE;
     applyI18n(document);

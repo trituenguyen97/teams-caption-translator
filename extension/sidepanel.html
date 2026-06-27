@@ -35,18 +35,27 @@
       </select>
     </div>
     <div class="fld">
-      <span data-i18n="settings.targetLang">Ngôn ngữ đích</span>
-      <div class="dd">
-        <button id="target-btn" class="flag-select" type="button"></button>
-        <div id="target-menu" class="menu hidden"></div>
+      <span data-i18n="settings.layout">Giao diện dịch</span>
+      <div class="layout-pick" id="layout-pick">
+        <button class="lay-opt" data-layout="translation" data-i18n-title="layout.translation" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="5" width="12" height="2" rx="1"/><rect x="2" y="9" width="9" height="2" rx="1"/></svg></button>
+        <button class="lay-opt" data-layout="stacked" data-i18n-title="layout.stacked" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="4" rx="1" opacity=".5"/><rect x="2" y="9" width="12" height="4" rx="1"/></svg></button>
+        <button class="lay-opt" data-layout="columns" data-i18n-title="layout.columns" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="10" rx="1" opacity=".5"/><rect x="9" y="3" width="5" height="10" rx="1"/></svg></button>
       </div>
     </div>
   </section>
 
   <!-- Thanh điều khiển -->
   <section class="controls">
-    <div class="row">
-      <select id="voice" title="Voice"></select>
+    <div class="row toolbar">
+      <div class="dd">
+        <button id="target-btn" class="pick-btn" data-i18n-title="settings.targetLang" type="button"></button>
+        <div id="target-menu" class="menu hidden"></div>
+      </div>
+      <div class="dd">
+        <button id="voice-btn" class="pick-btn" data-i18n-title="voice.title" type="button">🔊</button>
+        <div id="voice-menu" class="menu hidden"></div>
+      </div>
+      <span class="spacer"></span>
       <button id="start" class="primary">▶</button>
     </div>
     <div class="status" id="status"></div>
@@ -79,7 +88,6 @@
   <footer class="bottom">
     <span class="count" id="count">0</span>
     <span class="spacer"></span>
-    <button id="orig-btn" class="mini" data-i18n="footer.orig" data-i18n-title="footer.origTitle" type="button">Gốc</button>
     <button id="autoscroll" class="mini active" data-i18n="footer.auto" data-i18n-title="footer.autoTitle" type="button">↓ Auto</button>
     <button id="summary-toggle" class="mini" data-i18n="footer.summary" type="button">📋 Tóm tắt</button>
     <button id="export" class="mini" data-i18n-title="footer.exportTitle" type="button">💾</button>

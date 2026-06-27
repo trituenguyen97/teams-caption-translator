@@ -21,9 +21,10 @@ export const I18N_LOCALES = [   // ngôn ngữ GIAO DIỆN (UI) — chỉ vi/en/
 export const I18N = {
   vi: {
     settings: 'Cài đặt', 'settings.apiKey': 'Gemini API key', 'settings.source': 'Nguồn âm thanh',
+    'settings.layout': 'Giao diện dịch', 'layout.translation': 'Chỉ bản dịch', 'layout.stacked': 'Gốc trên, dịch dưới', 'layout.columns': 'Gốc trái, dịch phải',
     'settings.targetLang': 'Ngôn ngữ đích', 'uilang.title': 'Ngôn ngữ giao diện', 'popout.title': 'Mở trong tab riêng',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 Micro', 'source.screen': '🔊 Âm thanh (tab / màn hình / cửa sổ)',
-    'lang.transcribe': '📝 Chép lời', 'voice.off': '🔇 Tắt đọc',
+    'lang.transcribe': '📝 Chép lời', 'voice.off': '🔇 Tắt đọc', 'voice.title': 'Giọng đọc',
     'btn.start': '▶ Bắt đầu', 'btn.stop': '⏹ Dừng',
     'footer.auto': '↓ Auto', 'footer.autoTitle': 'Tự cuộn', 'footer.summary': '📋 Tóm tắt',
     'footer.exportTitle': 'Xuất transcript', 'footer.clearTitle': 'Xoá', 'footer.orig': 'Gốc', 'footer.origTitle': 'Hiện/ẩn lời gốc',
@@ -44,9 +45,10 @@ export const I18N = {
   },
   en: {
     settings: 'Settings', 'settings.apiKey': 'Gemini API key', 'settings.source': 'Audio source',
+    'settings.layout': 'Translation layout', 'layout.translation': 'Translation only', 'layout.stacked': 'Original top, translation below', 'layout.columns': 'Original left, translation right',
     'settings.targetLang': 'Target language', 'uilang.title': 'Interface language', 'popout.title': 'Open in a separate tab',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 Microphone', 'source.screen': '🔊 Audio (tab / screen / window)',
-    'lang.transcribe': '📝 Transcribe', 'voice.off': '🔇 Voice off',
+    'lang.transcribe': '📝 Transcribe', 'voice.off': '🔇 Voice off', 'voice.title': 'Voice',
     'btn.start': '▶ Start', 'btn.stop': '⏹ Stop',
     'footer.auto': '↓ Auto', 'footer.autoTitle': 'Auto-scroll', 'footer.summary': '📋 Summary',
     'footer.exportTitle': 'Export transcript', 'footer.clearTitle': 'Clear', 'footer.orig': 'Source', 'footer.origTitle': 'Show/hide original',
@@ -67,9 +69,10 @@ export const I18N = {
   },
   ja: {
     settings: '設定', 'settings.apiKey': 'Gemini API キー', 'settings.source': '音声ソース',
+    'settings.layout': '表示レイアウト', 'layout.translation': '訳のみ', 'layout.stacked': '原文(上)/訳(下)', 'layout.columns': '原文(左)/訳(右)',
     'settings.targetLang': '翻訳先の言語', 'uilang.title': '表示言語', 'popout.title': '別タブで開く',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 マイク', 'source.screen': '🔊 音声（タブ / 画面 / ウィンドウ）',
-    'lang.transcribe': '📝 文字起こし', 'voice.off': '🔇 読み上げオフ',
+    'lang.transcribe': '📝 文字起こし', 'voice.off': '🔇 読み上げオフ', 'voice.title': '読み上げ音声',
     'btn.start': '▶ 開始', 'btn.stop': '⏹ 停止',
     'footer.auto': '↓ 自動', 'footer.autoTitle': '自動スクロール', 'footer.summary': '📋 要約',
     'footer.exportTitle': '文字起こしを書き出す', 'footer.clearTitle': 'クリア', 'footer.orig': '原文', 'footer.origTitle': '原文の表示/非表示',

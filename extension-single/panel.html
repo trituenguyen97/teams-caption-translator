@@ -58,6 +58,15 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .entry-orig { margin-top: 2px; white-space: pre-wrap; color: var(--muted); font-size: 12px; }
 .entry-text { margin-top: 1px; white-space: pre-wrap; }
 .entry-text + .entry-orig { margin-top: 8px; }   /* cách giữa các CẶP câu (gốc/dịch) cho dễ đọc */
+/* #3 layout dịch: radio icon + chế độ 2 cột */
+.layout-pick { display: flex; gap: 6px; }
+.lay-opt { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px; padding: 8px; cursor: pointer; color: var(--fg); }
+.lay-opt svg { width: 22px; height: 22px; fill: currentColor; }
+.lay-opt:hover { border-color: var(--accent2); }
+.lay-opt.active { border-color: var(--accent2); color: var(--accent); background: var(--bg2); }
+.entry-body.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; align-items: start; }
+.entry-body.cols .col-o { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+.entry-body.cols .col-t { white-space: pre-wrap; }
 .entry.partial .entry-text { opacity: .65; font-style: italic; }
 
 .v-resizer { height: 7px; flex: 0 0 auto; cursor: row-resize; background: var(--bd); }
@@ -79,7 +88,11 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .flag-select { width: 100%; display: flex; align-items: center; gap: 8px; background: var(--bg3); color: var(--fg); border: 1px solid var(--bd); border-radius: 8px; padding: 7px 9px; cursor: pointer; font: inherit; text-align: left; }
 .flag-select:hover { border-color: var(--accent2); }
 .menu { position: absolute; z-index: 60; top: calc(100% + 4px); right: 0; min-width: 168px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow: auto; box-shadow: 0 8px 24px #0009; }
-#target-menu { left: 0; right: 0; }
+#target-menu, #voice-menu { left: 0; right: auto; }
+.toolbar { align-items: center; }
+.pick-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--bg3); color: var(--fg); border: 1px solid var(--bd); border-radius: 8px; padding: 6px 9px; cursor: pointer; font: inherit; }
+.pick-btn:hover { border-color: var(--accent2); }
+.pick-btn .flag svg { width: 20px; height: 13px; }
 .menu button { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; color: var(--fg); padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit; text-align: left; white-space: nowrap; }
 .menu button:hover { background: var(--bg2); }
 .menu button.sel { color: var(--accent); background: var(--bg2); }
@@ -132,18 +145,27 @@ button.mini.active { border-color: var(--accent2); color: var(--accent); }
       </select>
     </div>
     <div class="fld">
-      <span data-i18n="settings.targetLang">Ngôn ngữ đích</span>
-      <div class="dd">
-        <button id="target-btn" class="flag-select" type="button"></button>
-        <div id="target-menu" class="menu hidden"></div>
+      <span data-i18n="settings.layout">Giao diện dịch</span>
+      <div class="layout-pick" id="layout-pick">
+        <button class="lay-opt" data-layout="translation" data-i18n-title="layout.translation" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="5" width="12" height="2" rx="1"/><rect x="2" y="9" width="9" height="2" rx="1"/></svg></button>
+        <button class="lay-opt" data-layout="stacked" data-i18n-title="layout.stacked" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="4" rx="1" opacity=".5"/><rect x="2" y="9" width="12" height="4" rx="1"/></svg></button>
+        <button class="lay-opt" data-layout="columns" data-i18n-title="layout.columns" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="10" rx="1" opacity=".5"/><rect x="9" y="3" width="5" height="10" rx="1"/></svg></button>
       </div>
     </div>
   </section>
 
   <!-- Thanh điều khiển -->
   <section class="controls">
-    <div class="row">
-      <select id="voice" title="Voice"></select>
+    <div class="row toolbar">
+      <div class="dd">
+        <button id="target-btn" class="pick-btn" data-i18n-title="settings.targetLang" type="button"></button>
+        <div id="target-menu" class="menu hidden"></div>
+      </div>
+      <div class="dd">
+        <button id="voice-btn" class="pick-btn" data-i18n-title="voice.title" type="button">🔊</button>
+        <div id="voice-menu" class="menu hidden"></div>
+      </div>
+      <span class="spacer"></span>
       <button id="start" class="primary">▶</button>
     </div>
     <div class="status" id="status"></div>
@@ -176,7 +198,6 @@ button.mini.active { border-color: var(--accent2); color: var(--accent); }
   <footer class="bottom">
     <span class="count" id="count">0</span>
     <span class="spacer"></span>
-    <button id="orig-btn" class="mini" data-i18n="footer.orig" data-i18n-title="footer.origTitle" type="button">Gốc</button>
     <button id="autoscroll" class="mini active" data-i18n="footer.auto" data-i18n-title="footer.autoTitle" type="button">↓ Auto</button>
     <button id="summary-toggle" class="mini" data-i18n="footer.summary" type="button">📋 Tóm tắt</button>
     <button id="export" class="mini" data-i18n-title="footer.exportTitle" type="button">💾</button>

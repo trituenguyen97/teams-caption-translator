@@ -51,6 +51,15 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .entry-orig { margin-top: 2px; white-space: pre-wrap; color: var(--muted); font-size: 12px; }
 .entry-text { margin-top: 1px; white-space: pre-wrap; }
 .entry-text + .entry-orig { margin-top: 8px; }   /* cách giữa các CẶP câu (gốc/dịch) cho dễ đọc */
+/* #3 layout dịch: radio icon + chế độ 2 cột */
+.layout-pick { display: flex; gap: 6px; }
+.lay-opt { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px; padding: 8px; cursor: pointer; color: var(--fg); }
+.lay-opt svg { width: 22px; height: 22px; fill: currentColor; }
+.lay-opt:hover { border-color: var(--accent2); }
+.lay-opt.active { border-color: var(--accent2); color: var(--accent); background: var(--bg2); }
+.entry-body.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; align-items: start; }
+.entry-body.cols .col-o { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+.entry-body.cols .col-t { white-space: pre-wrap; }
 .entry.partial .entry-text { opacity: .65; font-style: italic; }
 
 .v-resizer { height: 7px; flex: 0 0 auto; cursor: row-resize; background: var(--bd); }
@@ -72,7 +81,11 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .flag-select { width: 100%; display: flex; align-items: center; gap: 8px; background: var(--bg3); color: var(--fg); border: 1px solid var(--bd); border-radius: 8px; padding: 7px 9px; cursor: pointer; font: inherit; text-align: left; }
 .flag-select:hover { border-color: var(--accent2); }
 .menu { position: absolute; z-index: 60; top: calc(100% + 4px); right: 0; min-width: 168px; background: var(--bg3); border: 1px solid var(--bd); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow: auto; box-shadow: 0 8px 24px #0009; }
-#target-menu { left: 0; right: 0; }
+#target-menu, #voice-menu { left: 0; right: auto; }
+.toolbar { align-items: center; }
+.pick-btn { display: inline-flex; align-items: center; gap: 5px; background: var(--bg3); color: var(--fg); border: 1px solid var(--bd); border-radius: 8px; padding: 6px 9px; cursor: pointer; font: inherit; }
+.pick-btn:hover { border-color: var(--accent2); }
+.pick-btn .flag svg { width: 20px; height: 13px; }
 .menu button { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; color: var(--fg); padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit; text-align: left; white-space: nowrap; }
 .menu button:hover { background: var(--bg2); }
 .menu button.sel { color: var(--accent); background: var(--bg2); }
