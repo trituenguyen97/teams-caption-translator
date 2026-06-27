@@ -20812,7 +20812,6 @@
   // extension/lib/gemini-live.js
   var MODEL = "gemini-3.5-live-translate-preview";
   var RECONNECT_MS = 1500;
-  var TR_SENT_END = /[.!?。．！？]\s*$/;
   var LONG_IDLE_MS = 2500;
   var INPUT_GRACE_MS = 700;
   var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
@@ -20860,7 +20859,7 @@
     let _started = false, _session = null, _connecting = null, _gen = 0;
     let _handle = null;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _emitted = 0;
+    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _inSeen = "", _outSeen = "";
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
     function _splitVI(s) {
@@ -20879,12 +20878,6 @@
       const tail = s.slice(start3).trim();
       if (tail) out.push(tail);
       return out;
-    }
-    function _doneCount(s) {
-      s = (s || "").trim();
-      if (!s) return 0;
-      const segs = _splitVI(s);
-      return TR_SENT_END.test(s) ? segs.length : Math.max(0, segs.length - 1);
     }
     function _mergeTrans(prev, next) {
       if (!next) return prev;
@@ -20909,29 +20902,23 @@
     }
     function _pump(final) {
       const transcribe = !!st2().transcribeMode;
-      const jaAll = _splitVI(_inAcc);
-      const viAll = transcribe ? [] : _splitVI(_outAcc);
-      const ready = transcribe ? _doneCount(_inAcc) : Math.min(_doneCount(_inAcc), _doneCount(_outAcc));
-      while (_emitted < ready) {
-        const o = (jaAll[_emitted] || "").trim();
-        const tt = transcribe ? "" : (viAll[_emitted] || "").trim();
-        if (_send(_lineBase, transcribe ? [{ o: "", t: o }] : [{ o, t: tt }], true)) _lineBase++;
-        _emitted++;
-      }
+      const inNew = _inAcc.startsWith(_inSeen) ? _inAcc.slice(_inSeen.length) : _inAcc;
+      const outNew = _outAcc.startsWith(_outSeen) ? _outAcc.slice(_outSeen.length) : _outAcc;
+      const oLines = _splitVI(inNew).join("\n");
+      const o = transcribe ? "" : oLines;
+      const tt = transcribe ? oLines : _splitVI(outNew).join("\n");
+      if (o || tt) _send(_lineBase, [{ o, t: tt }], final);
       if (final) {
-        const jaRest = jaAll.slice(_emitted).map((s) => s.trim()).filter(Boolean);
-        const viRest = transcribe ? [] : viAll.slice(_emitted).map((s) => s.trim()).filter(Boolean);
-        const o = transcribe ? "" : jaRest.join("\n");
-        const tt = transcribe ? jaRest.join("\n") : viRest.join("\n");
-        if ((o || tt) && _send(_lineBase, [{ o, t: tt }], true)) _lineBase++;
-        _inAcc = "";
-        _outAcc = "";
-        _emitted = 0;
-        _turnEnded = false;
-      } else {
-        const o = (jaAll[_emitted] || "").trim();
-        const tt = transcribe ? "" : (viAll[_emitted] || "").trim();
-        if (o || tt) _send(_lineBase, transcribe ? [{ o: "", t: o }] : [{ o, t: tt }], false);
+        if (o || tt) _lineBase++;
+        _inSeen = _inAcc;
+        _outSeen = _outAcc;
+        if (_turnEnded) {
+          _inAcc = "";
+          _outAcc = "";
+          _inSeen = "";
+          _outSeen = "";
+          _turnEnded = false;
+        }
       }
     }
     function _flush() {
@@ -21132,7 +21119,8 @@
       _handle = null;
       _inAcc = "";
       _outAcc = "";
-      _emitted = 0;
+      _inSeen = "";
+      _outSeen = "";
       _resetAudio();
       _ensure().catch(() => {
       });
@@ -21146,7 +21134,8 @@
       if (_inAcc || _outAcc) _flush();
       _inAcc = "";
       _outAcc = "";
-      _emitted = 0;
+      _inSeen = "";
+      _outSeen = "";
       _handle = null;
       _resetAudio();
       _closeSession();
@@ -21158,7 +21147,8 @@
         _handle = null;
         _inAcc = "";
         _outAcc = "";
-        _emitted = 0;
+        _inSeen = "";
+        _outSeen = "";
         clearTimeout(_emitTimer);
         clearTimeout(_flushTimer);
         _resetAudio();

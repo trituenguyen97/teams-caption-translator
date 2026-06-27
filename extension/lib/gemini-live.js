@@ -6,13 +6,8 @@ import { bcp47 } from './langs.js';
 
 const MODEL = 'gemini-3.5-live-translate-preview';
 const RECONNECT_MS = 1500;
-const PARTIAL_DEBOUNCE_MS = 120;
-const TR_SENT_END = /[.!?。．！？]\s*$/;
-const SETTLE_MS = 450;
-const LONG_IDLE_MS = 2500;
-const INPUT_GRACE_MS = 700;   // sau turnComplete chờ ~0.7s cho STT GỐC (ja, về chậm hơn dịch) đuổi kịp rồi mới chốt → ghép đúng cặp
-const SETTLE_PAUSE_MS = 700;  // không có turnComplete (nói liên tục) → chốt block khi GỐC & DỊCH vừa xong câu + im ~0.7s (nhịp nghỉ)
-const MAX_BLOCK_SENTS = 1;    // chốt theo TỪNG câu (đủ 1 câu hoàn chỉnh cả gốc lẫn dịch → chốt ngay) → giữ kiểu xen kẽ như lúc live
+const LONG_IDLE_MS = 2500;     // nói liên tục không có turnComplete → sau ~2.5s im thì chốt entry hiện tại, sang entry mới
+const INPUT_GRACE_MS = 700;    // sau turnComplete chờ ~0.7s cho transcript về nốt rồi mới chốt
 // Phát TTS THEO CÂU: gom audio tới khi BẢN DỊCH gặp dấu KẾT CÂU ( . ! ? ) — hoặc audio nghỉ — rồi phát cả câu → "đủ câu mới đọc".
 const AUDIO_MAX_SAMPLES = (24000 * 3) | 0;     // trần an toàn 3s: không gặp dấu kết câu/nghỉ vẫn phát (chống kẹt)
 const AUDIO_IDLE_MS = 250;                     // audio ngừng ~0.25s (model nghỉ cuối câu) → phát nốt
@@ -47,7 +42,7 @@ export function createLiveTranslator(opts) {
   let _started = false, _session = null, _connecting = null, _gen = 0;
   let _handle = null;
   let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-  let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false, _emitted = 0;   // _inAcc=GỐC, _outAcc=DỊCH, _emitted=số câu đã chốt trong lượt
+  let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false, _inSeen = '', _outSeen = '';   // _inAcc=GỐC, _outAcc=DỊCH; _inSeen/_outSeen=phần đã chốt vào entry trước (chống lặp khi stream cumulative)
   let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
 
   const isConfigured = () => !!(st().apiKey && String(st().apiKey).trim());
@@ -65,8 +60,6 @@ export function createLiveTranslator(opts) {
     const tail = s.slice(start).trim(); if (tail) out.push(tail);
     return out;
   }
-  // Đếm câu HOÀN CHỈNH (dùng _splitVI nên bỏ qua dấu '.' thập phân); câu cuối chưa có dấu kết → chưa tính.
-  function _doneCount(s) { s = (s || '').trim(); if (!s) return 0; const segs = _splitVI(s); return TR_SENT_END.test(s) ? segs.length : Math.max(0, segs.length - 1); }
   // Gom transcript BỀN VỮNG: model 3.x có thể gửi BẢN ĐẦY ĐỦ tích luỹ (không phải delta thuần) → cứ "+=" sẽ LẶP.
   // next bao trùm prev (là prefix mở rộng / hoặc y hệt) ⇒ THAY; ngược lại coi là delta ⇒ NỐI. An toàn cho cả 2 kiểu.
   function _mergeTrans(prev, next) {
@@ -85,30 +78,21 @@ export function createLiveTranslator(opts) {
     onCaption({ id, author: 'STT', lines, original, translated, isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
     return true;
   }
-  // HÀNG ĐỢI CẶP CÂU: chỉ chốt cặp gốc[i]↔dịch[i] khi CẢ HAI câu đó hoàn chỉnh → gốc chạy trước thì CHỜ dịch của nó
-  // (không nhét câu gốc dở/thừa vào block rồi lệch). final=true (hết lượt/nghỉ): chốt nốt phần dư (lệch số câu/partial).
+  // Hiển thị TRỰC TIẾP bản dịch của live-translate (realtime, không gọi thêm API). Mỗi luồng (gốc/dịch) TỰ xuống dòng
+  // tại dấu kết câu — ĐỘC LẬP, không ép ghép cặp. 1 entry / lượt nói; nghỉ lâu giữa lượt → chốt entry rồi sang entry mới.
+  // _inSeen/_outSeen = phần đã chốt vào entry trước trong CÙNG lượt → strip prefix để KHỎI lặp khi model gửi cumulative.
   function _pump(final) {
     const transcribe = !!st().transcribeMode;
-    const jaAll = _splitVI(_inAcc);
-    const viAll = transcribe ? [] : _splitVI(_outAcc);
-    const ready = transcribe ? _doneCount(_inAcc) : Math.min(_doneCount(_inAcc), _doneCount(_outAcc));
-    while (_emitted < ready) {   // chốt từng CẶP hoàn chỉnh = 1 entry riêng (xen kẽ gốc/dịch)
-      const o = (jaAll[_emitted] || '').trim();
-      const tt = transcribe ? '' : (viAll[_emitted] || '').trim();
-      if (_send(_lineBase, transcribe ? [{ o: '', t: o }] : [{ o, t: tt }], true)) _lineBase++;
-      _emitted++;
-    }
+    const inNew = _inAcc.startsWith(_inSeen) ? _inAcc.slice(_inSeen.length) : _inAcc;
+    const outNew = _outAcc.startsWith(_outSeen) ? _outAcc.slice(_outSeen.length) : _outAcc;
+    const oLines = _splitVI(inNew).join('\n');     // gốc: mỗi câu (gặp . ! ? 。…) một dòng; câu đang dở ở dòng cuối
+    const o = transcribe ? '' : oLines;
+    const tt = transcribe ? oLines : _splitVI(outNew).join('\n');   // dịch: tự xuống dòng theo dấu chấm của CHÍNH nó
+    if (o || tt) _send(_lineBase, [{ o, t: tt }], final);   // 1 entry: gốc-nhiều-dòng + dịch-nhiều-dòng (không pair)
     if (final) {
-      const jaRest = jaAll.slice(_emitted).map(s => s.trim()).filter(Boolean);
-      const viRest = transcribe ? [] : viAll.slice(_emitted).map(s => s.trim()).filter(Boolean);
-      const o = transcribe ? '' : jaRest.join('\n');
-      const tt = transcribe ? jaRest.join('\n') : viRest.join('\n');
-      if ((o || tt) && _send(_lineBase, [{ o, t: tt }], true)) _lineBase++;   // phần dư → 1 block (lệch số câu/partial)
-      _inAcc = ''; _outAcc = ''; _emitted = 0; _turnEnded = false;
-    } else {   // PARTIAL của cặp đang dở (index _emitted) — id chưa tăng → cập nhật tại chỗ
-      const o = (jaAll[_emitted] || '').trim();
-      const tt = transcribe ? '' : (viAll[_emitted] || '').trim();
-      if (o || tt) _send(_lineBase, transcribe ? [{ o: '', t: o }] : [{ o, t: tt }], false);
+      if (o || tt) _lineBase++;            // vừa chốt nội dung → sang entry mới
+      _inSeen = _inAcc; _outSeen = _outAcc;
+      if (_turnEnded) { _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; _turnEnded = false; }   // hết LƯỢT thật → reset hẳn
     }
   }
   function _flush() { clearTimeout(_emitTimer); clearTimeout(_flushTimer); _pump(true); }
@@ -227,7 +211,7 @@ export function createLiveTranslator(opts) {
   function start() {
     if (_started) return;
     if (!isConfigured()) { onStatus({ error: 'no-key' }); return; }
-    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _emitted = 0; _resetAudio();
+    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; _resetAudio();
     _ensure().catch(() => {});
     console.log('[live] start');
   }
@@ -235,12 +219,12 @@ export function createLiveTranslator(opts) {
     _started = false;
     clearTimeout(_reconnectTimer); clearTimeout(_emitTimer); clearTimeout(_flushTimer);
     if (_inAcc || _outAcc) _flush();
-    _inAcc = ''; _outAcc = ''; _emitted = 0; _handle = null; _resetAudio();
+    _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; _handle = null; _resetAudio();
     _closeSession();
     onClear();
     console.log('[live] stop');
   }
-  function onTargetLangChanged() { if (_started) { _handle = null; _inAcc = ''; _outAcc = ''; _emitted = 0; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
+  function onTargetLangChanged() { if (_started) { _handle = null; _inAcc = ''; _outAcc = ''; _inSeen = ''; _outSeen = ''; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
   function onTranscribeModeChanged() { onTargetLangChanged(); }
   function onVoiceChanged() {   // đổi giọng → mở PHIÊN MỚI (bỏ resume) để áp dụng speechConfig giọng mới ngay
     if (!_started) return;
