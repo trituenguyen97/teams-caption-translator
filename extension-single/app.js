@@ -21471,11 +21471,10 @@ ${lines}`;
   };
   var flag = (code) => FLAGS[code] || FLAGS[(code || "").split("-")[0]] || "";
   var I18N_LOCALES = [
+    // ngôn ngữ GIAO DIỆN (UI) — chỉ vi/en/ja
     { code: "vi", name: "Ti\u1EBFng Vi\u1EC7t" },
     { code: "en", name: "English" },
-    { code: "ja", name: "\u65E5\u672C\u8A9E" },
-    { code: "ko", name: "\uD55C\uAD6D\uC5B4" },
-    { code: "zh-CN", name: "\u4E2D\u6587" }
+    { code: "ja", name: "\u65E5\u672C\u8A9E" }
   ];
   var I18N = {
     vi: {
@@ -21666,132 +21665,6 @@ ${lines}`;
       "status.summaryApplied": "\u6307\u793A\u3092\u9069\u7528\u3057\u3066\u518D\u8981\u7D04\u3057\u307E\u3057\u305F\u3002",
       "status.noKeyShort": "API \u30AD\u30FC\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
       "status.geminiErr": "Gemini: {err}"
-    },
-    ko: {
-      settings: "\uC124\uC815",
-      "settings.apiKey": "Gemini API \uD0A4",
-      "settings.source": "\uC624\uB514\uC624 \uC18C\uC2A4",
-      "settings.targetLang": "\uB300\uC0C1 \uC5B8\uC5B4",
-      "uilang.title": "\uD45C\uC2DC \uC5B8\uC5B4",
-      "popout.title": "\uBCC4\uB3C4 \uD0ED\uC73C\uB85C \uC5F4\uAE30",
-      "apiKey.ph": "AIza\u2026",
-      "source.mic": "\u{1F3A4} \uB9C8\uC774\uD06C",
-      "source.screen": "\u{1F50A} \uC624\uB514\uC624 (\uD0ED / \uD654\uBA74 / \uCC3D)",
-      "lang.transcribe": "\u{1F4DD} \uBC1B\uC544\uC4F0\uAE30",
-      "voice.off": "\u{1F507} \uC74C\uC131 \uB044\uAE30",
-      "btn.start": "\u25B6 \uC2DC\uC791",
-      "btn.stop": "\u23F9 \uC911\uC9C0",
-      "footer.auto": "\u2193 \uC790\uB3D9",
-      "footer.autoTitle": "\uC790\uB3D9 \uC2A4\uD06C\uB864",
-      "footer.summary": "\u{1F4CB} \uC694\uC57D",
-      "footer.exportTitle": "\uC804\uC0AC \uB0B4\uBCF4\uB0B4\uAE30",
-      "footer.clearTitle": "\uC9C0\uC6B0\uAE30",
-      "footer.orig": "\uC6D0\uBB38",
-      "footer.origTitle": "\uC6D0\uBB38 \uD45C\uC2DC/\uC228\uAE30\uAE30",
-      "summary.title": "\uC694\uC57D",
-      "summary.full": "\u{1F4CA} \uC804\uCCB4 \uBCF4\uACE0\uC11C",
-      "summary.fullTitle": "\uC804\uCCB4 \uD68C\uC758 \uBCF4\uACE0\uC11C (\uC911\uC9C0 \uD6C4)",
-      "summary.copyTitle": "\uBCF5\uC0AC",
-      "summary.exportTitle": ".md \uB0B4\uBCF4\uB0B4\uAE30",
-      "summary.editTitle": "\uC694\uC57D \uC9C0\uC2DC \uD3B8\uC9D1",
-      "summary.empty": "\uC544\uC9C1 \uC694\uC57D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
-      "summary.extraPh": "\uC608: \uACB0\uC815 \uC0AC\uD56D\uACFC \uB9C8\uAC10\uC77C \uC911\uC2EC",
-      "summary.save": "\uC800\uC7A5",
-      "summary.updating": "\uC694\uC57D \uC5C5\uB370\uC774\uD2B8 \uC911\u2026",
-      count: "{n}\uC904",
-      "status.ready": "\uC900\uBE44\uB428. \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.",
-      "status.readyNoKey": "API \uD0A4(\u2699\uFE0F)\uB97C \uC785\uB825\uD55C \uD6C4 \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.",
-      "status.needKey": "\uBA3C\uC800 Gemini API \uD0A4\uB97C \uC785\uB825\uD558\uC138\uC694.",
-      "status.listeningMic": "\uB9C8\uC774\uD06C\uB97C \uB4E3\uB294 \uC911\u2026",
-      "status.listeningAudio": "\uC120\uD0DD\uD55C \uC624\uB514\uC624\uB97C \uB4E3\uB294 \uC911\u2026",
-      "status.stopped": "\uC911\uC9C0\uB428.",
-      "status.canceled": "\uC624\uB514\uC624 \uC18C\uC2A4 \uC120\uD0DD\uC774 \uCDE8\uC18C\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
-      "status.captureErr": "\uB179\uC74C \uC624\uB958: {err}",
-      "status.checking": "\uD655\uC778 \uC911\u2026",
-      "status.keyOk": "\u2713 \uC720\uD6A8\uD55C \uD0A4",
-      "status.keyBad": "\u2715 \uC798\uBABB\uB41C \uD0A4",
-      "status.copied": "\uC694\uC57D\uC744 \uBCF5\uC0AC\uD588\uC2B5\uB2C8\uB2E4.",
-      "status.makingFull": "\uC804\uCCB4 \uBCF4\uACE0\uC11C \uC0DD\uC131 \uC911\u2026",
-      "status.fullDone": "\uC804\uCCB4 \uBCF4\uACE0\uC11C \uC644\uB8CC.",
-      "status.fullErr": "\uBCF4\uACE0\uC11C \uC624\uB958: {err}",
-      "status.noContent": "\uC544\uC9C1 \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
-      "status.summaryErr": "\uC694\uC57D: {err}",
-      "status.stopFirst": "\uC804\uCCB4 \uBCF4\uACE0\uC11C\uB97C \uB9CC\uB4E4\uAE30 \uC804\uC5D0 \uB179\uC74C\uC744 \uC911\uC9C0\uD558\uC138\uC694.",
-      "status.popoutErr": "\uBCC4\uB3C4 \uCC3D\uC744 \uC5F4 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4: {err}",
-      "pip.title": "\uD50C\uB85C\uD305 \uACE0\uC815 (PiP \u2014 \uD56D\uC0C1 \uC704)",
-      "pip.active": "\uACE0\uC815(PiP) \uCC3D\uC5D0 \uD45C\uC2DC \uC911\uC785\uB2C8\uB2E4. PiP\uB97C \uB2EB\uC73C\uBA74 \uC5EC\uAE30\uB85C \uB3CC\uC544\uC635\uB2C8\uB2E4.",
-      "status.pipUnsupported": "\uC774 \uBE0C\uB77C\uC6B0\uC800\uB294 Document Picture-in-Picture\uB97C \uC9C0\uC6D0\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.",
-      "status.pipErr": "PiP \uC624\uB958: {err}",
-      "pip.return": "\uC6D0\uB798 \uCC3D\uC73C\uB85C \uBCF5\uADC0",
-      "status.micPermNeeded": '\uC5F4\uB9B0 \uCC3D\uC5D0\uC11C \uB9C8\uC774\uD06C \uAD8C\uD55C \uC694\uCCAD \uC911 \u2014 "\uD5C8\uC6A9"\uC744 \uC120\uD0DD\uD55C \uB4A4 \uB2E4\uC2DC \uC2DC\uC791\uC744 \uB204\uB974\uC138\uC694.',
-      "status.micGranted": "\u2705 \uB9C8\uC774\uD06C \uAD8C\uD55C\uC774 \uD5C8\uC6A9\uB418\uC5C8\uC2B5\uB2C8\uB2E4.",
-      "status.micPermHint": "\u{1F3A4} \uB9C8\uC774\uD06C \uBBF8\uD5C8\uC6A9 \u2014 \uC2DC\uC791\uC744 \uB20C\uB7EC \uD5C8\uC6A9\uD558\uC138\uC694.",
-      "status.summaryApplied": "\uC9C0\uC2DC\uB97C \uC801\uC6A9\uD558\uACE0 \uB2E4\uC2DC \uC694\uC57D\uD588\uC2B5\uB2C8\uB2E4.",
-      "status.noKeyShort": "API \uD0A4\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.",
-      "status.geminiErr": "Gemini: {err}"
-    },
-    "zh-CN": {
-      settings: "\u8BBE\u7F6E",
-      "settings.apiKey": "Gemini API \u5BC6\u94A5",
-      "settings.source": "\u97F3\u9891\u6765\u6E90",
-      "settings.targetLang": "\u76EE\u6807\u8BED\u8A00",
-      "uilang.title": "\u754C\u9762\u8BED\u8A00",
-      "popout.title": "\u5728\u5355\u72EC\u6807\u7B7E\u9875\u4E2D\u6253\u5F00",
-      "apiKey.ph": "AIza\u2026",
-      "source.mic": "\u{1F3A4} \u9EA6\u514B\u98CE",
-      "source.screen": "\u{1F50A} \u97F3\u9891\uFF08\u6807\u7B7E\u9875 / \u5C4F\u5E55 / \u7A97\u53E3\uFF09",
-      "lang.transcribe": "\u{1F4DD} \u8F6C\u5199",
-      "voice.off": "\u{1F507} \u5173\u95ED\u6717\u8BFB",
-      "btn.start": "\u25B6 \u5F00\u59CB",
-      "btn.stop": "\u23F9 \u505C\u6B62",
-      "footer.auto": "\u2193 \u81EA\u52A8",
-      "footer.autoTitle": "\u81EA\u52A8\u6EDA\u52A8",
-      "footer.summary": "\u{1F4CB} \u6458\u8981",
-      "footer.exportTitle": "\u5BFC\u51FA\u8F6C\u5199",
-      "footer.clearTitle": "\u6E05\u9664",
-      "footer.orig": "\u539F\u6587",
-      "footer.origTitle": "\u663E\u793A/\u9690\u85CF\u539F\u6587",
-      "summary.title": "\u6458\u8981",
-      "summary.full": "\u{1F4CA} \u5B8C\u6574\u62A5\u544A",
-      "summary.fullTitle": "\u5B8C\u6574\u4F1A\u8BAE\u62A5\u544A\uFF08\u505C\u6B62\u540E\uFF09",
-      "summary.copyTitle": "\u590D\u5236",
-      "summary.exportTitle": "\u5BFC\u51FA .md",
-      "summary.editTitle": "\u7F16\u8F91\u6458\u8981\u8981\u6C42",
-      "summary.empty": "\u6682\u65E0\u6458\u8981\u3002",
-      "summary.extraPh": "\u4F8B\u5982\uFF1A\u805A\u7126\u51B3\u7B56\u4E0E\u622A\u6B62\u65E5\u671F",
-      "summary.save": "\u4FDD\u5B58",
-      "summary.updating": "\u6B63\u5728\u66F4\u65B0\u6458\u8981\u2026",
-      count: "{n} \u884C",
-      "status.ready": "\u5C31\u7EEA\u3002\u70B9\u51FB\u5F00\u59CB\u3002",
-      "status.readyNoKey": "\u8F93\u5165 API \u5BC6\u94A5\uFF08\u2699\uFE0F\uFF09\u540E\u70B9\u51FB\u5F00\u59CB\u3002",
-      "status.needKey": "\u8BF7\u5148\u8F93\u5165 Gemini API \u5BC6\u94A5\u3002",
-      "status.listeningMic": "\u6B63\u5728\u8046\u542C\u9EA6\u514B\u98CE\u2026",
-      "status.listeningAudio": "\u6B63\u5728\u8046\u542C\u6240\u9009\u97F3\u9891\u2026",
-      "status.stopped": "\u5DF2\u505C\u6B62\u3002",
-      "status.canceled": "\u5DF2\u53D6\u6D88\u97F3\u9891\u6765\u6E90\u9009\u62E9\u3002",
-      "status.captureErr": "\u5F55\u5236\u9519\u8BEF\uFF1A{err}",
-      "status.checking": "\u68C0\u67E5\u4E2D\u2026",
-      "status.keyOk": "\u2713 \u5BC6\u94A5\u6709\u6548",
-      "status.keyBad": "\u2715 \u5BC6\u94A5\u65E0\u6548",
-      "status.copied": "\u5DF2\u590D\u5236\u6458\u8981\u3002",
-      "status.makingFull": "\u6B63\u5728\u751F\u6210\u5B8C\u6574\u62A5\u544A\u2026",
-      "status.fullDone": "\u5B8C\u6574\u62A5\u544A\u5B8C\u6210\u3002",
-      "status.fullErr": "\u62A5\u544A\u9519\u8BEF\uFF1A{err}",
-      "status.noContent": "\u6682\u65E0\u5185\u5BB9\u3002",
-      "status.summaryErr": "\u6458\u8981\uFF1A{err}",
-      "status.stopFirst": "\u751F\u6210\u5B8C\u6574\u62A5\u544A\u524D\u8BF7\u5148\u505C\u6B62\u5F55\u5236\u3002",
-      "status.popoutErr": "\u65E0\u6CD5\u6253\u5F00\u5355\u72EC\u7A97\u53E3\uFF1A{err}",
-      "pip.title": "\u60AC\u6D6E\u7F6E\u9876\uFF08PiP \u2014 \u59CB\u7EC8\u5728\u6700\u524D\uFF09",
-      "pip.active": "\u5DF2\u5728\u60AC\u6D6E(PiP)\u7A97\u53E3\u663E\u793A\u3002\u5173\u95ED PiP \u53EF\u6062\u590D\u5230\u6B64\u5904\u3002",
-      "status.pipUnsupported": "\u6D4F\u89C8\u5668\u4E0D\u652F\u6301 Document Picture-in-Picture\u3002",
-      "status.pipErr": "PiP \u9519\u8BEF\uFF1A{err}",
-      "pip.return": "\u8FD4\u56DE\u539F\u7A97\u53E3",
-      "status.micPermNeeded": '\u6B63\u5728\u65B0\u7A97\u53E3\u8BF7\u6C42\u9EA6\u514B\u98CE\u6743\u9650 \u2014 \u9009\u62E9"\u5141\u8BB8"\u540E\u8BF7\u91CD\u65B0\u70B9\u51FB\u5F00\u59CB\u3002',
-      "status.micGranted": "\u2705 \u5DF2\u6388\u4E88\u9EA6\u514B\u98CE\u6743\u9650\u3002",
-      "status.micPermHint": "\u{1F3A4} \u9EA6\u514B\u98CE\u672A\u6388\u6743 \u2014 \u70B9\u51FB\u5F00\u59CB\u4EE5\u6388\u4E88\u3002",
-      "status.summaryApplied": "\u5DF2\u5E94\u7528\u8981\u6C42\u5E76\u91CD\u65B0\u6458\u8981\u3002",
-      "status.noKeyShort": "\u7F3A\u5C11 API \u5BC6\u94A5\u3002",
-      "status.geminiErr": "Gemini\uFF1A{err}"
     }
   };
   var _loc = "vi";
@@ -21876,7 +21749,15 @@ ${lines}`;
     vResizer: $("v-resizer"),
     dl: $("dl")
   };
-  var langName = (c) => (I18N_LOCALES.find((l) => l.code === c) || {}).name || c;
+  var TARGET_LANGS = [
+    { code: "vi", name: "Ti\u1EBFng Vi\u1EC7t" },
+    { code: "en", name: "English" },
+    { code: "ja", name: "\u65E5\u672C\u8A9E" },
+    { code: "ko", name: "\uD55C\uAD6D\uC5B4" },
+    { code: "zh-CN", name: "\u4E2D\u6587" }
+  ];
+  var langName = (c) => (TARGET_LANGS.find((l) => l.code === c) || {}).name || c;
+  var GLOBE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/><path d="M4.8 7.5h14.4M4.8 16.5h14.4"/></svg>';
   var _lastStatus = null;
   function st(key, vars, cls) {
     _lastStatus = { key, vars, cls };
@@ -22500,7 +22381,7 @@ ${lines}`;
   }
   function buildTargetMenu() {
     el.targetMenu.innerHTML = "";
-    for (const L of I18N_LOCALES) {
+    for (const L of TARGET_LANGS) {
       const b = document.createElement("button");
       b.type = "button";
       b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
@@ -22546,7 +22427,7 @@ ${lines}`;
     refreshStartBtn();
     refreshCount();
     renderSummary();
-    el.langBtn.innerHTML = `<span class="flag">${flag(code)}</span>`;
+    el.langBtn.innerHTML = GLOBE;
     if (_lastStatus) st(_lastStatus.key, _lastStatus.vars, _lastStatus.cls);
   }
   function initResizer() {
@@ -22848,6 +22729,7 @@ ${lines}`;
   }
   (async function init() {
     await loadSettings();
+    if (!["vi", "en", "ja"].includes(S.uiLang)) save({ uiLang: "vi" });
     setLocale(S.uiLang || "vi");
     if (_isPopup) {
       el.popoutBtn.style.display = "none";
@@ -22867,7 +22749,7 @@ ${lines}`;
     buildVoiceSelect();
     el.voice.disabled = S.transcribeMode;
     buildTargetButton();
-    el.langBtn.innerHTML = `<span class="flag">${flag(S.uiLang)}</span>`;
+    el.langBtn.innerHTML = GLOBE;
     applyI18n(document);
     refreshStartBtn();
     refreshCount();

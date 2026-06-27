@@ -28,7 +28,13 @@ const el = {
   sumFull: $('sum-full'), sumCopy: $('sum-copy'), sumExport: $('sum-export'),
   vResizer: $('v-resizer'), dl: $('dl'),
 };
-const langName = c => (I18N_LOCALES.find(l => l.code === c) || {}).name || c;
+// Ngôn ngữ ĐÍCH (tách khỏi ngôn ngữ giao diện) — giữ 5 như cũ.
+const TARGET_LANGS = [
+  { code: 'vi', name: 'Tiếng Việt' }, { code: 'en', name: 'English' }, { code: 'ja', name: '日本語' },
+  { code: 'ko', name: '한국어' }, { code: 'zh-CN', name: '中文' },
+];
+const langName = c => (TARGET_LANGS.find(l => l.code === c) || {}).name || c;
+const GLOBE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/><path d="M4.8 7.5h14.4M4.8 16.5h14.4"/></svg>';
 
 // Trạng thái có khoá i18n để đổi ngôn ngữ là render lại được.
 let _lastStatus = null;
@@ -403,7 +409,7 @@ function buildLangMenu() {
 }
 function buildTargetMenu() {
   el.targetMenu.innerHTML = '';
-  for (const L of I18N_LOCALES) {
+  for (const L of TARGET_LANGS) {
     const b = document.createElement('button'); b.type = 'button';
     b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
     if (!S.transcribeMode && S.langCode === L.code) b.classList.add('sel');
@@ -428,7 +434,7 @@ function applyLocale(code) {
   setLocale(code); save({ uiLang: code });
   applyI18n(document);
   buildVoiceSelect(); buildTargetButton(); refreshStartBtn(); refreshCount(); renderSummary();
-  el.langBtn.innerHTML = `<span class="flag">${flag(code)}</span>`;
+  el.langBtn.innerHTML = GLOBE;
   if (_lastStatus) st(_lastStatus.key, _lastStatus.vars, _lastStatus.cls);
 }
 
@@ -586,6 +592,7 @@ function wire() {
 // ── Init ────────────────────────────────────────────────────────────────────────
 (async function init() {
   await loadSettings();
+  if (!['vi', 'en', 'ja'].includes(S.uiLang)) save({ uiLang: 'vi' });   // ko/zh đã gỡ → về vi
   setLocale(S.uiLang || 'vi');
   // Ghim (PiP) chỉ mở được từ context TOP-LEVEL (tab); side panel không phải top-level → ẩn nút ghim ở side panel.
   if (_isPopup) {
@@ -599,7 +606,7 @@ function wire() {
   el.origBtn.classList.toggle('active', S.showOriginal);
   buildVoiceSelect(); el.voice.disabled = S.transcribeMode;
   buildTargetButton();
-  el.langBtn.innerHTML = `<span class="flag">${flag(S.uiLang)}</span>`;
+  el.langBtn.innerHTML = GLOBE;
   applyI18n(document); refreshStartBtn(); refreshCount(); renderSummary();
   initResizer(); wire();
   if (S.apiKey) checkKey();
