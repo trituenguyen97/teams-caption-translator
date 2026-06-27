@@ -20860,11 +20860,11 @@
     let _started = false, _session = null, _connecting = null, _gen = 0;
     let _handle = null;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _jaCut = 0, _viCut = 0;
+    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _doneRows = 0;
     const _rowTs = {};
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
-    function _splitPos(s) {
+    function _splitVI(s) {
       s = s || "";
       const out = [];
       let start3 = 0;
@@ -20878,56 +20878,12 @@
         }
         if (c === "." || c === "!" || c === "?" || c === "\u3002" || c === "\uFF01" || c === "\uFF1F" || c === "\uFF0E") {
           const seg = s.slice(start3, i + 1).trim();
-          if (seg) out.push({ text: seg, end: i + 1 });
+          if (seg) out.push(seg);
           start3 = i + 1;
         }
       }
       const tail = s.slice(start3).trim();
-      if (tail) out.push({ text: tail, end: s.length });
-      return out;
-    }
-    function _splitVI(s) {
-      return _splitPos(s).map((x) => x.text);
-    }
-    function _resegmentVI(viText, jaTexts) {
-      viText = viText || "";
-      const segs = _splitPos(viText);
-      const N = jaTexts.length;
-      if (N <= 1 || segs.length >= N || !viText.trim()) return segs;
-      const L = viText.length;
-      const totalJa = jaTexts.reduce((a, x) => a + (x ? x.length : 0), 0) || 1;
-      const wanted = [];
-      let acc = 0;
-      for (let i = 0; i < N - 1; i++) {
-        acc += jaTexts[i] ? jaTexts[i].length : 0;
-        wanted.push(acc / totalJa * L);
-      }
-      const cand = [];
-      for (let p = 0; p < L - 1; p++) if (",\uFF0C\u3001;\uFF1B.!?\u3002\uFF01\uFF1F\uFF0E".indexOf(viText[p]) >= 0) cand.push(p);
-      if (cand.length < N - 1) return segs;
-      const used = /* @__PURE__ */ new Set();
-      for (const w of wanted) {
-        let best = -1, bd = Infinity;
-        for (const b of cand) {
-          if (used.has(b)) continue;
-          const d = Math.abs(b - w);
-          if (d < bd) {
-            bd = d;
-            best = b;
-          }
-        }
-        if (best >= 0) used.add(best);
-      }
-      const cuts = Array.from(used).sort((a, b) => a - b);
-      const out = [];
-      let start3 = 0;
-      for (const cut of cuts) {
-        const t2 = viText.slice(start3, cut + 1).trim().replace(/[,，、;；]\s*$/, ".");
-        if (t2) out.push({ text: t2, end: cut + 1 });
-        start3 = cut + 1;
-      }
-      const tail = viText.slice(start3).trim();
-      if (tail) out.push({ text: tail, end: L });
+      if (tail) out.push(tail);
       return out;
     }
     function _mergeTrans(prev, next) {
@@ -20959,39 +20915,32 @@
     }
     function _pump(final) {
       const transcribe = !!st2().transcribeMode;
-      const jaRest = _inAcc.slice(_jaCut);
-      const viRest = transcribe ? "" : _outAcc.slice(_viCut);
+      const jaAll = _splitVI(_inAcc);
+      const viAll = transcribe ? jaAll : _splitVI(_outAcc);
+      const jaDone = _doneCount(_inAcc);
+      const viDone = transcribe ? jaDone : _doneCount(_outAcc);
       const turnEnd = final && _turnEnded;
-      const jaSegs = _splitPos(jaRest);
-      const jaDone = _doneCount(jaRest);
-      const viSegs = transcribe ? jaSegs : _resegmentVI(viRest, jaSegs.map((s) => s.text));
-      const pairN = transcribe ? jaDone : Math.min(jaDone, viSegs.length);
-      const stable = turnEnd ? Math.max(jaSegs.length, viSegs.length) : Math.max(0, pairN - 1);
-      let jaEnd = 0, viEnd = 0;
-      for (let i = 0; i < stable; i++) {
-        const o = transcribe ? "" : jaSegs[i] ? jaSegs[i].text : "";
-        const t2 = transcribe ? jaSegs[i] ? jaSegs[i].text : "" : viSegs[i] ? viSegs[i].text : "";
-        const id = _lineBase;
+      const ready = turnEnd ? Math.max(jaAll.length, viAll.length) : Math.min(jaDone, viDone);
+      for (let i = _doneRows; i < ready; i++) {
+        const id = _lineBase + i;
+        const o = transcribe ? "" : jaAll[i] || "";
+        const t2 = transcribe ? jaAll[i] || "" : viAll[i] || "";
         if (!_rowTs[id]) _rowTs[id] = _ts();
-        if (o || t2) _send(id, transcribe ? [{ o: "", t: t2 }] : [{ o, t: t2 }], true, _rowTs[id]);
-        _lineBase++;
-        if (jaSegs[i]) jaEnd = jaSegs[i].end;
-        if (viSegs[i]) viEnd = viSegs[i].end;
+        _send(id, transcribe ? [{ o: "", t: t2 }] : [{ o, t: t2 }], true, _rowTs[id]);
       }
-      _jaCut += jaEnd;
-      if (!transcribe) _viCut += viEnd;
+      if (ready > _doneRows) _doneRows = ready;
       if (turnEnd) {
+        _lineBase += ready;
         _inAcc = "";
         _outAcc = "";
-        _jaCut = 0;
-        _viCut = 0;
         _turnEnded = false;
+        _doneRows = 0;
         _clearRowTs();
         return;
       }
-      const oPrev = transcribe ? "" : jaSegs.slice(stable).map((s) => s.text).join("\n").trim();
-      const tPrev = (transcribe ? jaSegs : viSegs).slice(stable).map((s) => s.text).join("\n").trim();
-      const pid = _lineBase;
+      const pid = _lineBase + _doneRows;
+      const oPrev = transcribe ? "" : jaAll.slice(_doneRows).join("\n").trim();
+      const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join("\n").trim();
       if (oPrev || tPrev) {
         if (!_rowTs[pid]) _rowTs[pid] = _ts();
         _send(pid, transcribe ? [{ o: "", t: tPrev }] : [{ o: oPrev, t: tPrev }], false, _rowTs[pid]);
@@ -21006,12 +20955,11 @@
       for (const k in _rowTs) delete _rowTs[k];
     }
     function _endTurnHard() {
-      _lineBase += _splitVI(_inAcc.slice(_jaCut)).length + 2;
+      _lineBase += Math.max(_splitVI(_inAcc).length, _splitVI(_outAcc).length, _doneRows + 1);
       _inAcc = "";
       _outAcc = "";
-      _jaCut = 0;
-      _viCut = 0;
       _turnEnded = false;
+      _doneRows = 0;
       _clearRowTs();
     }
     function _flushAudio(reason) {
@@ -21207,8 +21155,7 @@
       _handle = null;
       _inAcc = "";
       _outAcc = "";
-      _jaCut = 0;
-      _viCut = 0;
+      _doneRows = 0;
       _clearRowTs();
       _resetAudio();
       _ensure().catch(() => {
