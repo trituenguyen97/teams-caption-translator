@@ -10,6 +10,8 @@ const PARTIAL_DEBOUNCE_MS = 120;
 const TR_SENT_END = /[.!?。．！？]\s*$/;
 const SETTLE_MS = 450;
 const LONG_IDLE_MS = 2500;
+const INPUT_GRACE_MS = 700;   // sau turnComplete chờ ~0.7s cho STT GỐC (ja, về chậm hơn dịch) đuổi kịp rồi mới chốt → ghép đúng cặp
+const SETTLE_PAUSE_MS = 700;  // không có turnComplete (nói liên tục) → chốt block khi GỐC & DỊCH vừa xong câu + im ~0.7s (nhịp nghỉ)
 // Phát TTS THEO CÂU: gom audio tới khi BẢN DỊCH gặp dấu KẾT CÂU ( . ! ? ) — hoặc audio nghỉ — rồi phát cả câu → "đủ câu mới đọc".
 const AUDIO_MAX_SAMPLES = (24000 * 3) | 0;     // trần an toàn 3s: không gặp dấu kết câu/nghỉ vẫn phát (chống kẹt)
 const AUDIO_IDLE_MS = 250;                     // audio ngừng ~0.25s (model nghỉ cuối câu) → phát nốt
@@ -44,7 +46,7 @@ export function createLiveTranslator(opts) {
   let _started = false, _session = null, _connecting = null, _gen = 0;
   let _handle = null;
   let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-  let _lineBase = 1, _transAcc = '';
+  let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false;   // _inAcc = lời GỐC (input), _outAcc = bản DỊCH (output)
   let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
 
   const isConfigured = () => !!(st().apiKey && String(st().apiKey).trim());
@@ -69,21 +71,41 @@ export function createLiveTranslator(opts) {
     if (!prev || next.startsWith(prev)) return next;
     return prev + next;
   }
-  function _emitVI(turnDone) {
-    const sents = _splitVI(_transAcc);
-    const n = Math.max(sents.length, 1);
-    for (let i = 0; i < n; i++) {
-      const text = sents[i] || (_transAcc || '').trim();
-      if (!text) continue;
-      const isPartial = !turnDone && (i === n - 1);
-      onCaption({ id: _lineBase + i, author: 'STT', original: '', translated: text, isPartial, ts: _ts(), tsMs: Date.now() });
+  // So sánh đã-chuẩn-hoá để dedupe khi lời gốc ≈ bản dịch (người nói đúng ngôn ngữ đích → khỏi hiện 2 dòng trùng).
+  function _norm(s) { return (s || '').replace(/[\s。、，．！？!?.,]+/g, '').toLowerCase(); }
+  function _fmt(s) { const a = _splitVI(s); return a.length ? a.join('\n') : (s || '').trim(); }   // mỗi câu xuống dòng cho dễ đọc
+  // SONG NGỮ THEO LƯỢT: 1 entry/lượt — khối GỐC (mọi câu) trên + khối DỊCH dưới. Ghép ở mức LƯỢT (chốt sau turnComplete +
+  // chờ STT gốc đuổi kịp) → tránh lệch cặp do 2 luồng về so le. Nói đúng ngôn ngữ đích → dedupe còn 1 dòng.
+  function _emit(turnDone) {
+    const transcribe = !!st().transcribeMode;
+    const jaSents = _splitVI(_inAcc);
+    const viSents = transcribe ? [] : _splitVI(_outAcc);
+    let lines = [];   // [{o: câu gốc, t: câu dịch}]
+    if (transcribe) {
+      lines = jaSents.map(s => ({ o: '', t: (s || '').trim() })).filter(l => l.t);
+    } else if (jaSents.length > 0 && jaSents.length === viSents.length) {
+      // SỐ CÂU KHỚP → xen kẽ từng câu (đúng cặp)
+      for (let i = 0; i < jaSents.length; i++) {
+        let o = (jaSents[i] || '').trim(); const t = (viSents[i] || '').trim();
+        if (o && t && _norm(o) === _norm(t)) o = '';   // nói tiếng đích → còn 1 dòng
+        if (o || t) lines.push({ o, t });
+      }
+    } else {
+      // LỆCH SỐ CÂU (model gộp/tách câu) → GỘP KHỐI: gốc trên, dịch dưới — tránh ghép sai cặp
+      let o = jaSents.join('\n').trim(); const t = viSents.join('\n').trim();
+      if (o && t && _norm(o) === _norm(t)) o = '';
+      if (o || t) lines = [{ o, t }];
     }
-    return n;
+    if (!lines.length) return 0;
+    const original = lines.map(l => l.o).filter(Boolean).join('\n');     // giữ cho export/tóm tắt
+    const translated = lines.map(l => l.t).filter(Boolean).join('\n');
+    onCaption({ id: _lineBase, author: 'STT', lines, original, translated, isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
+    return 1;
   }
   function _flush() {
     clearTimeout(_emitTimer); clearTimeout(_flushTimer);
-    if ((_transAcc || '').trim()) { _lineBase += _emitVI(true); }
-    _transAcc = '';
+    if ((_inAcc || '').trim() || (_outAcc || '').trim()) { if (_emit(true)) _lineBase += 1; }
+    _inAcc = ''; _outAcc = ''; _turnEnded = false;
   }
 
   // ── Audio TTS: gom ~0.4s rồi phát trọn 1 lần ──
@@ -95,7 +117,7 @@ export function createLiveTranslator(opts) {
     const merged = new Uint8Array(total); let off = 0;
     for (const b of _audioBuf) { merged.set(b, off); off += b.length; }
     // DEBUG: 'break'=đủ câu (text kết câu) | 'idle'=model nghỉ | 'turn'=hết lượt | 'max'=trần 3s. text tail cho thấy lúc phát text đã đủ câu chưa.
-    console.log(`[tts] phát (${reason || '?'}) ${((total >> 1) / 24000).toFixed(2)}s | text: "…${(_transAcc || '').slice(-45)}"`);
+    console.log(`[tts] phát (${reason || '?'}) ${((total >> 1) / 24000).toFixed(2)}s | text: "…${(_outAcc || '').slice(-45)}"`);
     _audioBuf = []; _audioSamples = 0;
     onAudio({ b64: _bytesToB64(merged), sampleRate: 24000 });
   }
@@ -108,7 +130,7 @@ export function createLiveTranslator(opts) {
   }
   // Khi BẢN DỊCH chạm dấu ngắt (không phải . , kẹp số thập phân/tiền) → hẹn phát CỤM audio đã gom.
   function _audioBreakOnText() {
-    const s = (_transAcc || '').replace(/\s+$/, '');
+    const s = (_outAcc || '').replace(/\s+$/, '');
     if (!s) return;
     const c = s[s.length - 1];
     if (!TR_BREAK.test(c)) return;
@@ -128,21 +150,23 @@ export function createLiveTranslator(opts) {
       if (!sc) return;
       const transcribe = !!st().transcribeMode;
       let changed = false;
-      const ot = transcribe
-        ? (sc.inputTranscription && sc.inputTranscription.text)
-        : (sc.outputTranscription && sc.outputTranscription.text);
-      if (typeof ot === 'string' && ot) { const mg = _mergeTrans(_transAcc, ot); if (mg !== _transAcc) { _transAcc = mg; changed = true; } }
+      const itText = sc.inputTranscription && sc.inputTranscription.text;    // lời GỐC
+      const otText = sc.outputTranscription && sc.outputTranscription.text;   // bản DỊCH
+      if (typeof itText === 'string' && itText) { const mg = _mergeTrans(_inAcc, itText); if (mg !== _inAcc) { _inAcc = mg; changed = true; } }
+      if (!transcribe && typeof otText === 'string' && otText) { const mg = _mergeTrans(_outAcc, otText); if (mg !== _outAcc) { _outAcc = mg; changed = true; } }
       const parts = (sc.modelTurn && sc.modelTurn.parts) || sc.parts;
       if (!transcribe && parts && st().geminiAudioOn !== false) {
         for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
       }
       if (changed) {
-        clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emitVI(false), PARTIAL_DEBOUNCE_MS);
-        const ended = TR_SENT_END.test(_transAcc || '');
-        clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, ended ? SETTLE_MS : LONG_IDLE_MS);
-        if (!transcribe && st().geminiAudioOn !== false) _audioBreakOnText();   // bản dịch chạm dấu ngắt → phát cụm TTS
+        clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);
+        // Chốt block: hết lượt → INPUT_GRACE; nói liên tục mà GỐC+DỊCH vừa xong câu → SETTLE_PAUSE (nhịp nghỉ); còn dở → LONG_IDLE.
+        const settled = TR_SENT_END.test(_inAcc || '') && (transcribe || TR_SENT_END.test(_outAcc || ''));
+        const delay = _turnEnded ? INPUT_GRACE_MS : (settled ? SETTLE_PAUSE_MS : LONG_IDLE_MS);
+        clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, delay);
+        if (!transcribe && st().geminiAudioOn !== false) _audioBreakOnText();
       }
-      if (sc.turnComplete) { _flush(); _flushAudio('turn'); }   // hết lượt → chốt text + phát nốt audio còn lại
+      if (sc.turnComplete) { _turnEnded = true; clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, INPUT_GRACE_MS); _flushAudio('turn'); }   // hết lượt → chốt text + phát nốt audio còn lại
     } catch (e) { console.warn('[live] msg lỗi:', e && e.message); }
   }
 
@@ -200,20 +224,20 @@ export function createLiveTranslator(opts) {
   function start() {
     if (_started) return;
     if (!isConfigured()) { onStatus({ error: 'no-key' }); return; }
-    _started = true; _handle = null; _transAcc = ''; _resetAudio();
+    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _resetAudio();
     _ensure().catch(() => {});
     console.log('[live] start');
   }
   function stop() {
     _started = false;
     clearTimeout(_reconnectTimer); clearTimeout(_emitTimer); clearTimeout(_flushTimer);
-    if (_transAcc) _flush();
-    _transAcc = ''; _handle = null; _resetAudio();
+    if (_inAcc || _outAcc) _flush();
+    _inAcc = ''; _outAcc = ''; _handle = null; _resetAudio();
     _closeSession();
     onClear();
     console.log('[live] stop');
   }
-  function onTargetLangChanged() { if (_started) { _handle = null; _transAcc = ''; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
+  function onTargetLangChanged() { if (_started) { _handle = null; _inAcc = ''; _outAcc = ''; clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
   function onTranscribeModeChanged() { onTargetLangChanged(); }
   function onVoiceChanged() {   // đổi giọng → mở PHIÊN MỚI (bỏ resume) để áp dụng speechConfig giọng mới ngay
     if (!_started) return;

@@ -20814,8 +20814,9 @@
   var RECONNECT_MS = 1500;
   var PARTIAL_DEBOUNCE_MS = 120;
   var TR_SENT_END = /[.!?。．！？]\s*$/;
-  var SETTLE_MS = 450;
   var LONG_IDLE_MS = 2500;
+  var INPUT_GRACE_MS = 700;
+  var SETTLE_PAUSE_MS = 700;
   var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
   var AUDIO_IDLE_MS = 250;
   var AUDIO_BREAK_GRACE_MS = 160;
@@ -20861,7 +20862,7 @@
     let _started = false, _session = null, _connecting = null, _gen = 0;
     let _handle = null;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-    let _lineBase = 1, _transAcc = "";
+    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false;
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
     function _splitVI(s) {
@@ -20886,24 +20887,48 @@
       if (!prev || next.startsWith(prev)) return next;
       return prev + next;
     }
-    function _emitVI(turnDone) {
-      const sents = _splitVI(_transAcc);
-      const n = Math.max(sents.length, 1);
-      for (let i = 0; i < n; i++) {
-        const text = sents[i] || (_transAcc || "").trim();
-        if (!text) continue;
-        const isPartial = !turnDone && i === n - 1;
-        onCaption({ id: _lineBase + i, author: "STT", original: "", translated: text, isPartial, ts: _ts(), tsMs: Date.now() });
+    function _norm(s) {
+      return (s || "").replace(/[\s。、，．！？!?.,]+/g, "").toLowerCase();
+    }
+    function _fmt(s) {
+      const a = _splitVI(s);
+      return a.length ? a.join("\n") : (s || "").trim();
+    }
+    function _emit(turnDone) {
+      const transcribe = !!st2().transcribeMode;
+      const jaSents = _splitVI(_inAcc);
+      const viSents = transcribe ? [] : _splitVI(_outAcc);
+      let lines = [];
+      if (transcribe) {
+        lines = jaSents.map((s) => ({ o: "", t: (s || "").trim() })).filter((l) => l.t);
+      } else if (jaSents.length > 0 && jaSents.length === viSents.length) {
+        for (let i = 0; i < jaSents.length; i++) {
+          let o = (jaSents[i] || "").trim();
+          const t2 = (viSents[i] || "").trim();
+          if (o && t2 && _norm(o) === _norm(t2)) o = "";
+          if (o || t2) lines.push({ o, t: t2 });
+        }
+      } else {
+        let o = jaSents.join("\n").trim();
+        const t2 = viSents.join("\n").trim();
+        if (o && t2 && _norm(o) === _norm(t2)) o = "";
+        if (o || t2) lines = [{ o, t: t2 }];
       }
-      return n;
+      if (!lines.length) return 0;
+      const original = lines.map((l) => l.o).filter(Boolean).join("\n");
+      const translated = lines.map((l) => l.t).filter(Boolean).join("\n");
+      onCaption({ id: _lineBase, author: "STT", lines, original, translated, isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
+      return 1;
     }
     function _flush() {
       clearTimeout(_emitTimer);
       clearTimeout(_flushTimer);
-      if ((_transAcc || "").trim()) {
-        _lineBase += _emitVI(true);
+      if ((_inAcc || "").trim() || (_outAcc || "").trim()) {
+        if (_emit(true)) _lineBase += 1;
       }
-      _transAcc = "";
+      _inAcc = "";
+      _outAcc = "";
+      _turnEnded = false;
     }
     function _flushAudio(reason) {
       clearTimeout(_audioIdleTimer);
@@ -20919,7 +20944,7 @@
         merged.set(b, off);
         off += b.length;
       }
-      console.log(`[tts] ph\xE1t (${reason || "?"}) ${((total >> 1) / 24e3).toFixed(2)}s | text: "\u2026${(_transAcc || "").slice(-45)}"`);
+      console.log(`[tts] ph\xE1t (${reason || "?"}) ${((total >> 1) / 24e3).toFixed(2)}s | text: "\u2026${(_outAcc || "").slice(-45)}"`);
       _audioBuf = [];
       _audioSamples = 0;
       onAudio({ b64: _bytesToB64(merged), sampleRate: 24e3 });
@@ -20936,7 +20961,7 @@
       _audioIdleTimer = setTimeout(() => _flushAudio("idle"), AUDIO_IDLE_MS);
     }
     function _audioBreakOnText() {
-      const s = (_transAcc || "").replace(/\s+$/, "");
+      const s = (_outAcc || "").replace(/\s+$/, "");
       if (!s) return;
       const c = s[s.length - 1];
       if (!TR_BREAK.test(c)) return;
@@ -20966,11 +20991,19 @@
         if (!sc) return;
         const transcribe = !!st2().transcribeMode;
         let changed = false;
-        const ot = transcribe ? sc.inputTranscription && sc.inputTranscription.text : sc.outputTranscription && sc.outputTranscription.text;
-        if (typeof ot === "string" && ot) {
-          const mg = _mergeTrans(_transAcc, ot);
-          if (mg !== _transAcc) {
-            _transAcc = mg;
+        const itText = sc.inputTranscription && sc.inputTranscription.text;
+        const otText = sc.outputTranscription && sc.outputTranscription.text;
+        if (typeof itText === "string" && itText) {
+          const mg = _mergeTrans(_inAcc, itText);
+          if (mg !== _inAcc) {
+            _inAcc = mg;
+            changed = true;
+          }
+        }
+        if (!transcribe && typeof otText === "string" && otText) {
+          const mg = _mergeTrans(_outAcc, otText);
+          if (mg !== _outAcc) {
+            _outAcc = mg;
             changed = true;
           }
         }
@@ -20984,14 +21017,17 @@
         }
         if (changed) {
           clearTimeout(_emitTimer);
-          _emitTimer = setTimeout(() => _emitVI(false), PARTIAL_DEBOUNCE_MS);
-          const ended = TR_SENT_END.test(_transAcc || "");
+          _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);
+          const settled = TR_SENT_END.test(_inAcc || "") && (transcribe || TR_SENT_END.test(_outAcc || ""));
+          const delay2 = _turnEnded ? INPUT_GRACE_MS : settled ? SETTLE_PAUSE_MS : LONG_IDLE_MS;
           clearTimeout(_flushTimer);
-          _flushTimer = setTimeout(_flush, ended ? SETTLE_MS : LONG_IDLE_MS);
+          _flushTimer = setTimeout(_flush, delay2);
           if (!transcribe && st2().geminiAudioOn !== false) _audioBreakOnText();
         }
         if (sc.turnComplete) {
-          _flush();
+          _turnEnded = true;
+          clearTimeout(_flushTimer);
+          _flushTimer = setTimeout(_flush, INPUT_GRACE_MS);
           _flushAudio("turn");
         }
       } catch (e) {
@@ -21088,7 +21124,8 @@
       }
       _started = true;
       _handle = null;
-      _transAcc = "";
+      _inAcc = "";
+      _outAcc = "";
       _resetAudio();
       _ensure().catch(() => {
       });
@@ -21099,8 +21136,9 @@
       clearTimeout(_reconnectTimer);
       clearTimeout(_emitTimer);
       clearTimeout(_flushTimer);
-      if (_transAcc) _flush();
-      _transAcc = "";
+      if (_inAcc || _outAcc) _flush();
+      _inAcc = "";
+      _outAcc = "";
       _handle = null;
       _resetAudio();
       _closeSession();
@@ -21110,7 +21148,8 @@
     function onTargetLangChanged() {
       if (_started) {
         _handle = null;
-        _transAcc = "";
+        _inAcc = "";
+        _outAcc = "";
         clearTimeout(_emitTimer);
         clearTimeout(_flushTimer);
         _resetAudio();
@@ -21458,6 +21497,8 @@ ${lines}`;
       "footer.summary": "\u{1F4CB} T\xF3m t\u1EAFt",
       "footer.exportTitle": "Xu\u1EA5t transcript",
       "footer.clearTitle": "Xo\xE1",
+      "footer.orig": "G\u1ED1c",
+      "footer.origTitle": "Hi\u1EC7n/\u1EA9n l\u1EDDi g\u1ED1c",
       "summary.title": "T\xF3m t\u1EAFt",
       "summary.full": "\u{1F4CA} T\u1ED5ng th\u1EC3",
       "summary.fullTitle": "B\xE1o c\xE1o t\u1ED5ng th\u1EC3 (khi \u0111\xE3 d\u1EEBng)",
@@ -21519,6 +21560,8 @@ ${lines}`;
       "footer.summary": "\u{1F4CB} Summary",
       "footer.exportTitle": "Export transcript",
       "footer.clearTitle": "Clear",
+      "footer.orig": "Source",
+      "footer.origTitle": "Show/hide original",
       "summary.title": "Summary",
       "summary.full": "\u{1F4CA} Full report",
       "summary.fullTitle": "Full meeting report (after stopping)",
@@ -21580,6 +21623,8 @@ ${lines}`;
       "footer.summary": "\u{1F4CB} \u8981\u7D04",
       "footer.exportTitle": "\u6587\u5B57\u8D77\u3053\u3057\u3092\u66F8\u304D\u51FA\u3059",
       "footer.clearTitle": "\u30AF\u30EA\u30A2",
+      "footer.orig": "\u539F\u6587",
+      "footer.origTitle": "\u539F\u6587\u306E\u8868\u793A/\u975E\u8868\u793A",
       "summary.title": "\u8981\u7D04",
       "summary.full": "\u{1F4CA} \u5168\u4F53\u30EC\u30DD\u30FC\u30C8",
       "summary.fullTitle": "\u4F1A\u8B70\u5168\u4F53\u306E\u30EC\u30DD\u30FC\u30C8\uFF08\u505C\u6B62\u5F8C\uFF09",
@@ -21641,6 +21686,8 @@ ${lines}`;
       "footer.summary": "\u{1F4CB} \uC694\uC57D",
       "footer.exportTitle": "\uC804\uC0AC \uB0B4\uBCF4\uB0B4\uAE30",
       "footer.clearTitle": "\uC9C0\uC6B0\uAE30",
+      "footer.orig": "\uC6D0\uBB38",
+      "footer.origTitle": "\uC6D0\uBB38 \uD45C\uC2DC/\uC228\uAE30\uAE30",
       "summary.title": "\uC694\uC57D",
       "summary.full": "\u{1F4CA} \uC804\uCCB4 \uBCF4\uACE0\uC11C",
       "summary.fullTitle": "\uC804\uCCB4 \uD68C\uC758 \uBCF4\uACE0\uC11C (\uC911\uC9C0 \uD6C4)",
@@ -21702,6 +21749,8 @@ ${lines}`;
       "footer.summary": "\u{1F4CB} \u6458\u8981",
       "footer.exportTitle": "\u5BFC\u51FA\u8F6C\u5199",
       "footer.clearTitle": "\u6E05\u9664",
+      "footer.orig": "\u539F\u6587",
+      "footer.origTitle": "\u663E\u793A/\u9690\u85CF\u539F\u6587",
       "summary.title": "\u6458\u8981",
       "summary.full": "\u{1F4CA} \u5B8C\u6574\u62A5\u544A",
       "summary.fullTitle": "\u5B8C\u6574\u4F1A\u8BAE\u62A5\u544A\uFF08\u505C\u6B62\u540E\uFF09",
@@ -21779,7 +21828,8 @@ ${lines}`;
     geminiAudioOn: true,
     source: "mic",
     summaryExtra: "",
-    uiLang: "vi"
+    uiLang: "vi",
+    showOriginal: false
   };
   var S = { ...DEFAULTS };
   async function loadSettings() {
@@ -21809,6 +21859,7 @@ ${lines}`;
     list: $("list"),
     count: $("count"),
     autoscroll: $("autoscroll"),
+    origBtn: $("orig-btn"),
     summaryToggle: $("summary-toggle"),
     export: $("export"),
     clear: $("clear"),
@@ -21855,12 +21906,13 @@ ${lines}`;
   function addCaption(c) {
     let e = byId.get(c.id);
     if (!e) {
-      e = { id: c.id, author: c.author, translated: c.translated, original: c.original, ts: c.ts, tsMs: c.tsMs, partial: c.isPartial };
+      e = { id: c.id, author: c.author, translated: c.translated, original: c.original, lines: c.lines, ts: c.ts, tsMs: c.tsMs, partial: c.isPartial };
       captions.push(e);
       byId.set(c.id, e);
     } else {
       e.translated = c.translated;
       e.original = c.original;
+      e.lines = c.lines;
       e.author = c.author;
       e.partial = c.isPartial;
     }
@@ -21872,16 +21924,34 @@ ${lines}`;
     if (!row) {
       row = document.createElement("div");
       row.className = "entry";
-      row.innerHTML = '<div class="entry-head"><span class="who"></span><span class="spacer"></span><span class="ts"></span></div><div class="entry-text"></div>';
+      row.innerHTML = '<div class="entry-head"><span class="spacer"></span><span class="ts"></span></div><div class="entry-body"></div>';
       el.list.appendChild(row);
       rowById.set(e.id, row);
     }
     row.classList.toggle("partial", !!e.partial);
-    row.querySelector(".who").textContent = e.author || "Speaker";
     row.querySelector(".ts").textContent = e.ts || "";
-    row.querySelector(".entry-text").textContent = e.translated || e.original || "";
+    const body = row.querySelector(".entry-body");
+    const lines = e.lines && e.lines.length ? e.lines : [{ o: e.original || "", t: e.translated || "" }];
+    body.innerHTML = "";
+    for (const l of lines) {
+      if (S.showOriginal && l.o) {
+        const d = document.createElement("div");
+        d.className = "entry-orig";
+        d.textContent = l.o;
+        body.appendChild(d);
+      }
+      if (l.t) {
+        const d = document.createElement("div");
+        d.className = "entry-text";
+        d.textContent = l.t;
+        body.appendChild(d);
+      }
+    }
     refreshCount();
     if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
+  }
+  function reRenderAll() {
+    for (const e of captions) upsertRow(e);
   }
   function clearList() {
     captions.length = 0;
@@ -22713,6 +22783,11 @@ ${lines}`;
     el.start.addEventListener("click", () => running ? stop() : start());
     el.clear.addEventListener("click", clearList);
     el.export.addEventListener("click", exportTranscript);
+    el.origBtn.addEventListener("click", () => {
+      save({ showOriginal: !S.showOriginal });
+      el.origBtn.classList.toggle("active", S.showOriginal);
+      reRenderAll();
+    });
     el.autoscroll.addEventListener("click", () => {
       autoScroll = !autoScroll;
       el.autoscroll.classList.toggle("active", autoScroll);
@@ -22788,6 +22863,7 @@ ${lines}`;
     if (S.source !== "mic" && S.source !== "screen") save({ source: "screen" });
     el.apikey.value = S.apiKey;
     el.source.value = S.source;
+    el.origBtn.classList.toggle("active", S.showOriginal);
     buildVoiceSelect();
     el.voice.disabled = S.transcribeMode;
     buildTargetButton();

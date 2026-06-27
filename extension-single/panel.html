@@ -55,7 +55,9 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .entry { padding: 6px 0; border-bottom: 1px solid #2a2b2d55; }
 .entry-head { display: flex; gap: 8px; font-size: 11px; color: var(--muted); }
 .entry-head .who { color: var(--accent); font-weight: 600; }
-.entry-text { margin-top: 2px; white-space: pre-wrap; }
+.entry-orig { margin-top: 2px; white-space: pre-wrap; color: var(--muted); font-size: 12px; }
+.entry-text { margin-top: 1px; white-space: pre-wrap; }
+.entry-text + .entry-orig { margin-top: 8px; }   /* cách giữa các CẶP câu (gốc/dịch) cho dễ đọc */
 .entry.partial .entry-text { opacity: .65; font-style: italic; }
 
 .v-resizer { height: 7px; flex: 0 0 auto; cursor: row-resize; background: var(--bd); }
@@ -174,6 +176,7 @@ button.mini.active { border-color: var(--accent2); color: var(--accent); }
   <footer class="bottom">
     <span class="count" id="count">0</span>
     <span class="spacer"></span>
+    <button id="orig-btn" class="mini" data-i18n="footer.orig" data-i18n-title="footer.origTitle" type="button">Gốc</button>
     <button id="autoscroll" class="mini active" data-i18n="footer.auto" data-i18n-title="footer.autoTitle" type="button">↓ Auto</button>
     <button id="summary-toggle" class="mini" data-i18n="footer.summary" type="button">📋 Tóm tắt</button>
     <button id="export" class="mini" data-i18n-title="footer.exportTitle" type="button">💾</button>
