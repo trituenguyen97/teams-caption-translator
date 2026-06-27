@@ -23,7 +23,7 @@ const el = {
   targetBtn: $('target-btn'), targetMenu: $('target-menu'),
   voiceBtn: $('voice-btn'), voiceMenu: $('voice-menu'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
   autoscroll: $('autoscroll'), layoutPick: $('layout-pick'), zoom: $('zoom'), zoomVal: $('zoom-val'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
-  summaryWrap: $('summary-wrap'), summary: $('summary'), sumSpin: $('sum-spin'),
+  summaryWrap: $('summary-wrap'), summary: $('summary'), sumSpin: $('sum-spin'), sumOverlay: $('sum-overlay'),
   sumEdit: $('sum-edit'), sumEditBox: $('sum-edit-box'), summaryExtra: $('summary-extra'), sumExtraSave: $('sum-extra-save'),
   sumFull: $('sum-full'), sumDlHtml: $('sum-dlhtml'), sumExport: $('sum-export'),
   vResizer: $('v-resizer'), dl: $('dl'),
@@ -242,7 +242,13 @@ function stopCapture() {
 let running = false;
 let _micPermTabId = null;        // tab xin quyền mic đang mở (cấp xong → đóng tab)
 let _autoStartAfterGrant = false; // chỉ TỰ Bắt đầu sau khi cấp khi việc cấp đến từ nút Bắt đầu (không phải lúc mở extension)
-function refreshStartBtn() { el.start.textContent = t(running ? 'btn.stop' : 'btn.start'); el.start.classList.toggle('on', running); }
+function refreshStartBtn() {
+  el.start.textContent = t(running ? 'btn.stop' : 'btn.start'); el.start.classList.toggle('on', running);
+  // Nút "Tổng thể": chỉ bấm được khi ĐÃ DỪNG dịch → khóa hình thức (xám + not-allowed) + tooltip i18n khi đang chạy
+  el.sumFull.classList.toggle('disabled', running);
+  el.sumFull.setAttribute('aria-disabled', running ? 'true' : 'false');
+  el.sumFull.title = t(running ? 'summary.fullDisabledTitle' : 'summary.fullTitle');
+}
 async function start() {
   if (running) return;
   if (!S.apiKey || !S.apiKey.trim()) { st('status.needKey', null, 'err'); el.settings.classList.remove('hidden'); return; }
@@ -296,7 +302,7 @@ async function ensureMicPermission() {
 // ── Tóm tắt ────────────────────────────────────────────────────────────────────────
 let summaryMd = '', sumPrevCount = 0, sumBusy = false, sumTimer = null, sumPanelOpen = false, sumLastTime = 0;
 let fullMd = '', showingReport = false;   // #5: tóm tắt tổng thể (markdown) + đang hiển thị bản HTML đẹp?
-const SUM_MIN_NEW = 24, SUM_POLL_MS = 12000, SUM_MAX_CAPS_PER_CALL = 25;
+const SUM_INTERVAL_MS = 60000, SUM_POLL_MS = 10000, SUM_MAX_CAPS_PER_CALL = 250;   // rolling cập nhật ~1 PHÚT/lần (không theo số câu); kiểm tra mỗi 10s; vẫn gửi gần hết câu mới (token nhẹ)
 const SUM_MIN_FIRST = 8, SUM_MIN_FIRST_CHARS = 400;   // tóm tắt LẦN ĐẦU chỉ khi ĐỦ nội dung → chống LLM bịa lúc mới có 1-2 câu
 const finalized = () => captions.filter(c => !c.partial);
 async function summarizeTick() {
@@ -305,7 +311,8 @@ async function summarizeTick() {
   const newCount = caps.length - sumPrevCount;
   const firstChars = caps.reduce((n, c) => n + ((c.translated || c.original || '').length), 0);
   const firstReady = sumLastTime === 0 && caps.length >= SUM_MIN_FIRST && firstChars >= SUM_MIN_FIRST_CHARS;
-  if (!((newCount >= SUM_MIN_NEW) || firstReady)) return;
+  const dueByTime = sumLastTime !== 0 && newCount > 0 && (Date.now() - sumLastTime) >= (SUM_INTERVAL_MS - SUM_POLL_MS);
+  if (!(firstReady || dueByTime)) return;   // rolling: lần đầu khi ĐỦ nội dung, sau đó ~1 phút/lần MIỄN LÀ có câu mới (không có câu mới → bỏ qua, khỏi phí quota)
   sumBusy = true; refreshSpin();
   let newCaps = caps.slice(sumPrevCount);
   if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
@@ -318,6 +325,8 @@ async function summarizeTick() {
 }
 // Spinner = chỉ báo "đang chạy": hiện suốt khi đang dịch (running) và panel mở, hoặc khi có lệnh tóm tắt đang chạy. Stop → ẩn.
 function refreshSpin() { el.sumSpin.classList.toggle('hidden', !((running && sumPanelOpen) || sumBusy)); }
+// Overlay LỚN mờ ở giữa panel khi đang tạo BÁO CÁO TỔNG THỂ (tách khỏi spinner nhỏ của rolling).
+function showFullOverlay(on) { if (el.sumOverlay) el.sumOverlay.classList.toggle('hidden', !on); }
 // Làm lại tóm tắt TỪ ĐẦU với yêu cầu mới (prevSummary rỗng), GIỮ nội dung cũ hiển thị tới khi có bản mới rồi mới đè.
 async function regenerateSummary() {
   if (sumBusy) return;
@@ -596,11 +605,13 @@ function wire() {
   el.sumFull.addEventListener('click', async () => {
     if (running) { st('status.stopFirst'); return; }
     const caps = finalized(); if (!caps.length) { st('status.noContent'); return; }
-    st('status.makingFull'); sumBusy = true; refreshSpin();
-    const r = await summarizer.summarizeFull(caps);
-    sumBusy = false; refreshSpin();
-    if (r && r.ok) { fullMd = summaryMd = r.markdown; showingReport = true; renderSummary(); el.summaryWrap.classList.remove('hidden'); el.sumDlHtml.classList.remove('hidden'); st('status.fullDone'); }
-    else st('status.fullErr', { err: r && r.error }, 'err');
+    st('status.makingFull'); sumBusy = true; refreshSpin(); showFullOverlay(true);
+    try {
+      const r = await summarizer.summarizeFull(caps);
+      if (r && r.ok) { fullMd = summaryMd = r.markdown; showingReport = true; renderSummary(); el.summaryWrap.classList.remove('hidden'); el.sumDlHtml.classList.remove('hidden'); st('status.fullDone'); }
+      else st('status.fullErr', { err: r && r.error }, 'err');
+    } catch (e) { st('status.fullErr', { err: e.message }, 'err'); }
+    finally { sumBusy = false; refreshSpin(); showFullOverlay(false); }
   });
   // Bút chì: mở/đóng ô nhập yêu cầu tóm tắt
   el.sumEdit.addEventListener('click', () => {

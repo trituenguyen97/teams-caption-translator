@@ -8,8 +8,8 @@ const SUMMARY_CHAIN = [
   { id: 'gemma-4-31b-it',        re: /gemma-4-31b/i,                gemma: true  },
   { id: 'gemma-4-26b-it',        re: /gemma-4-26b/i,                gemma: true  },
 ];
-const MAX_PREV_SUMMARY_CHARS = 6000;
-const MAX_NEW_CAPTIONS = 25;
+const MAX_PREV_SUMMARY_CHARS = 24000;   // ~8K token: giữ ĐỦ bản tóm tắt họp DÀI, tránh cắt mất mục cũ (flash-lite ctx 1M dư sức)
+const MAX_NEW_CAPTIONS = 250;           // gửi gần như TẤT CẢ câu mới mỗi vòng → không bỏ sót khi họp dài/nói nhiều (token vẫn nhẹ)
 const ROLL_OUT_TOKENS = 2048;
 const FULL_OUT_TOKENS = 8192;
 
@@ -151,6 +151,7 @@ ${lines}`;
 
   async function _generate(ai, entry, prompt, { withSys = true, maxOut = ROLL_OUT_TOKENS } = {}) {
     const config = { temperature: 0.3, maxOutputTokens: maxOut };
+    if (!entry.gemma) config.thinkingConfig = { thinkingBudget: 0 };   // tắt "thinking" cho gemini flash-lite → nhanh hơn & khỏi nuốt token (gemma không có field này)
     let contents = prompt;
     if (withSys) { const sys = _sysSummary(); if (entry.gemma) contents = sys + '\n\n' + prompt; else config.systemInstruction = sys; }
     const res = await ai.models.generateContent({ model: entry.id, contents, config });
@@ -195,8 +196,8 @@ ${lines}`;
     if (!captions.length) return { ok: false, error: 'empty' };
     const ai = _ai();
     const chain = await _resolveChain(ai);
-    const gemma = chain.filter(c => c.gemma);
-    return _runChain(ai, gemma.length ? gemma : chain, _buildFullReportPrompt(captions), { withSys: false, maxOut: FULL_OUT_TOKENS });
+    // Tổng thể: ƯU TIÊN flash-lite (đo thật ~3s) thay vì gemma-31b (~33s); gemma giữ làm FALLBACK khi transcript quá to/đụng quota.
+    return _runChain(ai, chain, _buildFullReportPrompt(captions), { withSys: false, maxOut: FULL_OUT_TOKENS });
   }
   return { summarize, summarizeFull };
 }

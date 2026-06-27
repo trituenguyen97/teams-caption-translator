@@ -20812,12 +20812,9 @@
   // extension/lib/gemini-live.js
   var MODEL = "gemini-3.5-live-translate-preview";
   var RECONNECT_MS = 1500;
-  var PARTIAL_DEBOUNCE_MS = 120;
   var TR_SENT_END = /[.!?。．！？]\s*$/;
   var LONG_IDLE_MS = 2500;
   var INPUT_GRACE_MS = 700;
-  var SETTLE_PAUSE_MS = 700;
-  var MAX_BLOCK_SENTS = 1;
   var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
   var AUDIO_IDLE_MS = 250;
   var AUDIO_BREAK_GRACE_MS = 160;
@@ -20863,7 +20860,7 @@
     let _started = false, _session = null, _connecting = null, _gen = 0;
     let _handle = null;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false;
+    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _emitted = 0;
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
     function _splitVI(s) {
@@ -20897,45 +20894,50 @@
     function _norm(s) {
       return (s || "").replace(/[\s。、，．！？!?.,]+/g, "").toLowerCase();
     }
-    function _fmt(s) {
-      const a = _splitVI(s);
-      return a.length ? a.join("\n") : (s || "").trim();
-    }
-    function _emit(turnDone) {
-      const transcribe = !!st2().transcribeMode;
-      const jaSents = _splitVI(_inAcc);
-      const viSents = transcribe ? [] : _splitVI(_outAcc);
-      let lines = [];
-      if (transcribe) {
-        lines = jaSents.map((s) => ({ o: "", t: (s || "").trim() })).filter((l) => l.t);
-      } else if (jaSents.length > 0 && jaSents.length === viSents.length) {
-        for (let i = 0; i < jaSents.length; i++) {
-          let o = (jaSents[i] || "").trim();
-          const t2 = (viSents[i] || "").trim();
-          if (o && t2 && _norm(o) === _norm(t2)) o = "";
-          if (o || t2) lines.push({ o, t: t2 });
-        }
-      } else {
-        let o = jaSents.join("\n").trim();
-        const t2 = viSents.join("\n").trim();
-        if (o && t2 && _norm(o) === _norm(t2)) o = "";
-        if (o || t2) lines = [{ o, t: t2 }];
-      }
-      if (!lines.length) return 0;
+    function _send(id, lines, turnDone) {
+      lines = lines.map((l) => {
+        let o = (l.o || "").trim();
+        const tt = (l.t || "").trim();
+        if (o && tt && _norm(o) === _norm(tt)) o = "";
+        return { o, t: tt };
+      }).filter((l) => l.o || l.t);
+      if (!lines.length) return false;
       const original = lines.map((l) => l.o).filter(Boolean).join("\n");
       const translated = lines.map((l) => l.t).filter(Boolean).join("\n");
-      onCaption({ id: _lineBase, author: "STT", lines, original, translated, isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
-      return 1;
+      onCaption({ id, author: "STT", lines, original, translated, isPartial: !turnDone, ts: _ts(), tsMs: Date.now() });
+      return true;
+    }
+    function _pump(final) {
+      const transcribe = !!st2().transcribeMode;
+      const jaAll = _splitVI(_inAcc);
+      const viAll = transcribe ? [] : _splitVI(_outAcc);
+      const ready = transcribe ? _doneCount(_inAcc) : Math.min(_doneCount(_inAcc), _doneCount(_outAcc));
+      while (_emitted < ready) {
+        const o = (jaAll[_emitted] || "").trim();
+        const tt = transcribe ? "" : (viAll[_emitted] || "").trim();
+        if (_send(_lineBase, transcribe ? [{ o: "", t: o }] : [{ o, t: tt }], true)) _lineBase++;
+        _emitted++;
+      }
+      if (final) {
+        const jaRest = jaAll.slice(_emitted).map((s) => s.trim()).filter(Boolean);
+        const viRest = transcribe ? [] : viAll.slice(_emitted).map((s) => s.trim()).filter(Boolean);
+        const o = transcribe ? "" : jaRest.join("\n");
+        const tt = transcribe ? jaRest.join("\n") : viRest.join("\n");
+        if ((o || tt) && _send(_lineBase, [{ o, t: tt }], true)) _lineBase++;
+        _inAcc = "";
+        _outAcc = "";
+        _emitted = 0;
+        _turnEnded = false;
+      } else {
+        const o = (jaAll[_emitted] || "").trim();
+        const tt = transcribe ? "" : (viAll[_emitted] || "").trim();
+        if (o || tt) _send(_lineBase, transcribe ? [{ o: "", t: o }] : [{ o, t: tt }], false);
+      }
     }
     function _flush() {
       clearTimeout(_emitTimer);
       clearTimeout(_flushTimer);
-      if ((_inAcc || "").trim() || (_outAcc || "").trim()) {
-        if (_emit(true)) _lineBase += 1;
-      }
-      _inAcc = "";
-      _outAcc = "";
-      _turnEnded = false;
+      _pump(true);
     }
     function _flushAudio(reason) {
       clearTimeout(_audioIdleTimer);
@@ -21023,24 +21025,15 @@
           }
         }
         if (changed) {
-          const jaDone = _doneCount(_inAcc);
-          const viDone = transcribe ? jaDone : _doneCount(_outAcc);
-          if (jaDone >= MAX_BLOCK_SENTS && viDone >= MAX_BLOCK_SENTS) {
-            _flush();
-          } else {
-            clearTimeout(_emitTimer);
-            _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);
-            const settled = TR_SENT_END.test(_inAcc || "") && (transcribe || TR_SENT_END.test(_outAcc || ""));
-            const delay2 = _turnEnded ? INPUT_GRACE_MS : settled ? SETTLE_PAUSE_MS : LONG_IDLE_MS;
-            clearTimeout(_flushTimer);
-            _flushTimer = setTimeout(_flush, delay2);
-          }
+          _pump(false);
+          clearTimeout(_flushTimer);
+          _flushTimer = setTimeout(() => _pump(true), _turnEnded ? INPUT_GRACE_MS : LONG_IDLE_MS);
           if (!transcribe && st2().geminiAudioOn !== false) _audioBreakOnText();
         }
         if (sc.turnComplete) {
           _turnEnded = true;
           clearTimeout(_flushTimer);
-          _flushTimer = setTimeout(_flush, INPUT_GRACE_MS);
+          _flushTimer = setTimeout(() => _pump(true), INPUT_GRACE_MS);
           _flushAudio("turn");
         }
       } catch (e) {
@@ -21139,6 +21132,7 @@
       _handle = null;
       _inAcc = "";
       _outAcc = "";
+      _emitted = 0;
       _resetAudio();
       _ensure().catch(() => {
       });
@@ -21152,6 +21146,7 @@
       if (_inAcc || _outAcc) _flush();
       _inAcc = "";
       _outAcc = "";
+      _emitted = 0;
       _handle = null;
       _resetAudio();
       _closeSession();
@@ -21163,6 +21158,7 @@
         _handle = null;
         _inAcc = "";
         _outAcc = "";
+        _emitted = 0;
         clearTimeout(_emitTimer);
         clearTimeout(_flushTimer);
         _resetAudio();
@@ -21211,8 +21207,8 @@
     { id: "gemma-4-31b-it", re: /gemma-4-31b/i, gemma: true },
     { id: "gemma-4-26b-it", re: /gemma-4-26b/i, gemma: true }
   ];
-  var MAX_PREV_SUMMARY_CHARS = 6e3;
-  var MAX_NEW_CAPTIONS = 25;
+  var MAX_PREV_SUMMARY_CHARS = 24e3;
+  var MAX_NEW_CAPTIONS = 250;
   var ROLL_OUT_TOKENS = 2048;
   var FULL_OUT_TOKENS = 8192;
   function createSummarizer({ getState }) {
@@ -21374,6 +21370,7 @@ ${lines}`;
     }
     async function _generate(ai, entry, prompt, { withSys = true, maxOut = ROLL_OUT_TOKENS } = {}) {
       const config = { temperature: 0.3, maxOutputTokens: maxOut };
+      if (!entry.gemma) config.thinkingConfig = { thinkingBudget: 0 };
       let contents = prompt;
       if (withSys) {
         const sys = _sysSummary();
@@ -21433,8 +21430,7 @@ ${lines}`;
       if (!captions2.length) return { ok: false, error: "empty" };
       const ai = _ai();
       const chain = await _resolveChain(ai);
-      const gemma = chain.filter((c) => c.gemma);
-      return _runChain(ai, gemma.length ? gemma : chain, _buildFullReportPrompt(captions2), { withSys: false, maxOut: FULL_OUT_TOKENS });
+      return _runChain(ai, chain, _buildFullReportPrompt(captions2), { withSys: false, maxOut: FULL_OUT_TOKENS });
     }
     return { summarize, summarizeFull };
   }
@@ -21777,6 +21773,7 @@ ${lines}`;
     summaryWrap: $("summary-wrap"),
     summary: $("summary"),
     sumSpin: $("sum-spin"),
+    sumOverlay: $("sum-overlay"),
     sumEdit: $("sum-edit"),
     sumEditBox: $("sum-edit-box"),
     summaryExtra: $("summary-extra"),
@@ -22154,6 +22151,9 @@ ${lines}`;
   function refreshStartBtn() {
     el.start.textContent = t(running ? "btn.stop" : "btn.start");
     el.start.classList.toggle("on", running);
+    el.sumFull.classList.toggle("disabled", running);
+    el.sumFull.setAttribute("aria-disabled", running ? "true" : "false");
+    el.sumFull.title = t(running ? "summary.fullDisabledTitle" : "summary.fullTitle");
   }
   async function start() {
     if (running) return;
@@ -22242,9 +22242,9 @@ ${lines}`;
   var sumLastTime = 0;
   var fullMd = "";
   var showingReport = false;
-  var SUM_MIN_NEW = 24;
-  var SUM_POLL_MS = 12e3;
-  var SUM_MAX_CAPS_PER_CALL = 25;
+  var SUM_INTERVAL_MS = 6e4;
+  var SUM_POLL_MS = 1e4;
+  var SUM_MAX_CAPS_PER_CALL = 250;
   var SUM_MIN_FIRST = 8;
   var SUM_MIN_FIRST_CHARS = 400;
   var finalized = () => captions.filter((c) => !c.partial);
@@ -22254,7 +22254,8 @@ ${lines}`;
     const newCount = caps.length - sumPrevCount;
     const firstChars = caps.reduce((n, c) => n + (c.translated || c.original || "").length, 0);
     const firstReady = sumLastTime === 0 && caps.length >= SUM_MIN_FIRST && firstChars >= SUM_MIN_FIRST_CHARS;
-    if (!(newCount >= SUM_MIN_NEW || firstReady)) return;
+    const dueByTime = sumLastTime !== 0 && newCount > 0 && Date.now() - sumLastTime >= SUM_INTERVAL_MS - SUM_POLL_MS;
+    if (!(firstReady || dueByTime)) return;
     sumBusy = true;
     refreshSpin();
     let newCaps = caps.slice(sumPrevCount);
@@ -22277,6 +22278,9 @@ ${lines}`;
   }
   function refreshSpin() {
     el.sumSpin.classList.toggle("hidden", !(running && sumPanelOpen || sumBusy));
+  }
+  function showFullOverlay(on) {
+    if (el.sumOverlay) el.sumOverlay.classList.toggle("hidden", !on);
   }
   async function regenerateSummary() {
     if (sumBusy) return;
@@ -22797,17 +22801,24 @@ ${lines}`;
       st("status.makingFull");
       sumBusy = true;
       refreshSpin();
-      const r = await summarizer.summarizeFull(caps);
-      sumBusy = false;
-      refreshSpin();
-      if (r && r.ok) {
-        fullMd = summaryMd = r.markdown;
-        showingReport = true;
-        renderSummary();
-        el.summaryWrap.classList.remove("hidden");
-        el.sumDlHtml.classList.remove("hidden");
-        st("status.fullDone");
-      } else st("status.fullErr", { err: r && r.error }, "err");
+      showFullOverlay(true);
+      try {
+        const r = await summarizer.summarizeFull(caps);
+        if (r && r.ok) {
+          fullMd = summaryMd = r.markdown;
+          showingReport = true;
+          renderSummary();
+          el.summaryWrap.classList.remove("hidden");
+          el.sumDlHtml.classList.remove("hidden");
+          st("status.fullDone");
+        } else st("status.fullErr", { err: r && r.error }, "err");
+      } catch (e) {
+        st("status.fullErr", { err: e.message }, "err");
+      } finally {
+        sumBusy = false;
+        refreshSpin();
+        showFullOverlay(false);
+      }
     });
     el.sumEdit.addEventListener("click", () => {
       const show = el.sumEditBox.classList.contains("hidden");

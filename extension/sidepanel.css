@@ -64,7 +64,7 @@ button.primary:disabled { opacity: .5; cursor: default; }
 
 .v-resizer { height: 7px; flex: 0 0 auto; cursor: row-resize; background: var(--bd); }
 .v-resizer:hover { background: var(--accent2); }
-.summary-wrap { border-top: 1px solid var(--bd); background: var(--bg2); flex: 0 0 auto; height: 35vh; overflow: hidden; display: flex; flex-direction: column; }
+.summary-wrap { position: relative; border-top: 1px solid var(--bd); background: var(--bg2); flex: 0 0 auto; height: 35vh; overflow: hidden; display: flex; flex-direction: column; }
 .summary-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--bd); flex: 0 0 auto; }
 .summary-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px; font-size: 12px; }
 .summary-body h1, .summary-body h2, .summary-body h3 { margin: 8px 0 4px; font-size: 13px; color: var(--accent); }
@@ -100,9 +100,15 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .sum-spin { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 10px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--bd); flex: 0 0 auto; }
 .spin { width: 12px; height: 12px; border: 2px solid var(--bd); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* Overlay LỚN mờ ở giữa panel khi đang tạo BÁO CÁO TỔNG THỂ */
+.sum-overlay { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg2) 70%, transparent); backdrop-filter: blur(2.5px); -webkit-backdrop-filter: blur(2.5px); }
+.sum-overlay-box { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-weight: 600; text-align: center; padding: 0 16px; }
+.spin-lg { width: 48px; height: 48px; border: 4px solid var(--bd); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 
 .bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-top: 1px solid var(--bd); }
 .count { font-size: 11px; color: var(--muted); }
 button.mini { background: var(--bg3); border: 1px solid var(--bd); color: var(--fg); border-radius: 7px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
 button.mini:hover { background: #34353799; }
 button.mini.active { border-color: var(--accent2); color: var(--accent); }
+button.mini.disabled { opacity: .4; color: var(--muted); cursor: not-allowed; }   /* nhìn là biết disable; vẫn nhận hover để hiện tooltip */
+button.mini.disabled:hover { background: var(--bg3); }   /* hủy hiệu ứng hover khi disable */
