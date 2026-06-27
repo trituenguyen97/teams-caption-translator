@@ -8,7 +8,7 @@ import { I18N_LOCALES, flag, t, setLocale, currentLocale, applyI18n } from './li
 // ── State + lưu trữ ────────────────────────────────────────────────────────────
 const DEFAULTS = {
   apiKey: '', langCode: 'vi', transcribeMode: false, geminiVoice: DEFAULT_VOICE,
-  geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi', layout: 'translation',
+  geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi', layout: 'translation', zoom: 100,
 };
 const S = { ...DEFAULTS };
 async function loadSettings() { const got = await chrome.storage.local.get(DEFAULTS); Object.assign(S, got); }
@@ -22,7 +22,7 @@ const el = {
   apikey: $('apikey'), keyStatus: $('key-status'), source: $('source'),
   targetBtn: $('target-btn'), targetMenu: $('target-menu'),
   voiceBtn: $('voice-btn'), voiceMenu: $('voice-menu'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
-  autoscroll: $('autoscroll'), layoutPick: $('layout-pick'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
+  autoscroll: $('autoscroll'), layoutPick: $('layout-pick'), zoom: $('zoom'), zoomVal: $('zoom-val'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
   summaryWrap: $('summary-wrap'), summary: $('summary'), sumSpin: $('sum-spin'),
   sumEdit: $('sum-edit'), sumEditBox: $('sum-edit-box'), summaryExtra: $('summary-extra'), sumExtraSave: $('sum-extra-save'),
   sumFull: $('sum-full'), sumDlHtml: $('sum-dlhtml'), sumExport: $('sum-export'),
@@ -92,6 +92,7 @@ function upsertRow(e) {
 }
 function reRenderAll() { for (const e of captions) upsertRow(e); }   // áp dụng lại khi đổi layout
 function setLayoutActive() { el.layoutPick.querySelectorAll('.lay-opt').forEach(b => b.classList.toggle('active', b.dataset.layout === S.layout)); }
+function applyZoom() { const z = (S.zoom || 100) / 100; el.list.style.zoom = z; el.summary.style.zoom = z; if (el.zoomVal) el.zoomVal.textContent = (S.zoom || 100) + '%'; }
 function clearList() {
   captions.length = 0; byId.clear(); rowById.clear(); el.list.innerHTML = ''; refreshCount();
   summaryMd = ''; sumPrevCount = 0; sumLastTime = 0; fullMd = ''; showingReport = false; el.sumDlHtml.classList.add('hidden'); renderSummary();
@@ -586,6 +587,7 @@ function wire() {
   el.clear.addEventListener('click', clearList);
   el.export.addEventListener('click', exportTranscript);
   el.layoutPick.addEventListener('click', (ev) => { const b = ev.target.closest('.lay-opt'); if (!b) return; save({ layout: b.dataset.layout }); setLayoutActive(); reRenderAll(); });
+  el.zoom.addEventListener('input', () => { save({ zoom: +el.zoom.value }); applyZoom(); });
   el.autoscroll.addEventListener('click', () => { autoScroll = !autoScroll; el.autoscroll.classList.toggle('active', autoScroll); if (autoScroll) el.list.scrollTop = el.list.scrollHeight; });
   el.list.addEventListener('scroll', () => { const near = el.list.scrollHeight - el.list.scrollTop - el.list.clientHeight < 40; autoScroll = near; el.autoscroll.classList.toggle('active', near); });
   el.summaryToggle.addEventListener('click', () => sumPanelOpen ? closeSummary() : openSummary());
@@ -629,6 +631,7 @@ function wire() {
   if (S.source !== 'mic' && S.source !== 'screen') save({ source: 'screen' });   // migrate giá trị cũ ('tab')
   el.apikey.value = S.apiKey; el.source.value = S.source;
   setLayoutActive();
+  el.zoom.value = S.zoom; applyZoom();
   buildVoiceButton();
   buildTargetButton();
   el.langBtn.innerHTML = GLOBE;

@@ -21,7 +21,7 @@ export const I18N_LOCALES = [   // ngôn ngữ GIAO DIỆN (UI) — chỉ vi/en/
 export const I18N = {
   vi: {
     settings: 'Cài đặt', 'settings.apiKey': 'Gemini API key', 'settings.source': 'Nguồn âm thanh',
-    'settings.layout': 'Giao diện dịch', 'layout.translation': 'Chỉ bản dịch', 'layout.stacked': 'Gốc trên, dịch dưới', 'layout.columns': 'Gốc trái, dịch phải',
+    'settings.layout': 'Giao diện dịch', 'layout.translation': 'Chỉ bản dịch', 'layout.stacked': 'Gốc trên, dịch dưới', 'layout.columns': 'Gốc trái, dịch phải', 'settings.zoom': 'Cỡ chữ',
     'settings.targetLang': 'Ngôn ngữ đích', 'uilang.title': 'Ngôn ngữ giao diện', 'popout.title': 'Mở trong tab riêng',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 Micro', 'source.screen': '🔊 Âm thanh (tab / màn hình / cửa sổ)',
     'lang.transcribe': '📝 Chép lời', 'voice.off': '🔇 Tắt đọc', 'voice.title': 'Giọng đọc',
@@ -45,7 +45,7 @@ export const I18N = {
   },
   en: {
     settings: 'Settings', 'settings.apiKey': 'Gemini API key', 'settings.source': 'Audio source',
-    'settings.layout': 'Translation layout', 'layout.translation': 'Translation only', 'layout.stacked': 'Original top, translation below', 'layout.columns': 'Original left, translation right',
+    'settings.layout': 'Translation layout', 'layout.translation': 'Translation only', 'layout.stacked': 'Original top, translation below', 'layout.columns': 'Original left, translation right', 'settings.zoom': 'Text size',
     'settings.targetLang': 'Target language', 'uilang.title': 'Interface language', 'popout.title': 'Open in a separate tab',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 Microphone', 'source.screen': '🔊 Audio (tab / screen / window)',
     'lang.transcribe': '📝 Transcribe', 'voice.off': '🔇 Voice off', 'voice.title': 'Voice',
@@ -69,7 +69,7 @@ export const I18N = {
   },
   ja: {
     settings: '設定', 'settings.apiKey': 'Gemini API キー', 'settings.source': '音声ソース',
-    'settings.layout': '表示レイアウト', 'layout.translation': '訳のみ', 'layout.stacked': '原文(上)/訳(下)', 'layout.columns': '原文(左)/訳(右)',
+    'settings.layout': '表示レイアウト', 'layout.translation': '訳のみ', 'layout.stacked': '原文(上)/訳(下)', 'layout.columns': '原文(左)/訳(右)', 'settings.zoom': '文字サイズ',
     'settings.targetLang': '翻訳先の言語', 'uilang.title': '表示言語', 'popout.title': '別タブで開く',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 マイク', 'source.screen': '🔊 音声（タブ / 画面 / ウィンドウ）',
     'lang.transcribe': '📝 文字起こし', 'voice.off': '🔇 読み上げオフ', 'voice.title': '読み上げ音声',

@@ -20817,6 +20817,7 @@
   var LONG_IDLE_MS = 2500;
   var INPUT_GRACE_MS = 700;
   var SETTLE_PAUSE_MS = 700;
+  var MAX_BLOCK_SENTS = 2;
   var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
   var AUDIO_IDLE_MS = 250;
   var AUDIO_BREAK_GRACE_MS = 160;
@@ -21016,12 +21017,18 @@
           }
         }
         if (changed) {
-          clearTimeout(_emitTimer);
-          _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);
-          const settled = TR_SENT_END.test(_inAcc || "") && (transcribe || TR_SENT_END.test(_outAcc || ""));
-          const delay2 = _turnEnded ? INPUT_GRACE_MS : settled ? SETTLE_PAUSE_MS : LONG_IDLE_MS;
-          clearTimeout(_flushTimer);
-          _flushTimer = setTimeout(_flush, delay2);
+          const jaDone = (_inAcc.match(/[。．！？!?]/g) || []).length;
+          const viDone = transcribe ? jaDone : (_outAcc.match(/[。．！？!?.]/g) || []).length;
+          if (jaDone >= MAX_BLOCK_SENTS && viDone >= MAX_BLOCK_SENTS) {
+            _flush();
+          } else {
+            clearTimeout(_emitTimer);
+            _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);
+            const settled = TR_SENT_END.test(_inAcc || "") && (transcribe || TR_SENT_END.test(_outAcc || ""));
+            const delay2 = _turnEnded ? INPUT_GRACE_MS : settled ? SETTLE_PAUSE_MS : LONG_IDLE_MS;
+            clearTimeout(_flushTimer);
+            _flushTimer = setTimeout(_flush, delay2);
+          }
           if (!transcribe && st2().geminiAudioOn !== false) _audioBreakOnText();
         }
         if (sc.turnComplete) {
@@ -21485,6 +21492,7 @@ ${lines}`;
       "layout.translation": "Ch\u1EC9 b\u1EA3n d\u1ECBch",
       "layout.stacked": "G\u1ED1c tr\xEAn, d\u1ECBch d\u01B0\u1EDBi",
       "layout.columns": "G\u1ED1c tr\xE1i, d\u1ECBch ph\u1EA3i",
+      "settings.zoom": "C\u1EE1 ch\u1EEF",
       "settings.targetLang": "Ng\xF4n ng\u1EEF \u0111\xEDch",
       "uilang.title": "Ng\xF4n ng\u1EEF giao di\u1EC7n",
       "popout.title": "M\u1EDF trong tab ri\xEAng",
@@ -21554,6 +21562,7 @@ ${lines}`;
       "layout.translation": "Translation only",
       "layout.stacked": "Original top, translation below",
       "layout.columns": "Original left, translation right",
+      "settings.zoom": "Text size",
       "settings.targetLang": "Target language",
       "uilang.title": "Interface language",
       "popout.title": "Open in a separate tab",
@@ -21623,6 +21632,7 @@ ${lines}`;
       "layout.translation": "\u8A33\u306E\u307F",
       "layout.stacked": "\u539F\u6587(\u4E0A)/\u8A33(\u4E0B)",
       "layout.columns": "\u539F\u6587(\u5DE6)/\u8A33(\u53F3)",
+      "settings.zoom": "\u6587\u5B57\u30B5\u30A4\u30BA",
       "settings.targetLang": "\u7FFB\u8A33\u5148\u306E\u8A00\u8A9E",
       "uilang.title": "\u8868\u793A\u8A00\u8A9E",
       "popout.title": "\u5225\u30BF\u30D6\u3067\u958B\u304F",
@@ -21720,7 +21730,8 @@ ${lines}`;
     source: "mic",
     summaryExtra: "",
     uiLang: "vi",
-    layout: "translation"
+    layout: "translation",
+    zoom: 100
   };
   var S = { ...DEFAULTS };
   async function loadSettings() {
@@ -21752,6 +21763,8 @@ ${lines}`;
     count: $("count"),
     autoscroll: $("autoscroll"),
     layoutPick: $("layout-pick"),
+    zoom: $("zoom"),
+    zoomVal: $("zoom-val"),
     summaryToggle: $("summary-toggle"),
     export: $("export"),
     clear: $("clear"),
@@ -21867,6 +21880,12 @@ ${lines}`;
   }
   function setLayoutActive() {
     el.layoutPick.querySelectorAll(".lay-opt").forEach((b) => b.classList.toggle("active", b.dataset.layout === S.layout));
+  }
+  function applyZoom() {
+    const z = (S.zoom || 100) / 100;
+    el.list.style.zoom = z;
+    el.summary.style.zoom = z;
+    if (el.zoomVal) el.zoomVal.textContent = (S.zoom || 100) + "%";
   }
   function clearList() {
     captions.length = 0;
@@ -22738,6 +22757,10 @@ ${lines}`;
       setLayoutActive();
       reRenderAll();
     });
+    el.zoom.addEventListener("input", () => {
+      save({ zoom: +el.zoom.value });
+      applyZoom();
+    });
     el.autoscroll.addEventListener("click", () => {
       autoScroll = !autoScroll;
       el.autoscroll.classList.toggle("active", autoScroll);
@@ -22813,6 +22836,8 @@ ${lines}`;
     el.apikey.value = S.apiKey;
     el.source.value = S.source;
     setLayoutActive();
+    el.zoom.value = S.zoom;
+    applyZoom();
     buildVoiceButton();
     buildTargetButton();
     el.langBtn.innerHTML = GLOBE;

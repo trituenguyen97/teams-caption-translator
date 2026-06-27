@@ -12,6 +12,7 @@ const SETTLE_MS = 450;
 const LONG_IDLE_MS = 2500;
 const INPUT_GRACE_MS = 700;   // sau turnComplete chờ ~0.7s cho STT GỐC (ja, về chậm hơn dịch) đuổi kịp rồi mới chốt → ghép đúng cặp
 const SETTLE_PAUSE_MS = 700;  // không có turnComplete (nói liên tục) → chốt block khi GỐC & DỊCH vừa xong câu + im ~0.7s (nhịp nghỉ)
+const MAX_BLOCK_SENTS = 2;    // chống block DÀI: đủ 2 câu hoàn chỉnh cả gốc lẫn dịch → chốt NGAY (không chờ nghỉ)
 // Phát TTS THEO CÂU: gom audio tới khi BẢN DỊCH gặp dấu KẾT CÂU ( . ! ? ) — hoặc audio nghỉ — rồi phát cả câu → "đủ câu mới đọc".
 const AUDIO_MAX_SAMPLES = (24000 * 3) | 0;     // trần an toàn 3s: không gặp dấu kết câu/nghỉ vẫn phát (chống kẹt)
 const AUDIO_IDLE_MS = 250;                     // audio ngừng ~0.25s (model nghỉ cuối câu) → phát nốt
@@ -159,11 +160,18 @@ export function createLiveTranslator(opts) {
         for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
       }
       if (changed) {
-        clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);
-        // Chốt block: hết lượt → INPUT_GRACE; nói liên tục mà GỐC+DỊCH vừa xong câu → SETTLE_PAUSE (nhịp nghỉ); còn dở → LONG_IDLE.
-        const settled = TR_SENT_END.test(_inAcc || '') && (transcribe || TR_SENT_END.test(_outAcc || ''));
-        const delay = _turnEnded ? INPUT_GRACE_MS : (settled ? SETTLE_PAUSE_MS : LONG_IDLE_MS);
-        clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, delay);
+        // Đủ N câu hoàn chỉnh CẢ 2 phía → chốt NGAY (chống block dài khi nói liên tục, không chờ nghỉ).
+        const jaDone = (_inAcc.match(/[。．！？!?]/g) || []).length;
+        const viDone = transcribe ? jaDone : (_outAcc.match(/[。．！？!?.]/g) || []).length;
+        if (jaDone >= MAX_BLOCK_SENTS && viDone >= MAX_BLOCK_SENTS) {
+          _flush();
+        } else {
+          clearTimeout(_emitTimer); _emitTimer = setTimeout(() => _emit(false), PARTIAL_DEBOUNCE_MS);
+          // Chốt block: hết lượt → INPUT_GRACE; vừa xong câu → SETTLE_PAUSE (nhịp nghỉ); còn dở → LONG_IDLE.
+          const settled = TR_SENT_END.test(_inAcc || '') && (transcribe || TR_SENT_END.test(_outAcc || ''));
+          const delay = _turnEnded ? INPUT_GRACE_MS : (settled ? SETTLE_PAUSE_MS : LONG_IDLE_MS);
+          clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, delay);
+        }
         if (!transcribe && st().geminiAudioOn !== false) _audioBreakOnText();
       }
       if (sc.turnComplete) { _turnEnded = true; clearTimeout(_flushTimer); _flushTimer = setTimeout(_flush, INPUT_GRACE_MS); _flushAudio('turn'); }   // hết lượt → chốt text + phát nốt audio còn lại
