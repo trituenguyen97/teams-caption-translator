@@ -107,10 +107,10 @@ export function createLiveTranslator(opts) {
     }
     if (ready > _doneRows) _doneRows = ready;
     if (turnEnd) { _lineBase += ready; _inAcc = ''; _outAcc = ''; _turnEnded = false; _doneRows = 0; _clearRowTs(); return; }
-    // DÒNG LIVE (preview realtime): phần CHƯA đủ cặp → hiện nguyên cụm, CHƯA ngắt thành hàng (partial, mờ).
+    // DÒNG LIVE (preview realtime): phần CHƯA đủ cặp → vẫn XUỐNG DÒNG theo từng câu (không dồn 1 cục), nhưng để partial (mờ, chưa chốt).
     const pid = _lineBase + _doneRows;
-    const oPrev = transcribe ? '' : jaAll.slice(_doneRows).join(' ').trim();
-    const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join(' ').trim();
+    const oPrev = transcribe ? '' : jaAll.slice(_doneRows).join('\n').trim();
+    const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join('\n').trim();
     if (oPrev || tPrev) { if (!_rowTs[pid]) _rowTs[pid] = _ts(); _send(pid, transcribe ? [{ o: '', t: tPrev }] : [{ o: oPrev, t: tPrev }], false, _rowTs[pid]); }
   }
   function _flush() { clearTimeout(_emitTimer); clearTimeout(_flushTimer); _pump(true); }

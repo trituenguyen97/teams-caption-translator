@@ -20939,8 +20939,8 @@
         return;
       }
       const pid = _lineBase + _doneRows;
-      const oPrev = transcribe ? "" : jaAll.slice(_doneRows).join(" ").trim();
-      const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join(" ").trim();
+      const oPrev = transcribe ? "" : jaAll.slice(_doneRows).join("\n").trim();
+      const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join("\n").trim();
       if (oPrev || tPrev) {
         if (!_rowTs[pid]) _rowTs[pid] = _ts();
         _send(pid, transcribe ? [{ o: "", t: tPrev }] : [{ o: oPrev, t: tPrev }], false, _rowTs[pid]);
