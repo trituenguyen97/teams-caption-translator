@@ -74,7 +74,7 @@ function upsertRow(e) {
   row.querySelector('.ts').textContent = e.ts || '';
   const body = row.querySelector('.entry-body');
   const lines = (e.lines && e.lines.length) ? e.lines : [{ o: e.original || '', t: e.translated || '' }];
-  const lay = S.layout || 'translation';
+  const lay = curLayout();
   body.className = 'entry-body' + (lay === 'columns' ? ' cols' : '');
   body.innerHTML = '';
   for (const l of lines) {
@@ -91,7 +91,14 @@ function upsertRow(e) {
   if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
 }
 function reRenderAll() { for (const e of captions) upsertRow(e); }   // áp dụng lại khi đổi layout
-function setLayoutActive() { el.layoutPick.querySelectorAll('.lay-opt').forEach(b => b.classList.toggle('active', b.dataset.layout === S.layout)); }
+function curLayout() { return S.transcribeMode ? 'translation' : (S.layout || 'translation'); }   // Chép lời → ép Chỉ dịch
+function setLayoutActive() {
+  const eff = curLayout();
+  el.layoutPick.querySelectorAll('.lay-opt').forEach(b => {
+    b.disabled = S.transcribeMode && b.dataset.layout !== 'translation';   // Chép lời → khoá 'Gốc trên/dưới' & '2 cột'
+    b.classList.toggle('active', b.dataset.layout === eff);
+  });
+}
 function applyZoom() { const z = (S.zoom || 100) / 100; el.list.style.zoom = z; el.summary.style.zoom = z; if (el.zoomVal) el.zoomVal.textContent = (S.zoom || 100) + '%'; }
 function clearList() {
   captions.length = 0; byId.clear(); rowById.clear(); el.list.innerHTML = ''; refreshCount();
@@ -470,6 +477,7 @@ function pickTarget(code, transcribe) {
   else { const wasT = S.transcribeMode; save({ langCode: code, transcribeMode: false }); wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged(); }
   buildVoiceButton();   // chép lời → ẩn nút giọng
   buildTargetButton();
+  setLayoutActive(); reRenderAll();   // chép lời → ép layout Chỉ dịch + khoá radio; khôi phục khi tắt
 }
 function closeMenus() { el.langMenu.classList.add('hidden'); el.targetMenu.classList.add('hidden'); el.voiceMenu.classList.add('hidden'); }
 
@@ -595,7 +603,7 @@ function wire() {
   el.start.addEventListener('click', () => running ? stop() : start());
   el.clear.addEventListener('click', clearList);
   el.export.addEventListener('click', exportTranscript);
-  el.layoutPick.addEventListener('click', (ev) => { const b = ev.target.closest('.lay-opt'); if (!b) return; save({ layout: b.dataset.layout }); setLayoutActive(); reRenderAll(); });
+  el.layoutPick.addEventListener('click', (ev) => { const b = ev.target.closest('.lay-opt'); if (!b || b.disabled) return; save({ layout: b.dataset.layout }); setLayoutActive(); reRenderAll(); });
   el.zoom.addEventListener('input', () => { save({ zoom: +el.zoom.value }); applyZoom(); });
   el.autoscroll.addEventListener('click', () => { autoScroll = !autoScroll; el.autoscroll.classList.toggle('active', autoScroll); if (autoScroll) el.list.scrollTop = el.list.scrollHeight; });
   el.list.addEventListener('scroll', () => { const near = el.list.scrollHeight - el.list.scrollTop - el.list.clientHeight < 40; autoScroll = near; el.autoscroll.classList.toggle('active', near); });

@@ -57,6 +57,8 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .lay-opt svg { width: 22px; height: 22px; fill: currentColor; }
 .lay-opt:hover { border-color: var(--accent2); }
 .lay-opt.active { border-color: var(--accent2); color: var(--accent); background: var(--bg2); }
+.lay-opt:disabled { opacity: .4; cursor: not-allowed; }   /* Chép lời → khoá radio layout khác */
+.lay-opt:disabled:hover { border-color: var(--bd); }
 .entry-body.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; align-items: start; }
 .entry-body.cols .col-o { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
 .entry-body.cols .col-t { white-space: pre-wrap; }

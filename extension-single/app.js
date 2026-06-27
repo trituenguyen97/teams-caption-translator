@@ -21516,6 +21516,7 @@ ${lines}`;
       "summary.title": "T\xF3m t\u1EAFt",
       "summary.full": "\u{1F4CA} T\u1ED5ng th\u1EC3",
       "summary.fullTitle": "B\xE1o c\xE1o t\u1ED5ng th\u1EC3 (khi \u0111\xE3 d\u1EEBng)",
+      "summary.fullDisabledTitle": "Ch\u1EC9 t\xF3m t\u1EAFt \u0111\u01B0\u1EE3c khi \u0111\xE3 d\u1EEBng d\u1ECBch",
       "summary.copyTitle": "Copy",
       "summary.exportTitle": "T\u1EA3i .md",
       "summary.dlHtmlTitle": "T\u1EA3i b\xE1o c\xE1o HTML",
@@ -21586,6 +21587,7 @@ ${lines}`;
       "summary.title": "Summary",
       "summary.full": "\u{1F4CA} Full report",
       "summary.fullTitle": "Full meeting report (after stopping)",
+      "summary.fullDisabledTitle": "Available only after you stop translating",
       "summary.copyTitle": "Copy",
       "summary.exportTitle": "Download .md",
       "summary.dlHtmlTitle": "Download HTML report",
@@ -21656,6 +21658,7 @@ ${lines}`;
       "summary.title": "\u8981\u7D04",
       "summary.full": "\u{1F4CA} \u5168\u4F53\u30EC\u30DD\u30FC\u30C8",
       "summary.fullTitle": "\u4F1A\u8B70\u5168\u4F53\u306E\u30EC\u30DD\u30FC\u30C8\uFF08\u505C\u6B62\u5F8C\uFF09",
+      "summary.fullDisabledTitle": "\u7FFB\u8A33\u3092\u505C\u6B62\u3059\u308B\u3068\u8981\u7D04\u3067\u304D\u307E\u3059",
       "summary.copyTitle": "\u30B3\u30D4\u30FC",
       "summary.exportTitle": ".md \u3092\u4FDD\u5B58",
       "summary.dlHtmlTitle": "HTML \u30EC\u30DD\u30FC\u30C8\u3092\u4FDD\u5B58",
@@ -21847,7 +21850,7 @@ ${lines}`;
     row.querySelector(".ts").textContent = e.ts || "";
     const body = row.querySelector(".entry-body");
     const lines = e.lines && e.lines.length ? e.lines : [{ o: e.original || "", t: e.translated || "" }];
-    const lay = S.layout || "translation";
+    const lay = curLayout();
     body.className = "entry-body" + (lay === "columns" ? " cols" : "");
     body.innerHTML = "";
     for (const l of lines) {
@@ -21881,8 +21884,15 @@ ${lines}`;
   function reRenderAll() {
     for (const e of captions) upsertRow(e);
   }
+  function curLayout() {
+    return S.transcribeMode ? "translation" : S.layout || "translation";
+  }
   function setLayoutActive() {
-    el.layoutPick.querySelectorAll(".lay-opt").forEach((b) => b.classList.toggle("active", b.dataset.layout === S.layout));
+    const eff = curLayout();
+    el.layoutPick.querySelectorAll(".lay-opt").forEach((b) => {
+      b.disabled = S.transcribeMode && b.dataset.layout !== "translation";
+      b.classList.toggle("active", b.dataset.layout === eff);
+    });
   }
   function applyZoom() {
     const z = (S.zoom || 100) / 100;
@@ -22511,6 +22521,8 @@ ${lines}`;
     }
     buildVoiceButton();
     buildTargetButton();
+    setLayoutActive();
+    reRenderAll();
   }
   function closeMenus() {
     el.langMenu.classList.add("hidden");
@@ -22762,7 +22774,7 @@ ${lines}`;
     el.export.addEventListener("click", exportTranscript);
     el.layoutPick.addEventListener("click", (ev) => {
       const b = ev.target.closest(".lay-opt");
-      if (!b) return;
+      if (!b || b.disabled) return;
       save({ layout: b.dataset.layout });
       setLayoutActive();
       reRenderAll();
