@@ -20870,7 +20870,12 @@
       let start3 = 0;
       for (let i = 0; i < s.length; i++) {
         const c = s[i];
-        if (c === "." && /\d/.test(s[i - 1] || "") && /\d/.test(s[i + 1] || "")) continue;
+        if (c === ".") {
+          if (/\d/.test(s[i - 1] || "") && /\d/.test(s[i + 1] || "")) continue;
+          let j = i + 1;
+          while (j < s.length && s[j] === " ") j++;
+          if (j < s.length && /\p{Ll}/u.test(s[j])) continue;
+        }
         if (c === "." || c === "!" || c === "?" || c === "\u3002" || c === "\uFF01" || c === "\uFF1F" || c === "\uFF0E") {
           const seg = s.slice(start3, i + 1).trim();
           if (seg) out.push(seg);
@@ -20912,28 +20917,33 @@
       const transcribe = !!st2().transcribeMode;
       const jaAll = _splitVI(_inAcc);
       const viAll = transcribe ? jaAll : _splitVI(_outAcc);
-      const n = jaAll.length;
+      const jaDone = _doneCount(_inAcc);
+      const viDone = transcribe ? jaDone : _doneCount(_outAcc);
       const turnEnd = final && _turnEnded;
-      if (n) {
-        const jaDone = _doneCount(_inAcc);
-        const viDone = transcribe ? jaDone : _doneCount(_outAcc);
-        for (let i = _doneRows; i < n; i++) {
-          const id = _lineBase + i, last = i === n - 1;
-          const gocDone = turnEnd ? true : i < jaDone;
-          const o = transcribe ? "" : jaAll[i] || "";
-          const t2 = transcribe ? jaAll[i] || "" : last ? viAll.slice(i).join("\n") : viAll[i] || "";
-          if (gocDone && !_rowTs[id]) _rowTs[id] = _ts();
-          _send(id, transcribe ? [{ o: "", t: t2 }] : [{ o, t: t2 }], gocDone, _rowTs[id]);
-        }
-        _doneRows = turnEnd ? n : Math.min(jaDone, viDone, n - 1);
+      const ready = turnEnd ? Math.max(jaAll.length, viAll.length) : Math.min(jaDone, viDone);
+      for (let i = _doneRows; i < ready; i++) {
+        const id = _lineBase + i;
+        const o = transcribe ? "" : jaAll[i] || "";
+        const t2 = transcribe ? jaAll[i] || "" : viAll[i] || "";
+        if (!_rowTs[id]) _rowTs[id] = _ts();
+        _send(id, transcribe ? [{ o: "", t: t2 }] : [{ o, t: t2 }], true, _rowTs[id]);
       }
+      if (ready > _doneRows) _doneRows = ready;
       if (turnEnd) {
-        _lineBase += n;
+        _lineBase += ready;
         _inAcc = "";
         _outAcc = "";
         _turnEnded = false;
         _doneRows = 0;
         _clearRowTs();
+        return;
+      }
+      const pid = _lineBase + _doneRows;
+      const oPrev = transcribe ? "" : jaAll.slice(_doneRows).join(" ").trim();
+      const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join(" ").trim();
+      if (oPrev || tPrev) {
+        if (!_rowTs[pid]) _rowTs[pid] = _ts();
+        _send(pid, transcribe ? [{ o: "", t: tPrev }] : [{ o: oPrev, t: tPrev }], false, _rowTs[pid]);
       }
     }
     function _flush() {
@@ -20945,7 +20955,7 @@
       for (const k in _rowTs) delete _rowTs[k];
     }
     function _endTurnHard() {
-      _lineBase += _splitVI(_inAcc).length;
+      _lineBase += Math.max(_splitVI(_inAcc).length, _splitVI(_outAcc).length, _doneRows + 1);
       _inAcc = "";
       _outAcc = "";
       _turnEnded = false;
