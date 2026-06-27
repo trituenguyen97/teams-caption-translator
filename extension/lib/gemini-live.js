@@ -43,28 +43,62 @@ export function createLiveTranslator(opts) {
   let _started = false, _session = null, _connecting = null, _gen = 0;
   let _handle = null;
   let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-  let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false, _doneRows = 0;   // _lineBase=id hàng ĐẦU của lượt; mỗi câu GỐC=1 hàng (id=_lineBase+i); _doneRows=số hàng đã chốt đủ cặp (khỏi vẽ lại)
-  const _rowTs = {};   // id hàng → mốc thời gian (đặt 1 lần lúc câu gốc có dấu chấm → "dòng thời gian" cố định)
+  let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false;   // _lineBase=id hàng đầu của LƯỢT hiện tại
+  const _rowTs = {};   // id hàng → mốc thời gian (đặt 1 lần → "dòng thời gian" cố định)
+  let _oAnch = [];     // [{il,ol}] NEO: lúc 1 mảnh DỊCH về thì input đã tới il ký tự, output tới ol → căn câu gốc↔dịch theo tương quan này (S6)
+  const _emit = {};    // id → khoá nội dung đã gửi (chỉ vẽ lại hàng nào ĐỔI)
+  let _maxId = 0;      // id cao nhất đang hiện trong LƯỢT (để xoá hàng thừa khi DP gộp lại còn ít hàng hơn)
   let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
 
   const isConfigured = () => !!(st().apiKey && String(st().apiKey).trim());
 
-  // ── Tách câu bản dịch (cắt tại . ? !) — mỗi câu 1 entry ──
-  function _splitVI(s) {
+  // ── Tách câu kèm VỊ TRÍ kết thúc (end exclusive) — để neo char-anchor (S6) ──
+  function _splitPos(s) {
     s = s || ''; const out = []; let start = 0;
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
       if (c === '.') {
         if (/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '')) continue;   // số thập phân: 3.14 → không ngắt
-        let j = i + 1; while (j < s.length && s[j] === ' ') j++;                 // dấu '.' chèn GIỮA câu do STT (phía sau là CHỮ THƯỜNG) → không ngắt
+        let j = i + 1; while (j < s.length && /\s/.test(s[j])) j++;             // dấu '.' chèn GIỮA câu do STT (phía sau là CHỮ THƯỜNG) → không ngắt
         if (j < s.length && /\p{Ll}/u.test(s[j])) continue;                     // đầu câu THẬT luôn viết hoa → chỉ ngắt khi sau dấu chấm là chữ hoa/hết chuỗi
       }
       if (c === '.' || c === '!' || c === '?' || c === '。' || c === '！' || c === '？' || c === '．') {
-        const seg = s.slice(start, i + 1).trim(); if (seg) out.push(seg); start = i + 1;
+        const seg = s.slice(start, i + 1).trim(); if (seg) out.push({ text: seg, end: i + 1 }); start = i + 1;
       }
     }
-    const tail = s.slice(start).trim(); if (tail) out.push(tail);
+    const tail = s.slice(start).trim(); if (tail) out.push({ text: tail, end: s.length });
     return out;
+  }
+  function _splitVI(s) { return _splitPos(s).map(x => x.text); }
+  // NEO câu gốc k → vị trí ký tự trong bản DỊCH: lúc input chạm hết câu gốc k (C ký tự) thì output đã tới đâu (ol).
+  function _anchors(inSent, nIn) {
+    const a = [];
+    for (let k = 0; k < nIn; k++) { const C = inSent[k].end; let ol = _outAcc.length; for (const an of _oAnch) { if (an.il >= C) { ol = an.ol; break; } } a.push(ol); }
+    return a;
+  }
+  // CĂN nhiều-nhiều bằng DP (S6): tối thiểu Σ|neo(gốc) − vị-trí-kết(dịch)|, cho phép 1:1, 1:2, 2:1, bỏ qua. → rows [{o,t}].
+  function _alignRows(a, b, inSent, outSent) {
+    const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300;
+    const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
+    const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
+    dp[0][0] = 0;
+    for (let i = 0; i <= nIn; i++) for (let j = 0; j <= nOut; j++) {
+      if (dp[i][j] === INF) continue; const base = dp[i][j];
+      if (i < nIn && j < nOut) { const c = base + Math.abs(a[i] - b[j]); if (c < dp[i + 1][j + 1]) { dp[i + 1][j + 1] = c; bk[i + 1][j + 1] = { pi: i, pj: j, ti: 1, tj: 1 }; } }
+      if (i < nIn && j + 1 < nOut) { const c = base + Math.abs(a[i] - b[j + 1]); if (c < dp[i + 1][j + 2]) { dp[i + 1][j + 2] = c; bk[i + 1][j + 2] = { pi: i, pj: j, ti: 1, tj: 2 }; } }
+      if (i + 1 < nIn && j < nOut) { const c = base + Math.abs(a[i + 1] - b[j]); if (c < dp[i + 2][j + 1]) { dp[i + 2][j + 1] = c; bk[i + 2][j + 1] = { pi: i, pj: j, ti: 2, tj: 1 }; } }
+      if (i < nIn) { const c = base + gap; if (c < dp[i + 1][j]) { dp[i + 1][j] = c; bk[i + 1][j] = { pi: i, pj: j, ti: 1, tj: 0 }; } }
+      if (j < nOut) { const c = base + gap; if (c < dp[i][j + 1]) { dp[i][j + 1] = c; bk[i][j + 1] = { pi: i, pj: j, ti: 0, tj: 1 }; } }
+    }
+    const moves = []; let i = nIn, j = nOut; while (i > 0 || j > 0) { const m = bk[i][j]; if (!m) break; moves.push(m); i = m.pi; j = m.pj; } moves.reverse();
+    const rows = [];
+    for (const m of moves) {
+      const o = inSent.slice(m.pi, m.pi + m.ti).map(s => s.text).join(' ').trim();
+      const t = outSent.slice(m.pj, m.pj + m.tj).map(s => s.text).join(' ').trim();
+      if (m.ti === 0) { if (rows.length) rows[rows.length - 1].t = (rows[rows.length - 1].t + ' ' + t).trim(); else rows.push({ o: '', t }); }
+      else rows.push({ o, t });
+    }
+    return rows;
   }
   // Gom transcript BỀN VỮNG: model 3.x có thể gửi BẢN ĐẦY ĐỦ tích luỹ (không phải delta thuần) → cứ "+=" sẽ LẶP.
   // next bao trùm prev (là prefix mở rộng / hoặc y hệt) ⇒ THAY; ngược lại coi là delta ⇒ NỐI. An toàn cho cả 2 kiểu.
@@ -86,37 +120,49 @@ export function createLiveTranslator(opts) {
     onCaption({ id, author: 'STT', lines, original, translated, isPartial: !turnDone, ts: ts || _ts(), tsMs: Date.now() });
     return true;
   }
-  // Hiển thị TRỰC TIẾP bản dịch của live-translate (realtime). MỖI CÂU GỐC có dấu chấm = 1 HÀNG riêng (id=_lineBase+i, có mốc
-  // thời gian cố định); câu DỊCH tương ứng RÁP vào đúng hàng đó (gốc trái / dịch phải KHỚP HÀNG).
-  // KHÔNG tự ngắt khi chưa có dấu chấm: câu gốc đang dở = dòng live (partial); chỉ chốt thành hàng khi có dấu kết câu (hoặc hết LƯỢT).
+  // Vẽ 1 hàng — chỉ khi nội dung ĐỔI (change-detect) → khỏi vẽ lại hàng đã ổn định.
+  function _emitRow(id, o, t, partial) {
+    o = o || ''; t = t || '';
+    const key = o + '' + t + '' + (partial ? '1' : '0');
+    if (_emit[id] === key) return;
+    _emit[id] = key; if (id > _maxId) _maxId = id;
+    if (!_rowTs[id]) _rowTs[id] = _ts();
+    _send(id, [{ o, t }], !partial, _rowTs[id]);
+  }
+  // Xoá hàng từ fromId trở lên (khi DP gộp lại còn ÍT hàng hơn, hoặc dòng LIVE biến mất) → tránh "hàng ma".
+  function _trimRowsFrom(fromId) {
+    for (let id = fromId; id <= _maxId; id++) { if (_emit[id] !== undefined) { delete _emit[id]; delete _rowTs[id]; onCaption({ id, remove: true }); } }
+    if (fromId - 1 < _maxId) _maxId = fromId - 1;
+  }
+  // ── CĂN S6 (char-anchor DP) ── re-render TOÀN CỤC mỗi lần thay đổi, chỉ gửi hàng nào đổi. Trạng thái cuối == căn DP offline (~90% JA / ~95% EN).
+  // Mỗi câu gốc hoàn chỉnh được NEO vào bản dịch theo il/ol; DP ghép nhiều-nhiều. Câu chưa đủ dấu chấm → dòng LIVE preview (mờ).
   function _pump(final) {
     const transcribe = !!st().transcribeMode;
-    const jaAll = _splitVI(_inAcc);
-    const viAll = transcribe ? jaAll : _splitVI(_outAcc);
-    const jaDone = _doneCount(_inAcc);                 // số câu GỐC đã có dấu chấm
-    const viDone = transcribe ? jaDone : _doneCount(_outAcc);   // số câu DỊCH đã có dấu chấm
-    const turnEnd = final && _turnEnded;               // hết LƯỢT thật → chốt nốt cả câu cuối chưa có dấu chấm
-    // KHOAN NGẮT CÂU: chỉ chốt 1 hàng khi CẢ gốc[i] LẪN dịch[i] đã đủ dấu chấm → ngắt gốc+dịch cùng lúc, dấu chấm sạch (không ngắt non).
-    const ready = turnEnd ? Math.max(jaAll.length, viAll.length) : Math.min(jaDone, viDone);
-    for (let i = _doneRows; i < ready; i++) {          // mỗi câu hoàn chỉnh = 1 hàng riêng (id + mốc thời gian cố định)
-      const id = _lineBase + i;
-      const o = transcribe ? '' : (jaAll[i] || '');
-      const t = transcribe ? (jaAll[i] || '') : (viAll[i] || '');
-      if (!_rowTs[id]) _rowTs[id] = _ts();
-      _send(id, transcribe ? [{ o: '', t }] : [{ o, t }], true, _rowTs[id]);
+    const turnEnd = final && _turnEnded;
+    const inSent = _splitPos(_inAcc);
+    const outSent = transcribe ? inSent : _splitPos(_outAcc);
+    const jaDone = _doneCount(_inAcc);
+    const viDone = transcribe ? jaDone : _doneCount(_outAcc);
+    const nIn = turnEnd ? inSent.length : jaDone;
+    const nOut = turnEnd ? outSent.length : viDone;
+    let rows;
+    if (transcribe) rows = inSent.slice(0, nIn).map(s => ({ o: '', t: s.text }));   // chép lời: mỗi câu gốc 1 hàng
+    else if (nIn > 0 && nOut > 0) rows = _alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map(s => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut));
+    else rows = [];
+    for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? '' : rows[i].o, rows[i].t, false);
+    let nextId = _lineBase + rows.length;
+    if (!turnEnd) {   // dòng LIVE: câu chưa đủ dấu chấm (gốc/dịch còn dở) → 1 hàng partial, xuống dòng theo câu
+      const oPrev = transcribe ? '' : inSent.slice(nIn).map(s => s.text).join('\n').trim();
+      const tPrev = (transcribe ? inSent : outSent).slice(nOut).map(s => s.text).join('\n').trim();
+      if (oPrev || tPrev) { _emitRow(nextId, oPrev, tPrev, true); nextId++; }
     }
-    if (ready > _doneRows) _doneRows = ready;
-    if (turnEnd) { _lineBase += ready; _inAcc = ''; _outAcc = ''; _turnEnded = false; _doneRows = 0; _clearRowTs(); return; }
-    // DÒNG LIVE (preview realtime): phần CHƯA đủ cặp → vẫn XUỐNG DÒNG theo từng câu (không dồn 1 cục), nhưng để partial (mờ, chưa chốt).
-    const pid = _lineBase + _doneRows;
-    const oPrev = transcribe ? '' : jaAll.slice(_doneRows).join('\n').trim();
-    const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join('\n').trim();
-    if (oPrev || tPrev) { if (!_rowTs[pid]) _rowTs[pid] = _ts(); _send(pid, transcribe ? [{ o: '', t: tPrev }] : [{ o: oPrev, t: tPrev }], false, _rowTs[pid]); }
+    _trimRowsFrom(nextId);
+    if (turnEnd) { _lineBase += rows.length; _inAcc = ''; _outAcc = ''; _oAnch = []; _turnEnded = false; _clearTurn(); }
   }
   function _flush() { clearTimeout(_emitTimer); clearTimeout(_flushTimer); _pump(true); }
-  function _clearRowTs() { for (const k in _rowTs) delete _rowTs[k]; }
-  // Đóng CỨNG lượt hiện tại (stop / đổi ngôn ngữ giữa lượt): chừa id cho các hàng đã hiện để KHỎI đè khi sang lượt mới.
-  function _endTurnHard() { _lineBase += Math.max(_splitVI(_inAcc).length, _splitVI(_outAcc).length, _doneRows + 1); _inAcc = ''; _outAcc = ''; _turnEnded = false; _doneRows = 0; _clearRowTs(); }
+  function _clearTurn() { for (const k in _emit) delete _emit[k]; for (const k in _rowTs) delete _rowTs[k]; _maxId = _lineBase - 1; }
+  // Đóng CỨNG lượt (stop / đổi ngôn ngữ giữa lượt): nhảy id qua mọi hàng đã hiện để KHỎI đè lượt mới, reset trạng thái.
+  function _endTurnHard() { _lineBase = _maxId + 1; _inAcc = ''; _outAcc = ''; _oAnch = []; _turnEnded = false; _clearTurn(); }
 
   // ── Audio TTS: gom ~0.4s rồi phát trọn 1 lần ──
   function _flushAudio(reason) {
@@ -163,7 +209,7 @@ export function createLiveTranslator(opts) {
       const itText = sc.inputTranscription && sc.inputTranscription.text;    // lời GỐC
       const otText = sc.outputTranscription && sc.outputTranscription.text;   // bản DỊCH
       if (typeof itText === 'string' && itText) { const mg = _mergeTrans(_inAcc, itText); if (mg !== _inAcc) { _inAcc = mg; changed = true; } }
-      if (!transcribe && typeof otText === 'string' && otText) { const mg = _mergeTrans(_outAcc, otText); if (mg !== _outAcc) { _outAcc = mg; changed = true; } }
+      if (!transcribe && typeof otText === 'string' && otText) { const mg = _mergeTrans(_outAcc, otText); if (mg !== _outAcc) { _outAcc = mg; changed = true; _oAnch.push({ il: _inAcc.length, ol: _outAcc.length }); } }   // NEO: mảnh dịch về lúc input đã tới il
       const parts = (sc.modelTurn && sc.modelTurn.parts) || sc.parts;
       if (!transcribe && parts && st().geminiAudioOn !== false) {
         for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
@@ -232,14 +278,14 @@ export function createLiveTranslator(opts) {
   function start() {
     if (_started) return;
     if (!isConfigured()) { onStatus({ error: 'no-key' }); return; }
-    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _doneRows = 0; _clearRowTs(); _resetAudio();
+    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _oAnch = []; _clearTurn(); _resetAudio();
     _ensure().catch(() => {});
     console.log('[live] start');
   }
   function stop() {
     _started = false;
     clearTimeout(_reconnectTimer); clearTimeout(_emitTimer); clearTimeout(_flushTimer);
-    if (_inAcc || _outAcc) _flush();
+    if (_inAcc || _outAcc) { _turnEnded = true; _flush(); }   // chốt nốt phần đang dở trước khi dừng
     _endTurnHard(); _handle = null; _resetAudio();
     _closeSession();
     onClear();

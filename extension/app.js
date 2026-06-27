@@ -57,6 +57,11 @@ const captions = []; const byId = new Map(); const rowById = new Map();
 let autoScroll = true;
 function refreshCount() { el.count.textContent = t('count', { n: captions.length }); }
 function addCaption(c) {
+  if (c.remove) {   // engine báo xoá hàng (DP gộp lại còn ít hàng hơn / dòng live biến mất)
+    const e = byId.get(c.id); if (e) { const i = captions.indexOf(e); if (i >= 0) captions.splice(i, 1); byId.delete(c.id); }
+    const row = rowById.get(c.id); if (row) { row.remove(); rowById.delete(c.id); }
+    refreshCount(); return;
+  }
   let e = byId.get(c.id);
   if (!e) { e = { id: c.id, author: c.author, translated: c.translated, original: c.original, lines: c.lines, ts: c.ts, tsMs: c.tsMs, partial: c.isPartial }; captions.push(e); byId.set(c.id, e); }
   else { e.translated = c.translated; e.original = c.original; e.lines = c.lines; e.author = c.author; e.partial = c.isPartial; }

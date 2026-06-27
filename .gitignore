@@ -45,3 +45,6 @@ scripts/_translate-results.json
 # Audio test output (sinh bởi scripts/test-gemini-live.cjs)
 *.wav
 
+# File audio thử nghiệm (nặng) — dùng probe live API, không đưa vào repo
+extension/mp3-exp/
+

@@ -20860,11 +20860,14 @@
     let _started = false, _session = null, _connecting = null, _gen = 0;
     let _handle = null;
     let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
-    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false, _doneRows = 0;
+    let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false;
     const _rowTs = {};
+    let _oAnch = [];
+    const _emit = {};
+    let _maxId = 0;
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
-    function _splitVI(s) {
+    function _splitPos(s) {
       s = s || "";
       const out = [];
       let start3 = 0;
@@ -20873,18 +20876,101 @@
         if (c === ".") {
           if (/\d/.test(s[i - 1] || "") && /\d/.test(s[i + 1] || "")) continue;
           let j = i + 1;
-          while (j < s.length && s[j] === " ") j++;
+          while (j < s.length && /\s/.test(s[j])) j++;
           if (j < s.length && /\p{Ll}/u.test(s[j])) continue;
         }
         if (c === "." || c === "!" || c === "?" || c === "\u3002" || c === "\uFF01" || c === "\uFF1F" || c === "\uFF0E") {
           const seg = s.slice(start3, i + 1).trim();
-          if (seg) out.push(seg);
+          if (seg) out.push({ text: seg, end: i + 1 });
           start3 = i + 1;
         }
       }
       const tail = s.slice(start3).trim();
-      if (tail) out.push(tail);
+      if (tail) out.push({ text: tail, end: s.length });
       return out;
+    }
+    function _splitVI(s) {
+      return _splitPos(s).map((x) => x.text);
+    }
+    function _anchors(inSent, nIn) {
+      const a = [];
+      for (let k = 0; k < nIn; k++) {
+        const C = inSent[k].end;
+        let ol = _outAcc.length;
+        for (const an of _oAnch) {
+          if (an.il >= C) {
+            ol = an.ol;
+            break;
+          }
+        }
+        a.push(ol);
+      }
+      return a;
+    }
+    function _alignRows(a, b, inSent, outSent) {
+      const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300;
+      const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
+      const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
+      dp[0][0] = 0;
+      for (let i2 = 0; i2 <= nIn; i2++) for (let j2 = 0; j2 <= nOut; j2++) {
+        if (dp[i2][j2] === INF) continue;
+        const base = dp[i2][j2];
+        if (i2 < nIn && j2 < nOut) {
+          const c = base + Math.abs(a[i2] - b[j2]);
+          if (c < dp[i2 + 1][j2 + 1]) {
+            dp[i2 + 1][j2 + 1] = c;
+            bk[i2 + 1][j2 + 1] = { pi: i2, pj: j2, ti: 1, tj: 1 };
+          }
+        }
+        if (i2 < nIn && j2 + 1 < nOut) {
+          const c = base + Math.abs(a[i2] - b[j2 + 1]);
+          if (c < dp[i2 + 1][j2 + 2]) {
+            dp[i2 + 1][j2 + 2] = c;
+            bk[i2 + 1][j2 + 2] = { pi: i2, pj: j2, ti: 1, tj: 2 };
+          }
+        }
+        if (i2 + 1 < nIn && j2 < nOut) {
+          const c = base + Math.abs(a[i2 + 1] - b[j2]);
+          if (c < dp[i2 + 2][j2 + 1]) {
+            dp[i2 + 2][j2 + 1] = c;
+            bk[i2 + 2][j2 + 1] = { pi: i2, pj: j2, ti: 2, tj: 1 };
+          }
+        }
+        if (i2 < nIn) {
+          const c = base + gap;
+          if (c < dp[i2 + 1][j2]) {
+            dp[i2 + 1][j2] = c;
+            bk[i2 + 1][j2] = { pi: i2, pj: j2, ti: 1, tj: 0 };
+          }
+        }
+        if (j2 < nOut) {
+          const c = base + gap;
+          if (c < dp[i2][j2 + 1]) {
+            dp[i2][j2 + 1] = c;
+            bk[i2][j2 + 1] = { pi: i2, pj: j2, ti: 0, tj: 1 };
+          }
+        }
+      }
+      const moves = [];
+      let i = nIn, j = nOut;
+      while (i > 0 || j > 0) {
+        const m = bk[i][j];
+        if (!m) break;
+        moves.push(m);
+        i = m.pi;
+        j = m.pj;
+      }
+      moves.reverse();
+      const rows = [];
+      for (const m of moves) {
+        const o = inSent.slice(m.pi, m.pi + m.ti).map((s) => s.text).join(" ").trim();
+        const t2 = outSent.slice(m.pj, m.pj + m.tj).map((s) => s.text).join(" ").trim();
+        if (m.ti === 0) {
+          if (rows.length) rows[rows.length - 1].t = (rows[rows.length - 1].t + " " + t2).trim();
+          else rows.push({ o: "", t: t2 });
+        } else rows.push({ o, t: t2 });
+      }
+      return rows;
     }
     function _mergeTrans(prev, next) {
       if (!next) return prev;
@@ -20913,37 +20999,57 @@
       onCaption({ id, author: "STT", lines, original, translated, isPartial: !turnDone, ts: ts || _ts(), tsMs: Date.now() });
       return true;
     }
+    function _emitRow(id, o, t2, partial) {
+      o = o || "";
+      t2 = t2 || "";
+      const key = o + "" + t2 + "" + (partial ? "1" : "0");
+      if (_emit[id] === key) return;
+      _emit[id] = key;
+      if (id > _maxId) _maxId = id;
+      if (!_rowTs[id]) _rowTs[id] = _ts();
+      _send(id, [{ o, t: t2 }], !partial, _rowTs[id]);
+    }
+    function _trimRowsFrom(fromId) {
+      for (let id = fromId; id <= _maxId; id++) {
+        if (_emit[id] !== void 0) {
+          delete _emit[id];
+          delete _rowTs[id];
+          onCaption({ id, remove: true });
+        }
+      }
+      if (fromId - 1 < _maxId) _maxId = fromId - 1;
+    }
     function _pump(final) {
       const transcribe = !!st2().transcribeMode;
-      const jaAll = _splitVI(_inAcc);
-      const viAll = transcribe ? jaAll : _splitVI(_outAcc);
+      const turnEnd = final && _turnEnded;
+      const inSent = _splitPos(_inAcc);
+      const outSent = transcribe ? inSent : _splitPos(_outAcc);
       const jaDone = _doneCount(_inAcc);
       const viDone = transcribe ? jaDone : _doneCount(_outAcc);
-      const turnEnd = final && _turnEnded;
-      const ready = turnEnd ? Math.max(jaAll.length, viAll.length) : Math.min(jaDone, viDone);
-      for (let i = _doneRows; i < ready; i++) {
-        const id = _lineBase + i;
-        const o = transcribe ? "" : jaAll[i] || "";
-        const t2 = transcribe ? jaAll[i] || "" : viAll[i] || "";
-        if (!_rowTs[id]) _rowTs[id] = _ts();
-        _send(id, transcribe ? [{ o: "", t: t2 }] : [{ o, t: t2 }], true, _rowTs[id]);
+      const nIn = turnEnd ? inSent.length : jaDone;
+      const nOut = turnEnd ? outSent.length : viDone;
+      let rows;
+      if (transcribe) rows = inSent.slice(0, nIn).map((s) => ({ o: "", t: s.text }));
+      else if (nIn > 0 && nOut > 0) rows = _alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map((s) => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut));
+      else rows = [];
+      for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? "" : rows[i].o, rows[i].t, false);
+      let nextId = _lineBase + rows.length;
+      if (!turnEnd) {
+        const oPrev = transcribe ? "" : inSent.slice(nIn).map((s) => s.text).join("\n").trim();
+        const tPrev = (transcribe ? inSent : outSent).slice(nOut).map((s) => s.text).join("\n").trim();
+        if (oPrev || tPrev) {
+          _emitRow(nextId, oPrev, tPrev, true);
+          nextId++;
+        }
       }
-      if (ready > _doneRows) _doneRows = ready;
+      _trimRowsFrom(nextId);
       if (turnEnd) {
-        _lineBase += ready;
+        _lineBase += rows.length;
         _inAcc = "";
         _outAcc = "";
+        _oAnch = [];
         _turnEnded = false;
-        _doneRows = 0;
-        _clearRowTs();
-        return;
-      }
-      const pid = _lineBase + _doneRows;
-      const oPrev = transcribe ? "" : jaAll.slice(_doneRows).join("\n").trim();
-      const tPrev = (transcribe ? jaAll : viAll).slice(_doneRows).join("\n").trim();
-      if (oPrev || tPrev) {
-        if (!_rowTs[pid]) _rowTs[pid] = _ts();
-        _send(pid, transcribe ? [{ o: "", t: tPrev }] : [{ o: oPrev, t: tPrev }], false, _rowTs[pid]);
+        _clearTurn();
       }
     }
     function _flush() {
@@ -20951,16 +21057,18 @@
       clearTimeout(_flushTimer);
       _pump(true);
     }
-    function _clearRowTs() {
+    function _clearTurn() {
+      for (const k in _emit) delete _emit[k];
       for (const k in _rowTs) delete _rowTs[k];
+      _maxId = _lineBase - 1;
     }
     function _endTurnHard() {
-      _lineBase += Math.max(_splitVI(_inAcc).length, _splitVI(_outAcc).length, _doneRows + 1);
+      _lineBase = _maxId + 1;
       _inAcc = "";
       _outAcc = "";
+      _oAnch = [];
       _turnEnded = false;
-      _doneRows = 0;
-      _clearRowTs();
+      _clearTurn();
     }
     function _flushAudio(reason) {
       clearTimeout(_audioIdleTimer);
@@ -21037,6 +21145,7 @@
           if (mg !== _outAcc) {
             _outAcc = mg;
             changed = true;
+            _oAnch.push({ il: _inAcc.length, ol: _outAcc.length });
           }
         }
         const parts = sc.modelTurn && sc.modelTurn.parts || sc.parts;
@@ -21155,8 +21264,8 @@
       _handle = null;
       _inAcc = "";
       _outAcc = "";
-      _doneRows = 0;
-      _clearRowTs();
+      _oAnch = [];
+      _clearTurn();
       _resetAudio();
       _ensure().catch(() => {
       });
@@ -21167,7 +21276,10 @@
       clearTimeout(_reconnectTimer);
       clearTimeout(_emitTimer);
       clearTimeout(_flushTimer);
-      if (_inAcc || _outAcc) _flush();
+      if (_inAcc || _outAcc) {
+        _turnEnded = true;
+        _flush();
+      }
       _endTurnHard();
       _handle = null;
       _resetAudio();
@@ -21842,6 +21954,21 @@ ${lines}`;
     el.count.textContent = t("count", { n: captions.length });
   }
   function addCaption(c) {
+    if (c.remove) {
+      const e2 = byId.get(c.id);
+      if (e2) {
+        const i = captions.indexOf(e2);
+        if (i >= 0) captions.splice(i, 1);
+        byId.delete(c.id);
+      }
+      const row = rowById.get(c.id);
+      if (row) {
+        row.remove();
+        rowById.delete(c.id);
+      }
+      refreshCount();
+      return;
+    }
     let e = byId.get(c.id);
     if (!e) {
       e = { id: c.id, author: c.author, translated: c.translated, original: c.original, lines: c.lines, ts: c.ts, tsMs: c.tsMs, partial: c.isPartial };
