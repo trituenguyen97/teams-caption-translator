@@ -12,7 +12,7 @@ const SETTLE_MS = 450;
 const LONG_IDLE_MS = 2500;
 const INPUT_GRACE_MS = 700;   // sau turnComplete chờ ~0.7s cho STT GỐC (ja, về chậm hơn dịch) đuổi kịp rồi mới chốt → ghép đúng cặp
 const SETTLE_PAUSE_MS = 700;  // không có turnComplete (nói liên tục) → chốt block khi GỐC & DỊCH vừa xong câu + im ~0.7s (nhịp nghỉ)
-const MAX_BLOCK_SENTS = 2;    // chống block DÀI: đủ 2 câu hoàn chỉnh cả gốc lẫn dịch → chốt NGAY (không chờ nghỉ)
+const MAX_BLOCK_SENTS = 1;    // chốt theo TỪNG câu (đủ 1 câu hoàn chỉnh cả gốc lẫn dịch → chốt ngay) → giữ kiểu xen kẽ như lúc live
 // Phát TTS THEO CÂU: gom audio tới khi BẢN DỊCH gặp dấu KẾT CÂU ( . ! ? ) — hoặc audio nghỉ — rồi phát cả câu → "đủ câu mới đọc".
 const AUDIO_MAX_SAMPLES = (24000 * 3) | 0;     // trần an toàn 3s: không gặp dấu kết câu/nghỉ vẫn phát (chống kẹt)
 const AUDIO_IDLE_MS = 250;                     // audio ngừng ~0.25s (model nghỉ cuối câu) → phát nốt
@@ -65,6 +65,8 @@ export function createLiveTranslator(opts) {
     const tail = s.slice(start).trim(); if (tail) out.push(tail);
     return out;
   }
+  // Đếm câu HOÀN CHỈNH (dùng _splitVI nên bỏ qua dấu '.' thập phân); câu cuối chưa có dấu kết → chưa tính.
+  function _doneCount(s) { s = (s || '').trim(); if (!s) return 0; const segs = _splitVI(s); return TR_SENT_END.test(s) ? segs.length : Math.max(0, segs.length - 1); }
   // Gom transcript BỀN VỮNG: model 3.x có thể gửi BẢN ĐẦY ĐỦ tích luỹ (không phải delta thuần) → cứ "+=" sẽ LẶP.
   // next bao trùm prev (là prefix mở rộng / hoặc y hệt) ⇒ THAY; ngược lại coi là delta ⇒ NỐI. An toàn cho cả 2 kiểu.
   function _mergeTrans(prev, next) {
@@ -161,8 +163,8 @@ export function createLiveTranslator(opts) {
       }
       if (changed) {
         // Đủ N câu hoàn chỉnh CẢ 2 phía → chốt NGAY (chống block dài khi nói liên tục, không chờ nghỉ).
-        const jaDone = (_inAcc.match(/[。．！？!?]/g) || []).length;
-        const viDone = transcribe ? jaDone : (_outAcc.match(/[。．！？!?.]/g) || []).length;
+        const jaDone = _doneCount(_inAcc);
+        const viDone = transcribe ? jaDone : _doneCount(_outAcc);
         if (jaDone >= MAX_BLOCK_SENTS && viDone >= MAX_BLOCK_SENTS) {
           _flush();
         } else {

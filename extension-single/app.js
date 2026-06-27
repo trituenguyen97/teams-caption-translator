@@ -20817,7 +20817,7 @@
   var LONG_IDLE_MS = 2500;
   var INPUT_GRACE_MS = 700;
   var SETTLE_PAUSE_MS = 700;
-  var MAX_BLOCK_SENTS = 2;
+  var MAX_BLOCK_SENTS = 1;
   var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
   var AUDIO_IDLE_MS = 250;
   var AUDIO_BREAK_GRACE_MS = 160;
@@ -20882,6 +20882,12 @@
       const tail = s.slice(start3).trim();
       if (tail) out.push(tail);
       return out;
+    }
+    function _doneCount(s) {
+      s = (s || "").trim();
+      if (!s) return 0;
+      const segs = _splitVI(s);
+      return TR_SENT_END.test(s) ? segs.length : Math.max(0, segs.length - 1);
     }
     function _mergeTrans(prev, next) {
       if (!next) return prev;
@@ -21017,8 +21023,8 @@
           }
         }
         if (changed) {
-          const jaDone = (_inAcc.match(/[。．！？!?]/g) || []).length;
-          const viDone = transcribe ? jaDone : (_outAcc.match(/[。．！？!?.]/g) || []).length;
+          const jaDone = _doneCount(_inAcc);
+          const viDone = transcribe ? jaDone : _doneCount(_outAcc);
           if (jaDone >= MAX_BLOCK_SENTS && viDone >= MAX_BLOCK_SENTS) {
             _flush();
           } else {
