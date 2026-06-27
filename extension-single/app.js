@@ -21507,7 +21507,8 @@ ${lines}`;
       "summary.full": "\u{1F4CA} T\u1ED5ng th\u1EC3",
       "summary.fullTitle": "B\xE1o c\xE1o t\u1ED5ng th\u1EC3 (khi \u0111\xE3 d\u1EEBng)",
       "summary.copyTitle": "Copy",
-      "summary.exportTitle": "Xu\u1EA5t .md",
+      "summary.exportTitle": "T\u1EA3i .md",
+      "summary.dlHtmlTitle": "T\u1EA3i b\xE1o c\xE1o HTML",
       "summary.editTitle": "S\u1EEDa y\xEAu c\u1EA7u t\xF3m t\u1EAFt",
       "summary.empty": "Ch\u01B0a c\xF3 t\xF3m t\u1EAFt.",
       "summary.extraPh": "VD: t\u1EADp trung v\xE0o quy\u1EBFt \u0111\u1ECBnh & deadline",
@@ -21575,7 +21576,8 @@ ${lines}`;
       "summary.full": "\u{1F4CA} Full report",
       "summary.fullTitle": "Full meeting report (after stopping)",
       "summary.copyTitle": "Copy",
-      "summary.exportTitle": "Export .md",
+      "summary.exportTitle": "Download .md",
+      "summary.dlHtmlTitle": "Download HTML report",
       "summary.editTitle": "Edit summary instructions",
       "summary.empty": "No summary yet.",
       "summary.extraPh": "e.g. focus on decisions & deadlines",
@@ -21643,7 +21645,8 @@ ${lines}`;
       "summary.full": "\u{1F4CA} \u5168\u4F53\u30EC\u30DD\u30FC\u30C8",
       "summary.fullTitle": "\u4F1A\u8B70\u5168\u4F53\u306E\u30EC\u30DD\u30FC\u30C8\uFF08\u505C\u6B62\u5F8C\uFF09",
       "summary.copyTitle": "\u30B3\u30D4\u30FC",
-      "summary.exportTitle": ".md \u3067\u66F8\u304D\u51FA\u3059",
+      "summary.exportTitle": ".md \u3092\u4FDD\u5B58",
+      "summary.dlHtmlTitle": "HTML \u30EC\u30DD\u30FC\u30C8\u3092\u4FDD\u5B58",
       "summary.editTitle": "\u8981\u7D04\u306E\u6307\u793A\u3092\u7DE8\u96C6",
       "summary.empty": "\u307E\u3060\u8981\u7D04\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
       "summary.extraPh": "\u4F8B\uFF1A\u6C7A\u5B9A\u4E8B\u9805\u3068\u671F\u9650\u3092\u91CD\u8996",
@@ -21760,7 +21763,7 @@ ${lines}`;
     summaryExtra: $("summary-extra"),
     sumExtraSave: $("sum-extra-save"),
     sumFull: $("sum-full"),
-    sumCopy: $("sum-copy"),
+    sumDlHtml: $("sum-dlhtml"),
     sumExport: $("sum-export"),
     vResizer: $("v-resizer"),
     dl: $("dl")
@@ -21874,6 +21877,9 @@ ${lines}`;
     summaryMd = "";
     sumPrevCount = 0;
     sumLastTime = 0;
+    fullMd = "";
+    showingReport = false;
+    el.sumDlHtml.classList.add("hidden");
     renderSummary();
   }
   var _gemCtx = null;
@@ -22138,6 +22144,8 @@ ${lines}`;
       running = true;
       refreshStartBtn();
       refreshSpin();
+      showingReport = false;
+      el.sumDlHtml.classList.add("hidden");
       st(S.source === "mic" ? "status.listeningMic" : "status.listeningAudio", null, "run");
     } catch (e) {
       console.error(e);
@@ -22207,6 +22215,8 @@ ${lines}`;
   var sumTimer = null;
   var sumPanelOpen = false;
   var sumLastTime = 0;
+  var fullMd = "";
+  var showingReport = false;
   var SUM_MIN_NEW = 24;
   var SUM_POLL_MS = 12e3;
   var SUM_MAX_CAPS_PER_CALL = 25;
@@ -22228,6 +22238,7 @@ ${lines}`;
       const res = await summarizer.summarize({ prevSummary: summaryMd, captions: newCaps });
       if (res && res.ok) {
         summaryMd = res.markdown;
+        showingReport = false;
         renderSummary();
         sumPrevCount = caps.length;
         sumLastTime = Date.now();
@@ -22254,6 +22265,7 @@ ${lines}`;
       const res = await summarizer.summarize({ prevSummary: "", captions: newCaps });
       if (res && res.ok) {
         summaryMd = res.markdown;
+        showingReport = false;
         renderSummary();
         sumPrevCount = caps.length;
         sumLastTime = Date.now();
@@ -22287,7 +22299,14 @@ ${lines}`;
     sumTimer = null;
   }
   function renderSummary() {
-    el.summary.innerHTML = summaryMd ? md2html(summaryMd) : `<em class="muted">${t("summary.empty")}</em>`;
+    el.summary.innerHTML = showingReport && fullMd ? reportBodyHtml(fullMd) : summaryMd ? md2html(summaryMd) : `<em class="muted">${t("summary.empty")}</em>`;
+  }
+  var REPORT_CSS = 'body{font:14px/1.65 "Segoe UI",system-ui,sans-serif;color:#1a1a1a;background:#eef1f6;margin:0;padding:24px}.report{max-width:840px;margin:0 auto;background:#fff;border-radius:14px;padding:28px 34px;box-shadow:0 6px 30px #00000014}.report h1{font-size:22px;margin:0 0 14px}.report h2{font-size:16px;margin:22px 0 10px;padding:8px 12px;background:linear-gradient(90deg,#e8f0fe,#ffffff);border-left:4px solid #3794ff;border-radius:6px;color:#16345f}.report h3{font-size:14px;color:#333;margin:14px 0 6px}.report table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;overflow:hidden;border-radius:8px}.report th{background:#3794ff;color:#fff;padding:8px 11px;text-align:left}.report td{border:1px solid #e1e7ef;padding:7px 11px}.report tr:nth-child(even) td{background:#f5f8fc}.report ul,.report ol{margin:8px 0 8px 22px}.report li{margin:3px 0}.report code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-size:.92em}.report strong{color:#16345f}.report hr{border:0;border-top:1px solid #e3e8ef;margin:18px 0}';
+  function reportBodyHtml(md) {
+    return '<div class="report">' + md2html(md) + "</div>";
+  }
+  function buildReportDoc(md) {
+    return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meeting report</title><style>${REPORT_CSS}</style></head><body>${reportBodyHtml(md)}</body></html>`;
   }
   function md2html(md) {
     const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -22730,12 +22749,8 @@ ${lines}`;
       el.autoscroll.classList.toggle("active", near);
     });
     el.summaryToggle.addEventListener("click", () => sumPanelOpen ? closeSummary() : openSummary());
-    el.sumCopy.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(summaryMd || "");
-        st("status.copied");
-      } catch (e) {
-      }
+    el.sumDlHtml.addEventListener("click", () => {
+      if (fullMd) download(`report-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.html`, buildReportDoc(fullMd), "text/html");
     });
     el.sumExport.addEventListener("click", () => {
       if (summaryMd) download(`summary-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.md`, summaryMd, "text/markdown");
@@ -22757,9 +22772,11 @@ ${lines}`;
       sumBusy = false;
       refreshSpin();
       if (r && r.ok) {
-        summaryMd = r.markdown;
+        fullMd = summaryMd = r.markdown;
+        showingReport = true;
         renderSummary();
         el.summaryWrap.classList.remove("hidden");
+        el.sumDlHtml.classList.remove("hidden");
         st("status.fullDone");
       } else st("status.fullErr", { err: r && r.error }, "err");
     });
