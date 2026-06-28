@@ -20813,6 +20813,7 @@
   var MODEL = "gemini-3.5-live-translate-preview";
   var RECONNECT_MS = 1500;
   var LONG_IDLE_MS = 2500;
+  var PUMP_DEBOUNCE_MS = 350;
   var INPUT_GRACE_MS = 700;
   var TR_SENT_END = /[.!?。．！？]\s*$/;
   var AUDIO_MAX_SAMPLES = 24e3 * 3 | 0;
@@ -20859,10 +20860,10 @@
     });
     let _started = false, _session = null, _connecting = null, _gen = 0;
     let _handle = null;
-    let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
+    let _reconnectTimer = null, _emitTimer = null, _flushTimer = null, _pumpTimer = null;
     let _lineBase = 1, _inAcc = "", _outAcc = "", _turnEnded = false;
     const _rowTs = {};
-    let _oAnch = [];
+    let _inT = [], _outT = [];
     const _emit = {};
     let _maxId = 0;
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
@@ -20892,82 +20893,138 @@
     function _splitVI(s) {
       return _splitPos(s).map((x) => x.text);
     }
-    function _anchors(inSent, nIn) {
-      const a = [];
-      for (let k = 0; k < nIn; k++) {
-        const C = inSent[k].end;
-        let ol = _outAcc.length;
-        for (const an of _oAnch) {
-          if (an.il >= C) {
-            ol = an.ol;
-            break;
-          }
-        }
-        a.push(ol);
-      }
-      return a;
+    function _median(arr) {
+      if (!arr.length) return 0;
+      const a = arr.slice().sort((x, y) => x - y);
+      const m = a.length >> 1;
+      return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
     }
-    function _alignRows(a, b, inSent, outSent, R) {
-      const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300, LAM = 0.6;
-      const oend = (j2) => j2 <= 0 ? 0 : b[j2 - 1];
-      const slen = (i2, n) => {
+    const _WIN = 3, _LAM = 0.6, _TSCALE = 0.01, _GAP = 24;
+    function _alignTimeRows(inSent, outSent, inT, outT, R) {
+      const nIn = inSent.length, nOut = outSent.length;
+      if (!nIn || !nOut) return [];
+      const it = (k) => inT[k] || 0, ot = (j) => outT[j] || 0;
+      const slen = (i, n) => {
         let s = 0;
-        for (let k = 0; k < n; k++) s += inSent[i2 + k].text.length;
+        for (let k = 0; k < n; k++) s += inSent[i + k].text.length;
         return s;
       };
-      const lpen = (i2, ti, js, je) => LAM * Math.abs(R * slen(i2, ti) - (b[je - 1] - oend(js)));
-      const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
-      const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
-      dp[0][0] = 0;
-      for (let i2 = 0; i2 <= nIn; i2++) for (let j2 = 0; j2 <= nOut; j2++) {
-        if (dp[i2][j2] === INF) continue;
-        const base = dp[i2][j2];
-        if (i2 < nIn && j2 < nOut) {
-          const c = base + Math.abs(a[i2] - b[j2]) + lpen(i2, 1, j2, j2 + 1);
-          if (c < dp[i2 + 1][j2 + 1]) {
-            dp[i2 + 1][j2 + 1] = c;
-            bk[i2 + 1][j2 + 1] = { pi: i2, pj: j2, ti: 1, tj: 1 };
+      const tlen = (j, n) => {
+        let s = 0;
+        for (let k = 0; k < n; k++) s += outSent[j + k].text.length;
+        return s;
+      };
+      const lpen = (i, ti, j, tj) => _LAM * Math.abs(R * slen(i, ti) - tlen(j, tj));
+      const tcost = (k, j, lag2) => _TSCALE * Math.abs(it(k) + lag2[k] - ot(j));
+      const nearestSeed = () => {
+        const p = [];
+        for (let k = 0; k < nIn; k++) {
+          let bj = 0, bd = Infinity;
+          for (let j = 0; j < nOut; j++) {
+            const d = Math.abs(ot(j) - it(k));
+            if (d < bd) {
+              bd = d;
+              bj = j;
+            }
+          }
+          p.push({ dt: ot(bj) - it(k) });
+        }
+        return p;
+      };
+      const buildLag = (seed2) => {
+        const lag2 = new Array(nIn).fill(0);
+        for (let k = 0; k < nIn; k++) {
+          const lo = Math.max(0, k - _WIN), hi = Math.min(nIn - 1, k + _WIN);
+          const w = [];
+          for (let q = lo; q <= hi; q++) w.push(seed2[q].dt);
+          lag2[k] = _median(w);
+        }
+        return lag2;
+      };
+      const runDP = (lag2) => {
+        const INF = Infinity;
+        const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
+        const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
+        dp[0][0] = 0;
+        for (let i2 = 0; i2 <= nIn; i2++) for (let j2 = 0; j2 <= nOut; j2++) {
+          if (dp[i2][j2] === INF) continue;
+          const base = dp[i2][j2];
+          if (i2 < nIn && j2 < nOut) {
+            const c = base + tcost(i2, j2, lag2) + lpen(i2, 1, j2, 1);
+            if (c < dp[i2 + 1][j2 + 1]) {
+              dp[i2 + 1][j2 + 1] = c;
+              bk[i2 + 1][j2 + 1] = { pi: i2, pj: j2, ti: 1, tj: 1 };
+            }
+          }
+          if (i2 < nIn && j2 + 1 < nOut) {
+            const c = base + tcost(i2, j2, lag2) + lpen(i2, 1, j2, 2);
+            if (c < dp[i2 + 1][j2 + 2]) {
+              dp[i2 + 1][j2 + 2] = c;
+              bk[i2 + 1][j2 + 2] = { pi: i2, pj: j2, ti: 1, tj: 2 };
+            }
+          }
+          if (i2 + 1 < nIn && j2 < nOut) {
+            const c = base + tcost(i2 + 1, j2, lag2) + lpen(i2, 2, j2, 1);
+            if (c < dp[i2 + 2][j2 + 1]) {
+              dp[i2 + 2][j2 + 1] = c;
+              bk[i2 + 2][j2 + 1] = { pi: i2, pj: j2, ti: 2, tj: 1 };
+            }
+          }
+          if (i2 < nIn) {
+            const c = base + _GAP;
+            if (c < dp[i2 + 1][j2]) {
+              dp[i2 + 1][j2] = c;
+              bk[i2 + 1][j2] = { pi: i2, pj: j2, ti: 1, tj: 0 };
+            }
+          }
+          if (j2 < nOut) {
+            const c = base + _GAP;
+            if (c < dp[i2][j2 + 1]) {
+              dp[i2][j2 + 1] = c;
+              bk[i2][j2 + 1] = { pi: i2, pj: j2, ti: 0, tj: 1 };
+            }
           }
         }
-        if (i2 < nIn && j2 + 1 < nOut) {
-          const c = base + Math.abs(a[i2] - b[j2 + 1]) + lpen(i2, 1, j2, j2 + 2);
-          if (c < dp[i2 + 1][j2 + 2]) {
-            dp[i2 + 1][j2 + 2] = c;
-            bk[i2 + 1][j2 + 2] = { pi: i2, pj: j2, ti: 1, tj: 2 };
+        const mv = [];
+        let i = nIn, j = nOut;
+        while (i > 0 || j > 0) {
+          const m = bk[i][j];
+          if (!m) break;
+          mv.push(m);
+          i = m.pi;
+          j = m.pj;
+        }
+        mv.reverse();
+        return mv;
+      };
+      const lagFromMoves = (moves2, seed2) => {
+        const d = new Array(nIn).fill(null);
+        for (const m of moves2) {
+          if (m.ti >= 1 && m.tj >= 1) {
+            const kk = m.pi + m.ti - 1, jj = m.pj;
+            d[kk] = ot(jj) - it(kk);
           }
         }
-        if (i2 + 1 < nIn && j2 < nOut) {
-          const c = base + Math.abs(a[i2 + 1] - b[j2]) + lpen(i2, 2, j2, j2 + 1);
-          if (c < dp[i2 + 2][j2 + 1]) {
-            dp[i2 + 2][j2 + 1] = c;
-            bk[i2 + 2][j2 + 1] = { pi: i2, pj: j2, ti: 2, tj: 1 };
-          }
+        const f = d.slice();
+        let last = _median(seed2.map((p) => p.dt));
+        for (let k = 0; k < nIn; k++) {
+          if (f[k] === null) f[k] = last;
+          else last = f[k];
         }
-        if (i2 < nIn) {
-          const c = base + gap;
-          if (c < dp[i2 + 1][j2]) {
-            dp[i2 + 1][j2] = c;
-            bk[i2 + 1][j2] = { pi: i2, pj: j2, ti: 1, tj: 0 };
-          }
+        const out = new Array(nIn).fill(0);
+        for (let k = 0; k < nIn; k++) {
+          const lo = Math.max(0, k - _WIN), hi = Math.min(nIn - 1, k + _WIN);
+          const w = [];
+          for (let q = lo; q <= hi; q++) w.push(f[q]);
+          out[k] = _median(w);
         }
-        if (j2 < nOut) {
-          const c = base + gap;
-          if (c < dp[i2][j2 + 1]) {
-            dp[i2][j2 + 1] = c;
-            bk[i2][j2 + 1] = { pi: i2, pj: j2, ti: 0, tj: 1 };
-          }
-        }
-      }
-      const moves = [];
-      let i = nIn, j = nOut;
-      while (i > 0 || j > 0) {
-        const m = bk[i][j];
-        if (!m) break;
-        moves.push(m);
-        i = m.pi;
-        j = m.pj;
-      }
-      moves.reverse();
+        return out;
+      };
+      let seed = nearestSeed();
+      let lag = buildLag(seed);
+      let moves = runDP(lag);
+      lag = lagFromMoves(moves, seed);
+      moves = runDP(lag);
       const rows = [];
       for (const m of moves) {
         const o = inSent.slice(m.pi, m.pi + m.ti).map((s) => s.text).join(" ").trim();
@@ -21006,7 +21063,7 @@
       onCaption({ id, author: "STT", lines, original, translated, isPartial: !turnDone, ts: ts || _ts(), tsMs: Date.now() });
       return true;
     }
-    const _SRC_FILLER = /^(はい+|ええ+|うん+|うー?ん|そう(ですね|ですよね|か)?|です(ね|よね)|でしょう(ね)?|なるほど|オッケー|おっけー|あの+|えー?と|へえ+|ふ[んー]+|おお+|yes|yeah|ok(ay)?|right|mm+|uh+|um+)[。、,.!?！？\s]*$/iu;
+    const _SRC_FILLER = /^((はい+|ええ+|うん+|うー?ん|そう(ですね|ですよね|か)?|です(ね|よね)|でしょう(ね)?|なるほど|オッケー|おっけー|あの+|えー?と|へえ+|ふ[んー]+|おお+|yes|yeah|ok(ay)?|right|mm+|uh+|um+)[。、,.!?！？\s]*)+$/iu;
     function _isFillerSrc(o) {
       const s = (o || "").replace(/\s+/g, "");
       return !!s && _SRC_FILLER.test(s);
@@ -21023,6 +21080,19 @@
         rows[i].t = fil.join(" ");
       }
       return rows;
+    }
+    function _mergeEmptyRows(rows, turnEnd) {
+      const out = [];
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i], emptyT = r.o && !(r.t && r.t.trim()), lastOne = i === rows.length - 1;
+        if (emptyT && out.length && (!lastOne || turnEnd)) out[out.length - 1].o = (out[out.length - 1].o + " " + r.o).trim();
+        else out.push({ o: r.o, t: r.t });
+      }
+      return out;
+    }
+    function _tHasContent(t2) {
+      const segs = _splitVI(t2 || "");
+      return segs.length ? segs.some((s) => !_VI_FILLER.test(s.trim())) : false;
     }
     function _emitRow(id, o, t2, partial) {
       o = o || "";
@@ -21044,7 +21114,16 @@
       }
       if (fromId - 1 < _maxId) _maxId = fromId - 1;
     }
+    function _schedulePump() {
+      if (_pumpTimer) return;
+      _pumpTimer = setTimeout(() => {
+        _pumpTimer = null;
+        _pump(false);
+      }, PUMP_DEBOUNCE_MS);
+    }
     function _pump(final) {
+      clearTimeout(_pumpTimer);
+      _pumpTimer = null;
       const transcribe = !!st2().transcribeMode;
       const turnEnd = final && _turnEnded;
       const inSent = _splitPos(_inAcc);
@@ -21053,11 +21132,17 @@
       const viDone = transcribe ? jaDone : _doneCount(_outAcc);
       const nIn = turnEnd ? inSent.length : jaDone;
       const nOut = turnEnd ? outSent.length : viDone;
+      const _now = Date.now();
+      for (let k = 0; k < nIn; k++) if (_inT[k] === void 0) _inT[k] = _now;
+      if (!transcribe) {
+        for (let j = 0; j < nOut; j++) if (_outT[j] === void 0) _outT[j] = _now;
+      }
       let rows;
       if (transcribe) rows = inSent.slice(0, nIn).map((s) => ({ o: "", t: s.text }));
       else if (nIn > 0 && nOut > 0) {
-        rows = _fillerPostproc(_alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map((s) => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut), _outAcc.length / Math.max(1, _inAcc.length)));
-        rows = rows.filter((r) => !(_isFillerSrc(r.o) && !(r.t && r.t.trim())));
+        rows = _fillerPostproc(_alignTimeRows(inSent.slice(0, nIn), outSent.slice(0, nOut), _inT, _outT, _outAcc.length / Math.max(1, _inAcc.length)));
+        rows = rows.filter((r) => !(_isFillerSrc(r.o) && !_tHasContent(r.t)));
+        rows = _mergeEmptyRows(rows, turnEnd);
       } else rows = [];
       for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? "" : rows[i].o, rows[i].t, false);
       let nextId = _lineBase + rows.length;
@@ -21074,7 +21159,8 @@
         _lineBase += rows.length;
         _inAcc = "";
         _outAcc = "";
-        _oAnch = [];
+        _inT = [];
+        _outT = [];
         _turnEnded = false;
         _clearTurn();
       }
@@ -21093,7 +21179,8 @@
       _lineBase = _maxId + 1;
       _inAcc = "";
       _outAcc = "";
-      _oAnch = [];
+      _inT = [];
+      _outT = [];
       _turnEnded = false;
       _clearTurn();
     }
@@ -21172,7 +21259,6 @@
           if (mg !== _outAcc) {
             _outAcc = mg;
             changed = true;
-            _oAnch.push({ il: _inAcc.length, ol: _outAcc.length });
           }
         }
         const parts = sc.modelTurn && sc.modelTurn.parts || sc.parts;
@@ -21184,7 +21270,7 @@
           }
         }
         if (changed) {
-          _pump(false);
+          _schedulePump();
           clearTimeout(_flushTimer);
           _flushTimer = setTimeout(() => _pump(true), _turnEnded ? INPUT_GRACE_MS : LONG_IDLE_MS);
           if (!transcribe && st2().geminiAudioOn !== false) _audioBreakOnText();
@@ -21291,7 +21377,8 @@
       _handle = null;
       _inAcc = "";
       _outAcc = "";
-      _oAnch = [];
+      _inT = [];
+      _outT = [];
       _clearTurn();
       _resetAudio();
       _ensure().catch(() => {
@@ -21303,6 +21390,7 @@
       clearTimeout(_reconnectTimer);
       clearTimeout(_emitTimer);
       clearTimeout(_flushTimer);
+      clearTimeout(_pumpTimer);
       if (_inAcc || _outAcc) {
         _turnEnded = true;
         _flush();
@@ -21320,6 +21408,7 @@
         _endTurnHard();
         clearTimeout(_emitTimer);
         clearTimeout(_flushTimer);
+        clearTimeout(_pumpTimer);
         _resetAudio();
         _closeSession();
         _ensure().catch(() => {

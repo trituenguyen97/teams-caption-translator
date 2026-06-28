@@ -7,6 +7,7 @@ import { bcp47 } from './langs.js';
 const MODEL = 'gemini-3.5-live-translate-preview';
 const RECONNECT_MS = 1500;
 const LONG_IDLE_MS = 2500;     // nghỉ ~2.5s không có turnComplete → quét lại để chốt nốt các cặp đã đủ dấu chấm (KHÔNG ép ngắt câu đang dở)
+const PUMP_DEBOUNCE_MS = 350;  // GỘP NHỊP VẼ: thay vì re-render mỗi delta (UI "nhảy" liên tục), gom lại vẽ ~mỗi 350ms → chữ đứng yên rồi cập nhật
 const INPUT_GRACE_MS = 700;    // sau turnComplete chờ ~0.7s cho transcript về nốt rồi mới chốt hẳn câu cuối
 const TR_SENT_END = /[.!?。．！？]\s*$/;   // chuỗi KẾT THÚC bằng dấu kết câu → câu đã trọn (khớp _splitVI)
 // Phát TTS THEO CÂU: gom audio tới khi BẢN DỊCH gặp dấu KẾT CÂU ( . ! ? ) — hoặc audio nghỉ — rồi phát cả câu → "đủ câu mới đọc".
@@ -42,10 +43,10 @@ export function createLiveTranslator(opts) {
 
   let _started = false, _session = null, _connecting = null, _gen = 0;
   let _handle = null;
-  let _reconnectTimer = null, _emitTimer = null, _flushTimer = null;
+  let _reconnectTimer = null, _emitTimer = null, _flushTimer = null, _pumpTimer = null;
   let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false;   // _lineBase=id hàng đầu của LƯỢT hiện tại
   const _rowTs = {};   // id hàng → mốc thời gian (đặt 1 lần → "dòng thời gian" cố định)
-  let _oAnch = [];     // [{il,ol}] NEO: lúc 1 mảnh DỊCH về thì input đã tới il ký tự, output tới ol → căn câu gốc↔dịch theo tương quan này (S6)
+  let _inT = [], _outT = [];   // [k]/[j] = mốc thời gian (ms) câu GỐC/DỊCH thứ k/j HOÀN THÀNH → neo căn theo TRỤC THỜI GIAN (T1C lag-adaptive)
   const _emit = {};    // id → khoá nội dung đã gửi (chỉ vẽ lại hàng nào ĐỔI)
   let _maxId = 0;      // id cao nhất đang hiện trong LƯỢT (để xoá hàng thừa khi DP gộp lại còn ít hàng hơn)
   let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
@@ -70,31 +71,42 @@ export function createLiveTranslator(opts) {
     return out;
   }
   function _splitVI(s) { return _splitPos(s).map(x => x.text); }
-  // NEO câu gốc k → vị trí ký tự trong bản DỊCH: lúc input chạm hết câu gốc k (C ký tự) thì output đã tới đâu (ol).
-  function _anchors(inSent, nIn) {
-    const a = [];
-    for (let k = 0; k < nIn; k++) { const C = inSent[k].end; let ol = _outAcc.length; for (const an of _oAnch) { if (an.il >= C) { ol = an.ol; break; } } a.push(ol); }
-    return a;
-  }
-  // CĂN nhiều-nhiều bằng DP (S6): tối thiểu Σ(|neo(gốc) − vị-trí-kết(dịch)| + PHẠT-ĐỘ-DÀI), cho phép 1:1, 1:2, 2:1, bỏ qua. → rows [{o,t}].
-  // Phạt độ dài: câu gốc ngắn KHÔNG nên nhận bản dịch dài (kỳ vọng độ dài dịch ≈ R×độ dài gốc, R=tỉ lệ ký tự dịch/gốc) → tách đúng cụm bị model gộp.
-  function _alignRows(a, b, inSent, outSent, R) {
-    const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300, LAM = 0.6;
-    const oend = j => (j <= 0 ? 0 : b[j - 1]);                       // số ký tự DỊCH đã qua hết câu j-1
+  function _median(arr) { if (!arr.length) return 0; const a = arr.slice().sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; }
+  // CĂN nhiều-nhiều theo TRỤC THỜI GIAN (T1C): neo câu gốc k ↔ câu dịch j bằng |（t_in(k)+lag(k)) − t_out(j)|,
+  // lag(k) = trung vị TRƯỢT của độ trễ cục bộ (t_out − t_in) quanh câu k (2 pass: seed→DP→rebuild lag→DP). + phạt độ dài phụ.
+  // Trục thời gian trực giao char/length (dịch ĐỒNG THỜI: t_in≈t_out) → tách đúng filler ngắn vs câu dịch dài lệch pha. Cho phép 1:1/1:2/2:1/bỏ qua.
+  const _WIN = 3, _LAM = 0.6, _TSCALE = 0.01, _GAP = 24;   // bộ hằng đã verify: EN byte-identical baseline, JA ja240 72→80 / ja ngắn 83→87
+  function _alignTimeRows(inSent, outSent, inT, outT, R) {
+    const nIn = inSent.length, nOut = outSent.length; if (!nIn || !nOut) return [];
+    const it = k => inT[k] || 0, ot = j => outT[j] || 0;
     const slen = (i, n) => { let s = 0; for (let k = 0; k < n; k++) s += inSent[i + k].text.length; return s; };
-    const lpen = (i, ti, js, je) => LAM * Math.abs(R * slen(i, ti) - (b[je - 1] - oend(js)));
-    const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
-    const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
-    dp[0][0] = 0;
-    for (let i = 0; i <= nIn; i++) for (let j = 0; j <= nOut; j++) {
-      if (dp[i][j] === INF) continue; const base = dp[i][j];
-      if (i < nIn && j < nOut) { const c = base + Math.abs(a[i] - b[j]) + lpen(i, 1, j, j + 1); if (c < dp[i + 1][j + 1]) { dp[i + 1][j + 1] = c; bk[i + 1][j + 1] = { pi: i, pj: j, ti: 1, tj: 1 }; } }
-      if (i < nIn && j + 1 < nOut) { const c = base + Math.abs(a[i] - b[j + 1]) + lpen(i, 1, j, j + 2); if (c < dp[i + 1][j + 2]) { dp[i + 1][j + 2] = c; bk[i + 1][j + 2] = { pi: i, pj: j, ti: 1, tj: 2 }; } }
-      if (i + 1 < nIn && j < nOut) { const c = base + Math.abs(a[i + 1] - b[j]) + lpen(i, 2, j, j + 1); if (c < dp[i + 2][j + 1]) { dp[i + 2][j + 1] = c; bk[i + 2][j + 1] = { pi: i, pj: j, ti: 2, tj: 1 }; } }
-      if (i < nIn) { const c = base + gap; if (c < dp[i + 1][j]) { dp[i + 1][j] = c; bk[i + 1][j] = { pi: i, pj: j, ti: 1, tj: 0 }; } }
-      if (j < nOut) { const c = base + gap; if (c < dp[i][j + 1]) { dp[i][j + 1] = c; bk[i][j + 1] = { pi: i, pj: j, ti: 0, tj: 1 }; } }
-    }
-    const moves = []; let i = nIn, j = nOut; while (i > 0 || j > 0) { const m = bk[i][j]; if (!m) break; moves.push(m); i = m.pi; j = m.pj; } moves.reverse();
+    const tlen = (j, n) => { let s = 0; for (let k = 0; k < n; k++) s += outSent[j + k].text.length; return s; };
+    const lpen = (i, ti, j, tj) => _LAM * Math.abs(R * slen(i, ti) - tlen(j, tj));
+    const tcost = (k, j, lag) => _TSCALE * Math.abs((it(k) + lag[k]) - ot(j));
+    const nearestSeed = () => { const p = []; for (let k = 0; k < nIn; k++) { let bj = 0, bd = Infinity; for (let j = 0; j < nOut; j++) { const d = Math.abs(ot(j) - it(k)); if (d < bd) { bd = d; bj = j; } } p.push({ dt: ot(bj) - it(k) }); } return p; };
+    const buildLag = seed => { const lag = new Array(nIn).fill(0); for (let k = 0; k < nIn; k++) { const lo = Math.max(0, k - _WIN), hi = Math.min(nIn - 1, k + _WIN); const w = []; for (let q = lo; q <= hi; q++) w.push(seed[q].dt); lag[k] = _median(w); } return lag; };
+    const runDP = lag => {
+      const INF = Infinity;
+      const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
+      const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
+      dp[0][0] = 0;
+      for (let i = 0; i <= nIn; i++) for (let j = 0; j <= nOut; j++) {
+        if (dp[i][j] === INF) continue; const base = dp[i][j];
+        if (i < nIn && j < nOut) { const c = base + tcost(i, j, lag) + lpen(i, 1, j, 1); if (c < dp[i + 1][j + 1]) { dp[i + 1][j + 1] = c; bk[i + 1][j + 1] = { pi: i, pj: j, ti: 1, tj: 1 }; } }
+        if (i < nIn && j + 1 < nOut) { const c = base + tcost(i, j, lag) + lpen(i, 1, j, 2); if (c < dp[i + 1][j + 2]) { dp[i + 1][j + 2] = c; bk[i + 1][j + 2] = { pi: i, pj: j, ti: 1, tj: 2 }; } }
+        if (i + 1 < nIn && j < nOut) { const c = base + tcost(i + 1, j, lag) + lpen(i, 2, j, 1); if (c < dp[i + 2][j + 1]) { dp[i + 2][j + 1] = c; bk[i + 2][j + 1] = { pi: i, pj: j, ti: 2, tj: 1 }; } }
+        if (i < nIn) { const c = base + _GAP; if (c < dp[i + 1][j]) { dp[i + 1][j] = c; bk[i + 1][j] = { pi: i, pj: j, ti: 1, tj: 0 }; } }
+        if (j < nOut) { const c = base + _GAP; if (c < dp[i][j + 1]) { dp[i][j + 1] = c; bk[i][j + 1] = { pi: i, pj: j, ti: 0, tj: 1 }; } }
+      }
+      const mv = []; let i = nIn, j = nOut; while (i > 0 || j > 0) { const m = bk[i][j]; if (!m) break; mv.push(m); i = m.pi; j = m.pj; } mv.reverse(); return mv;
+    };
+    const lagFromMoves = (moves, seed) => {
+      const d = new Array(nIn).fill(null);
+      for (const m of moves) { if (m.ti >= 1 && m.tj >= 1) { const kk = m.pi + m.ti - 1, jj = m.pj; d[kk] = ot(jj) - it(kk); } }
+      const f = d.slice(); let last = _median(seed.map(p => p.dt)); for (let k = 0; k < nIn; k++) { if (f[k] === null) f[k] = last; else last = f[k]; }
+      const out = new Array(nIn).fill(0); for (let k = 0; k < nIn; k++) { const lo = Math.max(0, k - _WIN), hi = Math.min(nIn - 1, k + _WIN); const w = []; for (let q = lo; q <= hi; q++) w.push(f[q]); out[k] = _median(w); } return out;
+    };
+    let seed = nearestSeed(); let lag = buildLag(seed); let moves = runDP(lag); lag = lagFromMoves(moves, seed); moves = runDP(lag);
     const rows = [];
     for (const m of moves) {
       const o = inSent.slice(m.pi, m.pi + m.ti).map(s => s.text).join(' ').trim();
@@ -127,7 +139,7 @@ export function createLiveTranslator(opts) {
   // Câu gốc filler/aizuchi (はい/ええ/うん/yes/ok…) hay bị model dịch TRÀN vế câu trước vào. Hậu xử lý:
   // nếu hàng filler có >1 câu dịch và CÓ câu dịch filler (Vâng/Ừ/Rồi…), giữ lại câu filler, ĐẨY câu nội dung về hàng TRƯỚC (chủ nó).
   // Filler/aizuchi GỐC: nhận diện theo NGHĨA (regex), KHÔNG theo độ dài → tránh nhầm câu nội dung ngắn ("10年").
-  const _SRC_FILLER = /^(はい+|ええ+|うん+|うー?ん|そう(ですね|ですよね|か)?|です(ね|よね)|でしょう(ね)?|なるほど|オッケー|おっけー|あの+|えー?と|へえ+|ふ[んー]+|おお+|yes|yeah|ok(ay)?|right|mm+|uh+|um+)[。、,.!?！？\s]*$/iu;
+  const _SRC_FILLER = /^((はい+|ええ+|うん+|うー?ん|そう(ですね|ですよね|か)?|です(ね|よね)|でしょう(ね)?|なるほど|オッケー|おっけー|あの+|えー?と|へえ+|ふ[んー]+|おお+|yes|yeah|ok(ay)?|right|mm+|uh+|um+)[。、,.!?！？\s]*)+$/iu;   // (...)+ : khớp cả aizuchi LẶP (はいはいはい / うんうんうん) để lọc back-channel
   function _isFillerSrc(o) { const s = (o || '').replace(/\s+/g, ''); return !!s && _SRC_FILLER.test(s); }
   const _VI_FILLER = /^((vâng|dạ|ừ|ờ|được|rồi|ok(ay)?|à|ạ|ờm|um+|đúng vậy|đúng rồi|đúng)[\s,.!?]*)+$/i;
   // Hàng gốc filler mà có câu dịch NỘI DUNG (không phải Vâng/Ừ) → đẩy nội dung về hàng TRƯỚC (chủ nó), giữ lại câu filler (có thể rỗng → ẩn).
@@ -143,6 +155,19 @@ export function createLiveTranslator(opts) {
     }
     return rows;
   }
+  // POLISH B: hàng còn GỐC nhưng DỊCH RỖNG (1:N residual — bản dịch đã bị DP gán lên hàng trước) → GỘP gốc lên hàng trước (thành 1 hàng 2:1 đúng).
+  // Chỉ gộp khi AN TOÀN: có hàng trước & (KHÔNG phải hàng cuối HOẶC đã turnEnd) — tránh gộp nhầm khi bản dịch chỉ CHƯA kịp về (sẽ về ở pump sau).
+  function _mergeEmptyRows(rows, turnEnd) {
+    const out = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i], emptyT = r.o && !(r.t && r.t.trim()), lastOne = i === rows.length - 1;
+      if (emptyT && out.length && (!lastOne || turnEnd)) out[out.length - 1].o = (out[out.length - 1].o + ' ' + r.o).trim();
+      else out.push({ o: r.o, t: r.t });
+    }
+    return out;
+  }
+  // Dịch có NỘI DUNG thật (≥1 câu KHÔNG phải filler VI) hay chỉ toàn Vâng/Ừ/Rồi (back-channel)?
+  function _tHasContent(t) { const segs = _splitVI(t || ''); return segs.length ? segs.some(s => !_VI_FILLER.test(s.trim())) : false; }
   // Vẽ 1 hàng — chỉ khi nội dung ĐỔI (change-detect) → khỏi vẽ lại hàng đã ổn định.
   function _emitRow(id, o, t, partial) {
     o = o || ''; t = t || '';
@@ -157,9 +182,11 @@ export function createLiveTranslator(opts) {
     for (let id = fromId; id <= _maxId; id++) { if (_emit[id] !== undefined) { delete _emit[id]; delete _rowTs[id]; onCaption({ id, remove: true }); } }
     if (fromId - 1 < _maxId) _maxId = fromId - 1;
   }
-  // ── CĂN S6 (char-anchor DP) ── re-render TOÀN CỤC mỗi lần thay đổi, chỉ gửi hàng nào đổi. Trạng thái cuối == căn DP offline (~90% JA / ~95% EN).
-  // Mỗi câu gốc hoàn chỉnh được NEO vào bản dịch theo il/ol; DP ghép nhiều-nhiều. Câu chưa đủ dấu chấm → dòng LIVE preview (mờ).
+  // ── CĂN T1C (time-DP lag-adaptive) ── re-render TOÀN CỤC mỗi lần thay đổi, chỉ gửi hàng nào đổi. Trạng thái cuối == căn DP offline (ja240 ~80 / ja ~87 / en ~95).
+  // Mỗi câu gốc/dịch hoàn chỉnh gắn MỐC THỜI GIAN (_inT/_outT); DP ghép nhiều-nhiều theo |Δt|+lag cục bộ. Câu chưa đủ dấu chấm → dòng LIVE preview (mờ).
+  function _schedulePump() { if (_pumpTimer) return; _pumpTimer = setTimeout(() => { _pumpTimer = null; _pump(false); }, PUMP_DEBOUNCE_MS); }   // debounce: gom các delta dồn dập vào 1 lần vẽ
   function _pump(final) {
+    clearTimeout(_pumpTimer); _pumpTimer = null;   // đang vẽ → huỷ pump đang chờ (debounce)
     const transcribe = !!st().transcribeMode;
     const turnEnd = final && _turnEnded;
     const inSent = _splitPos(_inAcc);
@@ -168,11 +195,15 @@ export function createLiveTranslator(opts) {
     const viDone = transcribe ? jaDone : _doneCount(_outAcc);
     const nIn = turnEnd ? inSent.length : jaDone;
     const nOut = turnEnd ? outSent.length : viDone;
+    const _now = Date.now();   // mốc HOÀN THÀNH câu = lần ĐẦU câu thứ k/j lọt vào nIn/nOut (≈ Date.now() khi _doneCount tăng)
+    for (let k = 0; k < nIn; k++) if (_inT[k] === undefined) _inT[k] = _now;
+    if (!transcribe) for (let j = 0; j < nOut; j++) if (_outT[j] === undefined) _outT[j] = _now;
     let rows;
     if (transcribe) rows = inSent.slice(0, nIn).map(s => ({ o: '', t: s.text }));   // chép lời: mỗi câu gốc 1 hàng
     else if (nIn > 0 && nOut > 0) {
-      rows = _fillerPostproc(_alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map(s => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut), _outAcc.length / Math.max(1, _inAcc.length)));
-      rows = rows.filter(r => !(_isFillerSrc(r.o) && !(r.t && r.t.trim())));   // ẩn hàng gốc filler đã bị đẩy hết dịch đi (trống) cho gọn
+      rows = _fillerPostproc(_alignTimeRows(inSent.slice(0, nIn), outSent.slice(0, nOut), _inT, _outT, _outAcc.length / Math.max(1, _inAcc.length)));
+      rows = rows.filter(r => !(_isFillerSrc(r.o) && !_tHasContent(r.t)));   // ẩn BACK-CHANNEL: hàng gốc filler mà dịch rỗng/chỉ-toàn-filler (はい→Vâng); GIỮ nếu lỡ ôm nội dung thật
+      rows = _mergeEmptyRows(rows, turnEnd);   // POLISH B: gộp hàng gốc còn-lại-nhưng-dịch-rỗng (1:N residual) lên hàng trước
     } else rows = [];
     for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? '' : rows[i].o, rows[i].t, false);
     let nextId = _lineBase + rows.length;
@@ -182,12 +213,12 @@ export function createLiveTranslator(opts) {
       if (oPrev || tPrev) { _emitRow(nextId, oPrev, tPrev, true); nextId++; }
     }
     _trimRowsFrom(nextId);
-    if (turnEnd) { _lineBase += rows.length; _inAcc = ''; _outAcc = ''; _oAnch = []; _turnEnded = false; _clearTurn(); }
+    if (turnEnd) { _lineBase += rows.length; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _clearTurn(); }
   }
   function _flush() { clearTimeout(_emitTimer); clearTimeout(_flushTimer); _pump(true); }
   function _clearTurn() { for (const k in _emit) delete _emit[k]; for (const k in _rowTs) delete _rowTs[k]; _maxId = _lineBase - 1; }
   // Đóng CỨNG lượt (stop / đổi ngôn ngữ giữa lượt): nhảy id qua mọi hàng đã hiện để KHỎI đè lượt mới, reset trạng thái.
-  function _endTurnHard() { _lineBase = _maxId + 1; _inAcc = ''; _outAcc = ''; _oAnch = []; _turnEnded = false; _clearTurn(); }
+  function _endTurnHard() { _lineBase = _maxId + 1; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _clearTurn(); }
 
   // ── Audio TTS: gom ~0.4s rồi phát trọn 1 lần ──
   function _flushAudio(reason) {
@@ -234,13 +265,13 @@ export function createLiveTranslator(opts) {
       const itText = sc.inputTranscription && sc.inputTranscription.text;    // lời GỐC
       const otText = sc.outputTranscription && sc.outputTranscription.text;   // bản DỊCH
       if (typeof itText === 'string' && itText) { const mg = _mergeTrans(_inAcc, itText); if (mg !== _inAcc) { _inAcc = mg; changed = true; } }
-      if (!transcribe && typeof otText === 'string' && otText) { const mg = _mergeTrans(_outAcc, otText); if (mg !== _outAcc) { _outAcc = mg; changed = true; _oAnch.push({ il: _inAcc.length, ol: _outAcc.length }); } }   // NEO: mảnh dịch về lúc input đã tới il
+      if (!transcribe && typeof otText === 'string' && otText) { const mg = _mergeTrans(_outAcc, otText); if (mg !== _outAcc) { _outAcc = mg; changed = true; } }   // mốc thời gian câu dịch ghi trong _pump (theo _doneCount)
       const parts = (sc.modelTurn && sc.modelTurn.parts) || sc.parts;
       if (!transcribe && parts && st().geminiAudioOn !== false) {
         for (const p of parts) { const id = p && (p.inlineData || p.inline_data); const d = id && id.data; if (d) _bufAudio(d); }
       }
       if (changed) {
-        _pump(false);   // chốt ngay các CẶP đã hoàn chỉnh cả 2 phía + hiển thị partial cặp đang dở
+        _schedulePump();   // GỘP NHỊP VẼ (~350ms) → UI bớt nhảy; vẫn chốt CẶP hoàn chỉnh + hiện partial
         // chốt nốt phần dư (lệch số câu / câu cuối dở) khi NGHỈ hẳn hoặc HẾT lượt
         clearTimeout(_flushTimer); _flushTimer = setTimeout(() => _pump(true), _turnEnded ? INPUT_GRACE_MS : LONG_IDLE_MS);
         if (!transcribe && st().geminiAudioOn !== false) _audioBreakOnText();
@@ -303,20 +334,20 @@ export function createLiveTranslator(opts) {
   function start() {
     if (_started) return;
     if (!isConfigured()) { onStatus({ error: 'no-key' }); return; }
-    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _oAnch = []; _clearTurn(); _resetAudio();
+    _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _clearTurn(); _resetAudio();
     _ensure().catch(() => {});
     console.log('[live] start');
   }
   function stop() {
     _started = false;
-    clearTimeout(_reconnectTimer); clearTimeout(_emitTimer); clearTimeout(_flushTimer);
+    clearTimeout(_reconnectTimer); clearTimeout(_emitTimer); clearTimeout(_flushTimer); clearTimeout(_pumpTimer);
     if (_inAcc || _outAcc) { _turnEnded = true; _flush(); }   // chốt nốt phần đang dở trước khi dừng
     _endTurnHard(); _handle = null; _resetAudio();
     _closeSession();
     onClear();
     console.log('[live] stop');
   }
-  function onTargetLangChanged() { if (_started) { _handle = null; _endTurnHard(); clearTimeout(_emitTimer); clearTimeout(_flushTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
+  function onTargetLangChanged() { if (_started) { _handle = null; _endTurnHard(); clearTimeout(_emitTimer); clearTimeout(_flushTimer); clearTimeout(_pumpTimer); _resetAudio(); _closeSession(); _ensure().catch(() => {}); } }
   function onTranscribeModeChanged() { onTargetLangChanged(); }
   function onVoiceChanged() {   // đổi giọng → mở PHIÊN MỚI (bỏ resume) để áp dụng speechConfig giọng mới ngay
     if (!_started) return;
