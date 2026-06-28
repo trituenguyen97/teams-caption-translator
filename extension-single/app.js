@@ -20907,8 +20907,15 @@
       }
       return a;
     }
-    function _alignRows(a, b, inSent, outSent) {
-      const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300;
+    function _alignRows(a, b, inSent, outSent, R) {
+      const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300, LAM = 0.6;
+      const oend = (j2) => j2 <= 0 ? 0 : b[j2 - 1];
+      const slen = (i2, n) => {
+        let s = 0;
+        for (let k = 0; k < n; k++) s += inSent[i2 + k].text.length;
+        return s;
+      };
+      const lpen = (i2, ti, js, je) => LAM * Math.abs(R * slen(i2, ti) - (b[je - 1] - oend(js)));
       const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
       const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
       dp[0][0] = 0;
@@ -20916,21 +20923,21 @@
         if (dp[i2][j2] === INF) continue;
         const base = dp[i2][j2];
         if (i2 < nIn && j2 < nOut) {
-          const c = base + Math.abs(a[i2] - b[j2]);
+          const c = base + Math.abs(a[i2] - b[j2]) + lpen(i2, 1, j2, j2 + 1);
           if (c < dp[i2 + 1][j2 + 1]) {
             dp[i2 + 1][j2 + 1] = c;
             bk[i2 + 1][j2 + 1] = { pi: i2, pj: j2, ti: 1, tj: 1 };
           }
         }
         if (i2 < nIn && j2 + 1 < nOut) {
-          const c = base + Math.abs(a[i2] - b[j2 + 1]);
+          const c = base + Math.abs(a[i2] - b[j2 + 1]) + lpen(i2, 1, j2, j2 + 2);
           if (c < dp[i2 + 1][j2 + 2]) {
             dp[i2 + 1][j2 + 2] = c;
             bk[i2 + 1][j2 + 2] = { pi: i2, pj: j2, ti: 1, tj: 2 };
           }
         }
         if (i2 + 1 < nIn && j2 < nOut) {
-          const c = base + Math.abs(a[i2 + 1] - b[j2]);
+          const c = base + Math.abs(a[i2 + 1] - b[j2]) + lpen(i2, 2, j2, j2 + 1);
           if (c < dp[i2 + 2][j2 + 1]) {
             dp[i2 + 2][j2 + 1] = c;
             bk[i2 + 2][j2 + 1] = { pi: i2, pj: j2, ti: 2, tj: 1 };
@@ -20999,6 +21006,24 @@
       onCaption({ id, author: "STT", lines, original, translated, isPartial: !turnDone, ts: ts || _ts(), tsMs: Date.now() });
       return true;
     }
+    const _SRC_FILLER = /^(はい+|ええ+|うん+|うー?ん|そう(ですね|ですよね|か)?|です(ね|よね)|でしょう(ね)?|なるほど|オッケー|おっけー|あの+|えー?と|へえ+|ふ[んー]+|おお+|yes|yeah|ok(ay)?|right|mm+|uh+|um+)[。、,.!?！？\s]*$/iu;
+    function _isFillerSrc(o) {
+      const s = (o || "").replace(/\s+/g, "");
+      return !!s && _SRC_FILLER.test(s);
+    }
+    const _VI_FILLER = /^((vâng|dạ|ừ|ờ|được|rồi|ok(ay)?|à|ạ|ờm|um+|đúng vậy|đúng rồi|đúng)[\s,.!?]*)+$/i;
+    function _fillerPostproc(rows) {
+      for (let i = 1; i < rows.length; i++) {
+        if (!_isFillerSrc(rows[i].o)) continue;
+        const ts = _splitVI(rows[i].t);
+        const con = ts.filter((x) => !_VI_FILLER.test(x.trim()));
+        if (!con.length) continue;
+        const fil = ts.filter((x) => _VI_FILLER.test(x.trim()));
+        rows[i - 1].t = (rows[i - 1].t + " " + con.join(" ")).trim();
+        rows[i].t = fil.join(" ");
+      }
+      return rows;
+    }
     function _emitRow(id, o, t2, partial) {
       o = o || "";
       t2 = t2 || "";
@@ -21030,8 +21055,10 @@
       const nOut = turnEnd ? outSent.length : viDone;
       let rows;
       if (transcribe) rows = inSent.slice(0, nIn).map((s) => ({ o: "", t: s.text }));
-      else if (nIn > 0 && nOut > 0) rows = _alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map((s) => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut));
-      else rows = [];
+      else if (nIn > 0 && nOut > 0) {
+        rows = _fillerPostproc(_alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map((s) => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut), _outAcc.length / Math.max(1, _inAcc.length)));
+        rows = rows.filter((r) => !(_isFillerSrc(r.o) && !(r.t && r.t.trim())));
+      } else rows = [];
       for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? "" : rows[i].o, rows[i].t, false);
       let nextId = _lineBase + rows.length;
       if (!turnEnd) {
@@ -21626,7 +21653,17 @@ ${lines}`;
       "layout.translation": "Ch\u1EC9 b\u1EA3n d\u1ECBch",
       "layout.stacked": "G\u1ED1c tr\xEAn, d\u1ECBch d\u01B0\u1EDBi",
       "layout.columns": "G\u1ED1c tr\xE1i, d\u1ECBch ph\u1EA3i",
+      "layout.dual": "2 lu\u1ED3ng song song (lu\xF4n \u0111\xFAng, kh\xF4ng \xE9p kh\u1EDBp h\xE0ng)",
       "settings.zoom": "C\u1EE1 ch\u1EEF",
+      "settings.saveHistory": "T\u1EF1 l\u01B0u l\u1ECBch s\u1EED phi\xEAn (xem l\u1EA1i / export)",
+      "history.title": "L\u1ECBch s\u1EED",
+      "history.back": "Danh s\xE1ch",
+      "history.empty": "Ch\u01B0a c\xF3 phi\xEAn n\xE0o \u0111\u01B0\u1EE3c l\u01B0u.",
+      "history.exportMd": "T\u1EA3i .md",
+      "history.exportHtml": "T\u1EA3i .html",
+      "history.del": "Xo\xE1",
+      "history.confirmDel": "Xo\xE1 phi\xEAn n\xE0y?",
+      "history.lines": "{n} d\xF2ng",
       "settings.targetLang": "Ng\xF4n ng\u1EEF \u0111\xEDch",
       "uilang.title": "Ng\xF4n ng\u1EEF giao di\u1EC7n",
       "popout.title": "M\u1EDF trong tab ri\xEAng",
@@ -21697,7 +21734,17 @@ ${lines}`;
       "layout.translation": "Translation only",
       "layout.stacked": "Original top, translation below",
       "layout.columns": "Original left, translation right",
+      "layout.dual": "Two parallel streams (always correct, no row pairing)",
       "settings.zoom": "Text size",
+      "settings.saveHistory": "Auto-save sessions (review / export)",
+      "history.title": "History",
+      "history.back": "Sessions",
+      "history.empty": "No saved sessions yet.",
+      "history.exportMd": "Download .md",
+      "history.exportHtml": "Download .html",
+      "history.del": "Delete",
+      "history.confirmDel": "Delete this session?",
+      "history.lines": "{n} lines",
       "settings.targetLang": "Target language",
       "uilang.title": "Interface language",
       "popout.title": "Open in a separate tab",
@@ -21768,7 +21815,17 @@ ${lines}`;
       "layout.translation": "\u8A33\u306E\u307F",
       "layout.stacked": "\u539F\u6587(\u4E0A)/\u8A33(\u4E0B)",
       "layout.columns": "\u539F\u6587(\u5DE6)/\u8A33(\u53F3)",
+      "layout.dual": "2\u5217\u30FB\u72EC\u7ACB(\u5E38\u306B\u6B63\u78BA/\u884C\u3092\u63C3\u3048\u306A\u3044)",
       "settings.zoom": "\u6587\u5B57\u30B5\u30A4\u30BA",
+      "settings.saveHistory": "\u30BB\u30C3\u30B7\u30E7\u30F3\u3092\u81EA\u52D5\u4FDD\u5B58(\u95B2\u89A7/\u66F8\u51FA)",
+      "history.title": "\u5C65\u6B74",
+      "history.back": "\u4E00\u89A7",
+      "history.empty": "\u4FDD\u5B58\u3055\u308C\u305F\u30BB\u30C3\u30B7\u30E7\u30F3\u306F\u3042\u308A\u307E\u305B\u3093\u3002",
+      "history.exportMd": ".md\u4FDD\u5B58",
+      "history.exportHtml": ".html\u4FDD\u5B58",
+      "history.del": "\u524A\u9664",
+      "history.confirmDel": "\u3053\u306E\u30BB\u30C3\u30B7\u30E7\u30F3\u3092\u524A\u9664\u3057\u307E\u3059\u304B?",
+      "history.lines": "{n} \u884C",
       "settings.targetLang": "\u7FFB\u8A33\u5148\u306E\u8A00\u8A9E",
       "uilang.title": "\u8868\u793A\u8A00\u8A9E",
       "popout.title": "\u5225\u30BF\u30D6\u3067\u958B\u304F",
@@ -21857,6 +21914,66 @@ ${lines}`;
     });
   }
 
+  // extension/lib/history.js
+  var DB = "captrans-history";
+  var STORE = "sessions";
+  var VER = 1;
+  function _open() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(DB, VER);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: "id" });
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function hSave(s) {
+    const db = await _open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(s);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+  async function hList() {
+    const db = await _open();
+    return new Promise((res, rej) => {
+      const out = [];
+      const tx = db.transaction(STORE, "readonly");
+      const cur = tx.objectStore(STORE).openCursor();
+      cur.onsuccess = (e) => {
+        const c = e.target.result;
+        if (c) {
+          const v = c.value;
+          out.push({ id: v.id, startedAt: v.startedAt, endedAt: v.endedAt, langCode: v.langCode, transcribe: v.transcribe, count: v.count, hasSummary: !!(v.summaryMd || v.fullMd) });
+          c.continue();
+        } else res(out.sort((a, b) => b.startedAt - a.startedAt));
+      };
+      cur.onerror = () => rej(cur.error);
+    });
+  }
+  async function hGet(id) {
+    const db = await _open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, "readonly");
+      const rq = tx.objectStore(STORE).get(id);
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error);
+    });
+  }
+  async function hDel(id) {
+    const db = await _open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(id);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+
   // extension/app.js
   var DEFAULTS = {
     apiKey: "",
@@ -21868,7 +21985,8 @@ ${lines}`;
     summaryExtra: "",
     uiLang: "vi",
     layout: "translation",
-    zoom: 100
+    zoom: 100,
+    saveHistory: true
   };
   var S = { ...DEFAULTS };
   async function loadSettings() {
@@ -21917,7 +22035,14 @@ ${lines}`;
     sumDlHtml: $("sum-dlhtml"),
     sumExport: $("sum-export"),
     vResizer: $("v-resizer"),
-    dl: $("dl")
+    dl: $("dl"),
+    saveHistory: $("save-history"),
+    historyBtn: $("history-btn"),
+    history: $("history"),
+    histList: $("hist-list"),
+    histView: $("hist-view"),
+    histClose: $("hist-close"),
+    histBack: $("hist-back")
   };
   var TARGET_LANGS = [
     { code: "vi", name: "Ti\u1EBFng Vi\u1EC7t" },
@@ -21926,6 +22051,7 @@ ${lines}`;
     { code: "ko", name: "\uD55C\uAD6D\uC5B4" },
     { code: "zh-CN", name: "\u4E2D\u6587" }
   ];
+  var langName = (c) => (TARGET_LANGS.find((l) => l.code === c) || {}).name || c;
   var GLOBE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18"/><path d="M4.8 7.5h14.4M4.8 16.5h14.4"/></svg>';
   var _lastStatus = null;
   function st(key, vars, cls) {
@@ -21961,6 +22087,10 @@ ${lines}`;
         if (i >= 0) captions.splice(i, 1);
         byId.delete(c.id);
       }
+      if (curLayout() === "dual") {
+        renderDual();
+        return;
+      }
       const row = rowById.get(c.id);
       if (row) {
         row.remove();
@@ -21981,8 +22111,59 @@ ${lines}`;
       e.author = c.author;
       e.partial = c.isPartial;
     }
-    upsertRow(e);
+    if (curLayout() === "dual") renderDual();
+    else upsertRow(e);
     if (!c.isPartial && sumPanelOpen) summarizeTick();
+  }
+  function _splitSent(s) {
+    s = s || "";
+    const out = [];
+    let start2 = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === ".") {
+        if (/\d/.test(s[i - 1] || "") && /\d/.test(s[i + 1] || "")) continue;
+        let j = i + 1;
+        while (j < s.length && s[j] === " ") j++;
+        if (j < s.length && /\p{Ll}/u.test(s[j])) continue;
+      }
+      if (".!?\u3002\uFF01\uFF1F\uFF0E".includes(c)) {
+        const seg = s.slice(start2, i + 1).trim();
+        if (seg) out.push(seg);
+        start2 = i + 1;
+      }
+    }
+    const tail = s.slice(start2).trim();
+    if (tail) out.push(tail);
+    return out;
+  }
+  function renderDual() {
+    el.list.classList.add("dual");
+    const oArr = [], tArr = [];
+    for (const e of captions) {
+      const ls = e.lines && e.lines.length ? e.lines : [{ o: e.original || "", t: e.translated || "" }];
+      for (const l of ls) {
+        if (l.o && l.o.trim()) oArr.push(l.o.trim());
+        if (l.t && l.t.trim()) tArr.push(l.t.trim());
+      }
+    }
+    const oS = _splitSent(oArr.join(" ")), tS = _splitSent(tArr.join(" "));
+    el.list.innerHTML = '<div class="dual-col dual-o"></div><div class="dual-col dual-t"></div>';
+    const oc = el.list.firstChild, tc = el.list.lastChild;
+    for (const s of oS) {
+      const d = document.createElement("div");
+      d.className = "dual-line";
+      d.textContent = s;
+      oc.appendChild(d);
+    }
+    for (const s of tS) {
+      const d = document.createElement("div");
+      d.className = "dual-line";
+      d.textContent = s;
+      tc.appendChild(d);
+    }
+    refreshCount();
+    if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
   }
   function upsertRow(e) {
     let row = rowById.get(e.id);
@@ -22030,6 +22211,13 @@ ${lines}`;
     if (autoScroll) el.list.scrollTop = el.list.scrollHeight;
   }
   function reRenderAll() {
+    if (curLayout() === "dual") {
+      renderDual();
+      return;
+    }
+    el.list.classList.remove("dual");
+    el.list.innerHTML = "";
+    rowById.clear();
     for (const e of captions) upsertRow(e);
   }
   function curLayout() {
@@ -22049,9 +22237,12 @@ ${lines}`;
     if (el.zoomVal) el.zoomVal.textContent = (S.zoom || 100) + "%";
   }
   function clearList() {
+    saveSession();
+    _sessId = null;
     captions.length = 0;
     byId.clear();
     rowById.clear();
+    el.list.classList.remove("dual");
     el.list.innerHTML = "";
     refreshCount();
     summaryMd = "";
@@ -22059,7 +22250,6 @@ ${lines}`;
     sumLastTime = 0;
     fullMd = "";
     showingReport = false;
-    el.sumDlHtml.classList.add("hidden");
     renderSummary();
   }
   var _gemCtx = null;
@@ -22325,10 +22515,13 @@ ${lines}`;
       live.start();
       await startCapture();
       running = true;
+      if (!_sessId) {
+        _sessId = Date.now();
+        _sessStart = _sessId;
+      }
       refreshStartBtn();
       refreshSpin();
       showingReport = false;
-      el.sumDlHtml.classList.add("hidden");
       st(S.source === "mic" ? "status.listeningMic" : "status.listeningAudio", null, "run");
     } catch (e) {
       console.error(e);
@@ -22347,7 +22540,126 @@ ${lines}`;
     clearAudio();
     refreshStartBtn();
     refreshSpin();
+    saveSession();
     st("status.stopped");
+  }
+  var _sessId = null;
+  var _sessStart = 0;
+  function _capPairs() {
+    return captions.map((e) => {
+      const ls = e.lines && e.lines.length ? e.lines : [{ o: e.original || "", t: e.translated || "" }];
+      return { o: ls.map((l) => l.o).filter(Boolean).join("\n"), t: ls.map((l) => l.t).filter(Boolean).join("\n"), ts: e.ts || "" };
+    });
+  }
+  function saveSession() {
+    if (!S.saveHistory || !_sessId || !captions.length) return;
+    const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: S.langCode, transcribe: !!S.transcribeMode, count: captions.length, caps: _capPairs(), summaryMd, fullMd };
+    hSave(s).catch((e) => console.warn("[history] l\u01B0u l\u1ED7i:", e && e.message));
+  }
+  function _fmtDate(ts) {
+    const d = new Date(ts), p = (n) => (n < 10 ? "0" : "") + n;
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function sessionToMd(s) {
+    const out = [`# Transcript \u2014 ${_fmtDate(s.startedAt)} (${langName(s.langCode)})`, ""];
+    for (const c of s.caps || []) {
+      const o = (c.o || "").replace(/\n/g, " ").trim(), tt = (c.t || "").replace(/\n/g, " ").trim();
+      if (o) out.push(`**${o}**  `);
+      if (tt) out.push(tt);
+      if (o || tt) out.push("");
+    }
+    if (s.fullMd || s.summaryMd) out.push("---", "", `# ${t("summary.title")}`, "", s.fullMd || s.summaryMd);
+    return out.join("\n");
+  }
+  function sessionToHtmlDoc(s) {
+    const SESS_CSS = REPORT_CSS + ".tx{margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #eef1f5}.tx .o{color:#5a6573;font-size:13px;margin-bottom:2px}.tx .t{color:#1a1a1a;font-weight:500}";
+    const esc = (x) => (x || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+    let body = `<div class="report"><h1>Transcript \u2014 ${esc(_fmtDate(s.startedAt))} (${esc(langName(s.langCode))})</h1>`;
+    for (const c of s.caps || []) {
+      const o = (c.o || "").trim(), tt = (c.t || "").trim();
+      if (!o && !tt) continue;
+      body += '<div class="tx">' + (o ? `<div class="o">${esc(o)}</div>` : "") + (tt ? `<div class="t">${esc(tt)}</div>` : "") + "</div>";
+    }
+    if (s.fullMd || s.summaryMd) body += `<hr><h1>${esc(t("summary.title"))}</h1>` + md2html(s.fullMd || s.summaryMd);
+    body += "</div>";
+    return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Transcript</title><style>${SESS_CSS}</style></head><body>${body}</body></html>`;
+  }
+  async function openHistory() {
+    el.history.classList.remove("hidden");
+    el.histView.classList.add("hidden");
+    el.histList.classList.remove("hidden");
+    el.histBack.classList.add("hidden");
+    el.histList.innerHTML = '<div class="hist-empty">\u2026</div>';
+    let items = [];
+    try {
+      items = await hList();
+    } catch (e) {
+      console.warn("[history]", e);
+    }
+    if (!items.length) {
+      el.histList.innerHTML = `<div class="hist-empty">${t("history.empty")}</div>`;
+      return;
+    }
+    el.histList.innerHTML = "";
+    for (const m of items) {
+      const div = document.createElement("div");
+      div.className = "hist-item";
+      div.innerHTML = `<div class="hist-meta"><div class="hist-date"></div><div class="hist-sub"></div></div><div class="hist-acts"><button class="mini" data-act="md" title="${t("history.exportMd")}">\u2B07MD</button><button class="mini" data-act="html" title="${t("history.exportHtml")}">\u2B07HTML</button><button class="mini" data-act="del" title="${t("history.del")}">\u{1F5D1}</button></div>`;
+      div.querySelector(".hist-date").textContent = _fmtDate(m.startedAt);
+      div.querySelector(".hist-sub").textContent = `${langName(m.langCode)} \xB7 ${t("history.lines", { n: m.count })}${m.hasSummary ? " \xB7 \u{1F4CB}" : ""}`;
+      div.querySelector(".hist-meta").addEventListener("click", () => viewSession(m.id));
+      div.querySelector('[data-act="md"]').addEventListener("click", () => exportSess(m.id, "md"));
+      div.querySelector('[data-act="html"]').addEventListener("click", () => exportSess(m.id, "html"));
+      div.querySelector('[data-act="del"]').addEventListener("click", async () => {
+        if (confirm(t("history.confirmDel"))) {
+          try {
+            await hDel(m.id);
+          } catch (_) {
+          }
+          openHistory();
+        }
+      });
+      el.histList.appendChild(div);
+    }
+  }
+  async function viewSession(id) {
+    const s = await hGet(id);
+    if (!s) return;
+    el.histList.classList.add("hidden");
+    el.histView.classList.remove("hidden");
+    el.histBack.classList.remove("hidden");
+    el.histView.innerHTML = "";
+    for (const c of s.caps || []) {
+      const e = document.createElement("div");
+      e.className = "entry";
+      if (c.o && c.o.trim()) {
+        const o = document.createElement("div");
+        o.className = "entry-orig";
+        o.textContent = c.o;
+        e.appendChild(o);
+      }
+      if (c.t && c.t.trim()) {
+        const tt = document.createElement("div");
+        tt.className = "entry-text";
+        tt.textContent = c.t;
+        e.appendChild(tt);
+      }
+      if (e.childNodes.length) el.histView.appendChild(e);
+    }
+    if (s.fullMd || s.summaryMd) {
+      const sm = document.createElement("div");
+      sm.className = "hist-sum summary-body";
+      sm.innerHTML = md2html(s.fullMd || s.summaryMd);
+      el.histView.appendChild(sm);
+    }
+    el.histView.scrollTop = 0;
+  }
+  async function exportSess(id, kind) {
+    const s = await hGet(id);
+    if (!s) return;
+    const stamp = _fmtDate(s.startedAt).replace(/[: ]/g, "-");
+    if (kind === "md") download(`transcript-${stamp}.md`, sessionToMd(s), "text/markdown");
+    else download(`transcript-${stamp}.html`, sessionToHtmlDoc(s), "text/html");
   }
   function closeSelf() {
     try {
@@ -22920,6 +23232,10 @@ ${lines}`;
     el.start.addEventListener("click", () => running ? stop() : start());
     el.clear.addEventListener("click", clearList);
     el.export.addEventListener("click", exportTranscript);
+    el.historyBtn.addEventListener("click", openHistory);
+    el.histClose.addEventListener("click", () => el.history.classList.add("hidden"));
+    el.histBack.addEventListener("click", openHistory);
+    el.saveHistory.addEventListener("change", () => save({ saveHistory: el.saveHistory.checked }));
     el.layoutPick.addEventListener("click", (ev) => {
       const b = ev.target.closest(".lay-opt");
       if (!b || b.disabled) return;
@@ -22943,7 +23259,8 @@ ${lines}`;
     });
     el.summaryToggle.addEventListener("click", () => sumPanelOpen ? closeSummary() : openSummary());
     el.sumDlHtml.addEventListener("click", () => {
-      if (fullMd) download(`report-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.html`, buildReportDoc(fullMd), "text/html");
+      const md = fullMd || summaryMd;
+      if (md) download(`${fullMd ? "report" : "summary"}-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.html`, buildReportDoc(md), "text/html");
     });
     el.sumExport.addEventListener("click", () => {
       if (summaryMd) download(`summary-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.md`, summaryMd, "text/markdown");
@@ -22969,7 +23286,6 @@ ${lines}`;
           showingReport = true;
           renderSummary();
           el.summaryWrap.classList.remove("hidden");
-          el.sumDlHtml.classList.remove("hidden");
           st("status.fullDone");
         } else st("status.fullErr", { err: r && r.error }, "err");
       } catch (e) {
@@ -23015,6 +23331,7 @@ ${lines}`;
     setLayoutActive();
     el.zoom.value = S.zoom;
     applyZoom();
+    el.saveHistory.checked = S.saveHistory !== false;
     buildVoiceButton();
     buildTargetButton();
     el.langBtn.innerHTML = GLOBE;

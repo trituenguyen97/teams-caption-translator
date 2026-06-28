@@ -21,7 +21,8 @@ export const I18N_LOCALES = [   // ngôn ngữ GIAO DIỆN (UI) — chỉ vi/en/
 export const I18N = {
   vi: {
     settings: 'Cài đặt', 'settings.apiKey': 'Gemini API key', 'settings.source': 'Nguồn âm thanh',
-    'settings.layout': 'Giao diện dịch', 'layout.translation': 'Chỉ bản dịch', 'layout.stacked': 'Gốc trên, dịch dưới', 'layout.columns': 'Gốc trái, dịch phải', 'settings.zoom': 'Cỡ chữ',
+    'settings.layout': 'Giao diện dịch', 'layout.translation': 'Chỉ bản dịch', 'layout.stacked': 'Gốc trên, dịch dưới', 'layout.columns': 'Gốc trái, dịch phải', 'layout.dual': '2 luồng song song (luôn đúng, không ép khớp hàng)', 'settings.zoom': 'Cỡ chữ',
+    'settings.saveHistory': 'Tự lưu lịch sử phiên (xem lại / export)', 'history.title': 'Lịch sử', 'history.back': 'Danh sách', 'history.empty': 'Chưa có phiên nào được lưu.', 'history.exportMd': 'Tải .md', 'history.exportHtml': 'Tải .html', 'history.del': 'Xoá', 'history.confirmDel': 'Xoá phiên này?', 'history.lines': '{n} dòng',
     'settings.targetLang': 'Ngôn ngữ đích', 'uilang.title': 'Ngôn ngữ giao diện', 'popout.title': 'Mở trong tab riêng',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 Micro', 'source.screen': '🔊 Âm thanh (tab / màn hình / cửa sổ)',
     'lang.transcribe': '📝 Chép lời', 'voice.off': '🔇 Tắt đọc', 'voice.title': 'Giọng đọc',
@@ -45,7 +46,8 @@ export const I18N = {
   },
   en: {
     settings: 'Settings', 'settings.apiKey': 'Gemini API key', 'settings.source': 'Audio source',
-    'settings.layout': 'Translation layout', 'layout.translation': 'Translation only', 'layout.stacked': 'Original top, translation below', 'layout.columns': 'Original left, translation right', 'settings.zoom': 'Text size',
+    'settings.layout': 'Translation layout', 'layout.translation': 'Translation only', 'layout.stacked': 'Original top, translation below', 'layout.columns': 'Original left, translation right', 'layout.dual': 'Two parallel streams (always correct, no row pairing)', 'settings.zoom': 'Text size',
+    'settings.saveHistory': 'Auto-save sessions (review / export)', 'history.title': 'History', 'history.back': 'Sessions', 'history.empty': 'No saved sessions yet.', 'history.exportMd': 'Download .md', 'history.exportHtml': 'Download .html', 'history.del': 'Delete', 'history.confirmDel': 'Delete this session?', 'history.lines': '{n} lines',
     'settings.targetLang': 'Target language', 'uilang.title': 'Interface language', 'popout.title': 'Open in a separate tab',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 Microphone', 'source.screen': '🔊 Audio (tab / screen / window)',
     'lang.transcribe': '📝 Transcribe', 'voice.off': '🔇 Voice off', 'voice.title': 'Voice',
@@ -69,7 +71,8 @@ export const I18N = {
   },
   ja: {
     settings: '設定', 'settings.apiKey': 'Gemini API キー', 'settings.source': '音声ソース',
-    'settings.layout': '表示レイアウト', 'layout.translation': '訳のみ', 'layout.stacked': '原文(上)/訳(下)', 'layout.columns': '原文(左)/訳(右)', 'settings.zoom': '文字サイズ',
+    'settings.layout': '表示レイアウト', 'layout.translation': '訳のみ', 'layout.stacked': '原文(上)/訳(下)', 'layout.columns': '原文(左)/訳(右)', 'layout.dual': '2列・独立(常に正確/行を揃えない)', 'settings.zoom': '文字サイズ',
+    'settings.saveHistory': 'セッションを自動保存(閲覧/書出)', 'history.title': '履歴', 'history.back': '一覧', 'history.empty': '保存されたセッションはありません。', 'history.exportMd': '.md保存', 'history.exportHtml': '.html保存', 'history.del': '削除', 'history.confirmDel': 'このセッションを削除しますか?', 'history.lines': '{n} 行',
     'settings.targetLang': '翻訳先の言語', 'uilang.title': '表示言語', 'popout.title': '別タブで開く',
     'apiKey.ph': 'AIza…', 'source.mic': '🎤 マイク', 'source.screen': '🔊 音声（タブ / 画面 / ウィンドウ）',
     'lang.transcribe': '📝 文字起こし', 'voice.off': '🔇 読み上げオフ', 'voice.title': '読み上げ音声',

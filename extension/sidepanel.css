@@ -62,6 +62,11 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .entry-body.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; align-items: start; }
 .entry-body.cols .col-o { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
 .entry-body.cols .col-t { white-space: pre-wrap; }
+/* 2 luồng song song độc lập — mỗi cột là luồng thô (LUÔN ĐÚNG), không ép khớp hàng */
+.list.dual { display: flex; gap: 12px; align-items: flex-start; }
+.dual-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dual-line { white-space: pre-wrap; padding: 3px 0; border-bottom: 1px solid #2a2b2d55; }
+.dual-col.dual-o .dual-line { color: var(--muted); font-size: 12px; }   /* cột gốc: mờ, nhỏ */
 .entry.partial .entry-text { opacity: .65; font-style: italic; }
 
 .v-resizer { height: 7px; flex: 0 0 auto; cursor: row-resize; background: var(--bd); }
@@ -106,6 +111,20 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .sum-overlay { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg2) 70%, transparent); backdrop-filter: blur(2.5px); -webkit-backdrop-filter: blur(2.5px); }
 .sum-overlay-box { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-weight: 600; text-align: center; padding: 0 16px; }
 .spin-lg { width: 48px; height: 48px; border: 4px solid var(--bd); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+
+/* Lịch sử phiên (overlay) */
+.history { position: fixed; inset: 0; z-index: 80; background: var(--bg); display: flex; flex-direction: column; }
+.hist-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg2); border-bottom: 1px solid var(--bd); }
+.hist-list { flex: 1; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.hist-item { background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+.hist-meta { flex: 1; min-width: 0; cursor: pointer; }
+.hist-date { font-weight: 600; font-size: 13px; }
+.hist-sub { font-size: 11px; color: var(--muted); }
+.hist-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+.hist-view { flex: 1; overflow-y: auto; padding: 8px 12px; }
+.hist-view .entry { padding: 6px 0; border-bottom: 1px solid #2a2b2d55; }
+.hist-empty { color: var(--muted); text-align: center; padding: 28px 16px; font-size: 12px; }
+.hist-sum { margin-top: 12px; border-top: 2px solid var(--bd); padding-top: 10px; }
 
 .bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-top: 1px solid var(--bd); }
 .count { font-size: 11px; color: var(--muted); }

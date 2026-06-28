@@ -76,17 +76,21 @@ export function createLiveTranslator(opts) {
     for (let k = 0; k < nIn; k++) { const C = inSent[k].end; let ol = _outAcc.length; for (const an of _oAnch) { if (an.il >= C) { ol = an.ol; break; } } a.push(ol); }
     return a;
   }
-  // CĂN nhiều-nhiều bằng DP (S6): tối thiểu Σ|neo(gốc) − vị-trí-kết(dịch)|, cho phép 1:1, 1:2, 2:1, bỏ qua. → rows [{o,t}].
-  function _alignRows(a, b, inSent, outSent) {
-    const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300;
+  // CĂN nhiều-nhiều bằng DP (S6): tối thiểu Σ(|neo(gốc) − vị-trí-kết(dịch)| + PHẠT-ĐỘ-DÀI), cho phép 1:1, 1:2, 2:1, bỏ qua. → rows [{o,t}].
+  // Phạt độ dài: câu gốc ngắn KHÔNG nên nhận bản dịch dài (kỳ vọng độ dài dịch ≈ R×độ dài gốc, R=tỉ lệ ký tự dịch/gốc) → tách đúng cụm bị model gộp.
+  function _alignRows(a, b, inSent, outSent, R) {
+    const nIn = a.length, nOut = b.length, INF = Infinity, gap = 300, LAM = 0.6;
+    const oend = j => (j <= 0 ? 0 : b[j - 1]);                       // số ký tự DỊCH đã qua hết câu j-1
+    const slen = (i, n) => { let s = 0; for (let k = 0; k < n; k++) s += inSent[i + k].text.length; return s; };
+    const lpen = (i, ti, js, je) => LAM * Math.abs(R * slen(i, ti) - (b[je - 1] - oend(js)));
     const dp = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(INF));
     const bk = Array.from({ length: nIn + 1 }, () => new Array(nOut + 1).fill(null));
     dp[0][0] = 0;
     for (let i = 0; i <= nIn; i++) for (let j = 0; j <= nOut; j++) {
       if (dp[i][j] === INF) continue; const base = dp[i][j];
-      if (i < nIn && j < nOut) { const c = base + Math.abs(a[i] - b[j]); if (c < dp[i + 1][j + 1]) { dp[i + 1][j + 1] = c; bk[i + 1][j + 1] = { pi: i, pj: j, ti: 1, tj: 1 }; } }
-      if (i < nIn && j + 1 < nOut) { const c = base + Math.abs(a[i] - b[j + 1]); if (c < dp[i + 1][j + 2]) { dp[i + 1][j + 2] = c; bk[i + 1][j + 2] = { pi: i, pj: j, ti: 1, tj: 2 }; } }
-      if (i + 1 < nIn && j < nOut) { const c = base + Math.abs(a[i + 1] - b[j]); if (c < dp[i + 2][j + 1]) { dp[i + 2][j + 1] = c; bk[i + 2][j + 1] = { pi: i, pj: j, ti: 2, tj: 1 }; } }
+      if (i < nIn && j < nOut) { const c = base + Math.abs(a[i] - b[j]) + lpen(i, 1, j, j + 1); if (c < dp[i + 1][j + 1]) { dp[i + 1][j + 1] = c; bk[i + 1][j + 1] = { pi: i, pj: j, ti: 1, tj: 1 }; } }
+      if (i < nIn && j + 1 < nOut) { const c = base + Math.abs(a[i] - b[j + 1]) + lpen(i, 1, j, j + 2); if (c < dp[i + 1][j + 2]) { dp[i + 1][j + 2] = c; bk[i + 1][j + 2] = { pi: i, pj: j, ti: 1, tj: 2 }; } }
+      if (i + 1 < nIn && j < nOut) { const c = base + Math.abs(a[i + 1] - b[j]) + lpen(i, 2, j, j + 1); if (c < dp[i + 2][j + 1]) { dp[i + 2][j + 1] = c; bk[i + 2][j + 1] = { pi: i, pj: j, ti: 2, tj: 1 }; } }
       if (i < nIn) { const c = base + gap; if (c < dp[i + 1][j]) { dp[i + 1][j] = c; bk[i + 1][j] = { pi: i, pj: j, ti: 1, tj: 0 }; } }
       if (j < nOut) { const c = base + gap; if (c < dp[i][j + 1]) { dp[i][j + 1] = c; bk[i][j + 1] = { pi: i, pj: j, ti: 0, tj: 1 }; } }
     }
@@ -120,6 +124,25 @@ export function createLiveTranslator(opts) {
     onCaption({ id, author: 'STT', lines, original, translated, isPartial: !turnDone, ts: ts || _ts(), tsMs: Date.now() });
     return true;
   }
+  // Câu gốc filler/aizuchi (はい/ええ/うん/yes/ok…) hay bị model dịch TRÀN vế câu trước vào. Hậu xử lý:
+  // nếu hàng filler có >1 câu dịch và CÓ câu dịch filler (Vâng/Ừ/Rồi…), giữ lại câu filler, ĐẨY câu nội dung về hàng TRƯỚC (chủ nó).
+  // Filler/aizuchi GỐC: nhận diện theo NGHĨA (regex), KHÔNG theo độ dài → tránh nhầm câu nội dung ngắn ("10年").
+  const _SRC_FILLER = /^(はい+|ええ+|うん+|うー?ん|そう(ですね|ですよね|か)?|です(ね|よね)|でしょう(ね)?|なるほど|オッケー|おっけー|あの+|えー?と|へえ+|ふ[んー]+|おお+|yes|yeah|ok(ay)?|right|mm+|uh+|um+)[。、,.!?！？\s]*$/iu;
+  function _isFillerSrc(o) { const s = (o || '').replace(/\s+/g, ''); return !!s && _SRC_FILLER.test(s); }
+  const _VI_FILLER = /^((vâng|dạ|ừ|ờ|được|rồi|ok(ay)?|à|ạ|ờm|um+|đúng vậy|đúng rồi|đúng)[\s,.!?]*)+$/i;
+  // Hàng gốc filler mà có câu dịch NỘI DUNG (không phải Vâng/Ừ) → đẩy nội dung về hàng TRƯỚC (chủ nó), giữ lại câu filler (có thể rỗng → ẩn).
+  function _fillerPostproc(rows) {
+    for (let i = 1; i < rows.length; i++) {
+      if (!_isFillerSrc(rows[i].o)) continue;
+      const ts = _splitVI(rows[i].t);
+      const con = ts.filter(x => !_VI_FILLER.test(x.trim()));
+      if (!con.length) continue;   // chỉ toàn filler (Vâng/Ừ) → giữ nguyên
+      const fil = ts.filter(x => _VI_FILLER.test(x.trim()));
+      rows[i - 1].t = (rows[i - 1].t + ' ' + con.join(' ')).trim();
+      rows[i].t = fil.join(' ');
+    }
+    return rows;
+  }
   // Vẽ 1 hàng — chỉ khi nội dung ĐỔI (change-detect) → khỏi vẽ lại hàng đã ổn định.
   function _emitRow(id, o, t, partial) {
     o = o || ''; t = t || '';
@@ -147,8 +170,10 @@ export function createLiveTranslator(opts) {
     const nOut = turnEnd ? outSent.length : viDone;
     let rows;
     if (transcribe) rows = inSent.slice(0, nIn).map(s => ({ o: '', t: s.text }));   // chép lời: mỗi câu gốc 1 hàng
-    else if (nIn > 0 && nOut > 0) rows = _alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map(s => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut));
-    else rows = [];
+    else if (nIn > 0 && nOut > 0) {
+      rows = _fillerPostproc(_alignRows(_anchors(inSent, nIn), outSent.slice(0, nOut).map(s => s.end), inSent.slice(0, nIn), outSent.slice(0, nOut), _outAcc.length / Math.max(1, _inAcc.length)));
+      rows = rows.filter(r => !(_isFillerSrc(r.o) && !(r.t && r.t.trim())));   // ẩn hàng gốc filler đã bị đẩy hết dịch đi (trống) cho gọn
+    } else rows = [];
     for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? '' : rows[i].o, rows[i].t, false);
     let nextId = _lineBase + rows.length;
     if (!turnEnd) {   // dòng LIVE: câu chưa đủ dấu chấm (gốc/dịch còn dở) → 1 hàng partial, xuống dòng theo câu

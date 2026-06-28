@@ -69,6 +69,11 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .entry-body.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 10px; align-items: start; }
 .entry-body.cols .col-o { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
 .entry-body.cols .col-t { white-space: pre-wrap; }
+/* 2 luồng song song độc lập — mỗi cột là luồng thô (LUÔN ĐÚNG), không ép khớp hàng */
+.list.dual { display: flex; gap: 12px; align-items: flex-start; }
+.dual-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dual-line { white-space: pre-wrap; padding: 3px 0; border-bottom: 1px solid #2a2b2d55; }
+.dual-col.dual-o .dual-line { color: var(--muted); font-size: 12px; }   /* cột gốc: mờ, nhỏ */
 .entry.partial .entry-text { opacity: .65; font-style: italic; }
 
 .v-resizer { height: 7px; flex: 0 0 auto; cursor: row-resize; background: var(--bd); }
@@ -114,6 +119,20 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .sum-overlay-box { display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-weight: 600; text-align: center; padding: 0 16px; }
 .spin-lg { width: 48px; height: 48px; border: 4px solid var(--bd); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 
+/* Lịch sử phiên (overlay) */
+.history { position: fixed; inset: 0; z-index: 80; background: var(--bg); display: flex; flex-direction: column; }
+.hist-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg2); border-bottom: 1px solid var(--bd); }
+.hist-list { flex: 1; overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.hist-item { background: var(--bg2); border: 1px solid var(--bd); border-radius: 8px; padding: 8px 10px; display: flex; align-items: center; gap: 8px; }
+.hist-meta { flex: 1; min-width: 0; cursor: pointer; }
+.hist-date { font-weight: 600; font-size: 13px; }
+.hist-sub { font-size: 11px; color: var(--muted); }
+.hist-acts { display: flex; gap: 4px; flex: 0 0 auto; }
+.hist-view { flex: 1; overflow-y: auto; padding: 8px 12px; }
+.hist-view .entry { padding: 6px 0; border-bottom: 1px solid #2a2b2d55; }
+.hist-empty { color: var(--muted); text-align: center; padding: 28px 16px; font-size: 12px; }
+.hist-sum { margin-top: 12px; border-top: 2px solid var(--bd); padding-top: 10px; }
+
 .bottom { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--bg2); border-top: 1px solid var(--bd); }
 .count { font-size: 11px; color: var(--muted); }
 button.mini { background: var(--bg3); border: 1px solid var(--bd); color: var(--fg); border-radius: 7px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
@@ -158,12 +177,14 @@ button.mini.disabled:hover { background: var(--bg3); }   /* hủy hiệu ứng h
         <button class="lay-opt" data-layout="translation" data-i18n-title="layout.translation" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="5" width="12" height="2" rx="1"/><rect x="2" y="9" width="9" height="2" rx="1"/></svg></button>
         <button class="lay-opt" data-layout="stacked" data-i18n-title="layout.stacked" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="4" rx="1" opacity=".5"/><rect x="2" y="9" width="12" height="4" rx="1"/></svg></button>
         <button class="lay-opt" data-layout="columns" data-i18n-title="layout.columns" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="10" rx="1" opacity=".5"/><rect x="9" y="3" width="5" height="10" rx="1"/></svg></button>
+        <button class="lay-opt" data-layout="dual" data-i18n-title="layout.dual" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="6" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="9" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="9" y="4.5" width="5" height="1.6" rx=".8"/><rect x="9" y="7.5" width="5" height="1.6" rx=".8"/></svg></button>
       </div>
     </div>
     <div class="fld">
       <span><span data-i18n="settings.zoom">Cỡ chữ</span> · <span id="zoom-val" class="muted">100%</span></span>
       <input id="zoom" type="range" min="80" max="220" step="10" value="100" />
     </div>
+    <label class="chk"><input id="save-history" type="checkbox" /> <span data-i18n="settings.saveHistory">Tự lưu lịch sử phiên (xem lại / export)</span></label>
   </section>
 
   <!-- Thanh điều khiển -->
@@ -195,7 +216,7 @@ button.mini.disabled:hover { background: var(--bg3); }   /* hủy hiệu ứng h
       <button id="sum-edit" class="mini" data-i18n-title="summary.editTitle" type="button">✏️</button>
       <span class="spacer"></span>
       <button id="sum-full" class="mini" data-i18n="summary.full" data-i18n-title="summary.fullTitle" type="button">📊</button>
-      <button id="sum-dlhtml" class="mini hidden" data-i18n-title="summary.dlHtmlTitle" type="button">⬇ HTML</button>
+      <button id="sum-dlhtml" class="mini" data-i18n-title="summary.dlHtmlTitle" type="button">⬇ HTML</button>
       <button id="sum-export" class="mini" data-i18n-title="summary.exportTitle" type="button">⬇ MD</button>
     </div>
     <div id="sum-edit-box" class="sum-edit-box hidden">
@@ -213,9 +234,22 @@ button.mini.disabled:hover { background: var(--bg3); }   /* hủy hiệu ứng h
     <span class="spacer"></span>
     <button id="autoscroll" class="mini active" data-i18n="footer.auto" data-i18n-title="footer.autoTitle" type="button">↓ Auto</button>
     <button id="summary-toggle" class="mini" data-i18n="footer.summary" type="button">📋 Tóm tắt</button>
+    <button id="history-btn" class="mini" data-i18n-title="history.title" type="button">📚</button>
     <button id="export" class="mini" data-i18n-title="footer.exportTitle" type="button">💾</button>
     <button id="clear" class="mini" data-i18n-title="footer.clearTitle" type="button">🗑</button>
   </footer>
+
+  <!-- Lịch sử phiên (overlay) -->
+  <section id="history" class="history hidden">
+    <div class="hist-bar">
+      <strong data-i18n="history.title">Lịch sử</strong>
+      <button id="hist-back" class="mini hidden" type="button">← <span data-i18n="history.back">Danh sách</span></button>
+      <span class="spacer"></span>
+      <button id="hist-close" class="mini" type="button">✕</button>
+    </div>
+    <div id="hist-list" class="hist-list"></div>
+    <div id="hist-view" class="hist-view hidden"></div>
+  </section>
   <a id="dl" hidden></a>
 
   <script src="app.js"></script>
