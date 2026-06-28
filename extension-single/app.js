@@ -21664,6 +21664,10 @@ ${lines}`;
       "history.del": "Xo\xE1",
       "history.confirmDel": "Xo\xE1 phi\xEAn n\xE0y?",
       "history.lines": "{n} d\xF2ng",
+      "history.exportAll": "Xu\u1EA5t to\xE0n b\u1ED9 (.json \u0111\u1EC3 sao l\u01B0u/chuy\u1EC3n m\xE1y)",
+      "history.import": "Nh\u1EADp t\u1EEB file .json",
+      "history.imported": "\u0110\xE3 nh\u1EADp {n} phi\xEAn.",
+      "history.importErr": "File kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c kh\xF4ng c\xF3 phi\xEAn n\xE0o.",
       "settings.targetLang": "Ng\xF4n ng\u1EEF \u0111\xEDch",
       "uilang.title": "Ng\xF4n ng\u1EEF giao di\u1EC7n",
       "popout.title": "M\u1EDF trong tab ri\xEAng",
@@ -21701,6 +21705,8 @@ ${lines}`;
       "status.listeningMic": "\u0110ang nghe micro\u2026",
       "status.listeningAudio": "\u0110ang nghe \xE2m thanh \u0111\xE3 ch\u1ECDn\u2026",
       "status.stopped": "\u0110\xE3 d\u1EEBng.",
+      "status.resumePick": "\u0110\xE3 chuy\u1EC3n sang tab \u2014 b\u1EA5m \u25B6 ch\u1ECDn l\u1EA1i ngu\u1ED3n \u0111\u1EC3 d\u1ECBch ti\u1EBFp.",
+      "status.resumed": "\u0110\xE3 kh\xF4i ph\u1EE5c phi\xEAn. B\u1EA5m \u25B6 \u0111\u1EC3 ti\u1EBFp t\u1EE5c.",
       "status.canceled": "\u0110\xE3 hu\u1EF7 ch\u1ECDn ngu\u1ED3n \xE2m thanh.",
       "status.captureErr": "L\u1ED7i thu \xE2m: {err}",
       "status.checking": "\u0110ang ki\u1EC3m tra\u2026",
@@ -21745,6 +21751,10 @@ ${lines}`;
       "history.del": "Delete",
       "history.confirmDel": "Delete this session?",
       "history.lines": "{n} lines",
+      "history.exportAll": "Export all (.json backup / move devices)",
+      "history.import": "Import from .json",
+      "history.imported": "Imported {n} sessions.",
+      "history.importErr": "Invalid file or no sessions found.",
       "settings.targetLang": "Target language",
       "uilang.title": "Interface language",
       "popout.title": "Open in a separate tab",
@@ -21782,6 +21792,8 @@ ${lines}`;
       "status.listeningMic": "Listening to microphone\u2026",
       "status.listeningAudio": "Listening to selected audio\u2026",
       "status.stopped": "Stopped.",
+      "status.resumePick": "Moved to a tab \u2014 click \u25B6 to re-pick the source and continue.",
+      "status.resumed": "Session restored. Click \u25B6 to continue.",
       "status.canceled": "Audio source selection canceled.",
       "status.captureErr": "Capture error: {err}",
       "status.checking": "Checking\u2026",
@@ -21826,6 +21838,10 @@ ${lines}`;
       "history.del": "\u524A\u9664",
       "history.confirmDel": "\u3053\u306E\u30BB\u30C3\u30B7\u30E7\u30F3\u3092\u524A\u9664\u3057\u307E\u3059\u304B?",
       "history.lines": "{n} \u884C",
+      "history.exportAll": "\u5168\u3066\u66F8\u304D\u51FA\u3057(.json\u30D0\u30C3\u30AF\u30A2\u30C3\u30D7/\u7AEF\u672B\u79FB\u884C)",
+      "history.import": ".json\u304B\u3089\u8AAD\u307F\u8FBC\u307F",
+      "history.imported": "{n}\u4EF6\u306E\u30BB\u30C3\u30B7\u30E7\u30F3\u3092\u8AAD\u307F\u8FBC\u307F\u307E\u3057\u305F\u3002",
+      "history.importErr": "\u7121\u52B9\u306A\u30D5\u30A1\u30A4\u30EB\u3001\u307E\u305F\u306F\u30BB\u30C3\u30B7\u30E7\u30F3\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
       "settings.targetLang": "\u7FFB\u8A33\u5148\u306E\u8A00\u8A9E",
       "uilang.title": "\u8868\u793A\u8A00\u8A9E",
       "popout.title": "\u5225\u30BF\u30D6\u3067\u958B\u304F",
@@ -21863,6 +21879,8 @@ ${lines}`;
       "status.listeningMic": "\u30DE\u30A4\u30AF\u3092\u805E\u3044\u3066\u3044\u307E\u3059\u2026",
       "status.listeningAudio": "\u9078\u629E\u3057\u305F\u97F3\u58F0\u3092\u805E\u3044\u3066\u3044\u307E\u3059\u2026",
       "status.stopped": "\u505C\u6B62\u3057\u307E\u3057\u305F\u3002",
+      "status.resumePick": "\u30BF\u30D6\u306B\u79FB\u52D5\u3057\u307E\u3057\u305F \u2014 \u25B6 \u3092\u62BC\u3057\u3066\u97F3\u6E90\u3092\u9078\u3073\u76F4\u3059\u3068\u7D9A\u884C\u3057\u307E\u3059\u3002",
+      "status.resumed": "\u30BB\u30C3\u30B7\u30E7\u30F3\u3092\u5FA9\u5143\u3057\u307E\u3057\u305F\u3002\u25B6 \u3067\u7D9A\u884C\u3057\u307E\u3059\u3002",
       "status.canceled": "\u97F3\u58F0\u30BD\u30FC\u30B9\u306E\u9078\u629E\u3092\u30AD\u30E3\u30F3\u30BB\u30EB\u3057\u307E\u3057\u305F\u3002",
       "status.captureErr": "\u9332\u97F3\u30A8\u30E9\u30FC: {err}",
       "status.checking": "\u78BA\u8A8D\u4E2D\u2026",
@@ -21973,6 +21991,26 @@ ${lines}`;
       tx.onerror = () => rej(tx.error);
     });
   }
+  async function hAll() {
+    const db = await _open();
+    return new Promise((res, rej) => {
+      const rq = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
+      rq.onsuccess = () => res((rq.result || []).sort((a, b) => b.startedAt - a.startedAt));
+      rq.onerror = () => rej(rq.error);
+    });
+  }
+  async function hImport(sessions) {
+    const arr = Array.isArray(sessions) ? sessions.filter((s) => s && s.id != null && Array.isArray(s.caps)) : [];
+    if (!arr.length) return 0;
+    const db = await _open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, "readwrite");
+      const os = tx.objectStore(STORE);
+      for (const s of arr) os.put(s);
+      tx.oncomplete = () => res(arr.length);
+      tx.onerror = () => rej(tx.error);
+    });
+  }
 
   // extension/app.js
   var DEFAULTS = {
@@ -22042,7 +22080,10 @@ ${lines}`;
     histList: $("hist-list"),
     histView: $("hist-view"),
     histClose: $("hist-close"),
-    histBack: $("hist-back")
+    histBack: $("hist-back"),
+    histExport: $("hist-export"),
+    histImport: $("hist-import"),
+    histImportFile: $("hist-import-file")
   };
   var TARGET_LANGS = [
     { code: "vi", name: "Ti\u1EBFng Vi\u1EC7t" },
@@ -22551,6 +22592,57 @@ ${lines}`;
       return { o: ls.map((l) => l.o).filter(Boolean).join("\n"), t: ls.map((l) => l.t).filter(Boolean).join("\n"), ts: e.ts || "" };
     });
   }
+  function _capSnapshot() {
+    return captions.filter((e) => !e.partial).map((e) => ({
+      author: e.author || "",
+      original: e.original || "",
+      translated: e.translated || "",
+      lines: e.lines && e.lines.length ? e.lines : null,
+      ts: e.ts || ""
+    }));
+  }
+  async function _consumeHandoff() {
+    let h;
+    try {
+      const got = await chrome.storage.local.get("handoff");
+      h = got.handoff;
+    } catch (_) {
+    }
+    if (h) {
+      try {
+        await chrome.storage.local.remove("handoff");
+      } catch (_) {
+      }
+    }
+    if (!h || !Array.isArray(h.caps) || !h.caps.length || Date.now() - (h.ts || 0) > 12e4) return null;
+    if (h.sessId) {
+      _sessId = h.sessId;
+      _sessStart = h.sessStart || h.sessId;
+    }
+    h.caps.forEach((c, i) => {
+      const e = {
+        id: "h" + i,
+        author: c.author || "",
+        translated: c.translated || "",
+        original: c.original || "",
+        lines: c.lines || [{ o: c.original || "", t: c.translated || "" }],
+        ts: c.ts || "",
+        partial: false
+      };
+      captions.push(e);
+      byId.set(e.id, e);
+    });
+    if (h.summaryMd) summaryMd = h.summaryMd;
+    if (h.fullMd) {
+      fullMd = h.fullMd;
+      showingReport = false;
+    }
+    sumPrevCount = captions.length;
+    reRenderAll();
+    renderSummary();
+    refreshCount();
+    return h;
+  }
   function saveSession() {
     if (!S.saveHistory || !_sessId || !captions.length) return;
     const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: S.langCode, transcribe: !!S.transcribeMode, count: captions.length, caps: _capPairs(), summaryMd, fullMd };
@@ -22660,6 +22752,38 @@ ${lines}`;
     const stamp = _fmtDate(s.startedAt).replace(/[: ]/g, "-");
     if (kind === "md") download(`transcript-${stamp}.md`, sessionToMd(s), "text/markdown");
     else download(`transcript-${stamp}.html`, sessionToHtmlDoc(s), "text/html");
+  }
+  async function exportAllHistory() {
+    let all = [];
+    try {
+      all = await hAll();
+    } catch (e) {
+      console.warn("[history] export", e);
+    }
+    if (!all.length) {
+      alert(t("history.empty"));
+      return;
+    }
+    const blob = { app: "captrans-history", version: 1, exportedAt: Date.now(), sessions: all };
+    const stamp = _fmtDate(Date.now()).replace(/[: ]/g, "-");
+    download(`captrans-history-${stamp}.json`, JSON.stringify(blob), "application/json");
+  }
+  async function importHistory(file) {
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const sessions = Array.isArray(data) ? data : data && data.sessions || [];
+      const n = await hImport(sessions);
+      if (!n) {
+        alert(t("history.importErr"));
+        return;
+      }
+      alert(t("history.imported", { n }));
+      openHistory();
+    } catch (e) {
+      console.warn("[history] import", e);
+      alert(t("history.importErr"));
+    }
   }
   function closeSelf() {
     try {
@@ -23054,6 +23178,7 @@ ${lines}`;
   var _pipAuto = false;
   var _autoReturning = false;
   var _isPopup = new URLSearchParams(location.search).get("popup") === "1";
+  var _resume = new URLSearchParams(location.search).get("resume") === "1";
   var _prevTabId = (() => {
     const v = new URLSearchParams(location.search).get("prev");
     return v != null ? parseInt(v, 10) : null;
@@ -23177,6 +23302,20 @@ ${lines}`;
     el.popoutBtn.addEventListener("click", async () => {
       const page = location.pathname.split("/").pop() || "sidepanel.html";
       try {
+        const wasRunning = running;
+        try {
+          await chrome.storage.local.set({ handoff: {
+            caps: _capSnapshot(),
+            summaryMd,
+            fullMd,
+            sessId: _sessId,
+            sessStart: _sessStart,
+            wasRunning,
+            source: S.source,
+            ts: Date.now()
+          } });
+        } catch (_) {
+        }
         if (running) stop();
         let prev = "";
         try {
@@ -23184,7 +23323,7 @@ ${lines}`;
           if (act && act.id != null) prev = "&prev=" + act.id;
         } catch (_) {
         }
-        await chrome.tabs.create({ url: chrome.runtime.getURL(page + "?popup=1" + prev), active: true });
+        await chrome.tabs.create({ url: chrome.runtime.getURL(page + "?popup=1&resume=1" + prev), active: true });
         window.close();
       } catch (e) {
         st("status.popoutErr", { err: e && e.message }, "err");
@@ -23235,6 +23374,13 @@ ${lines}`;
     el.historyBtn.addEventListener("click", openHistory);
     el.histClose.addEventListener("click", () => el.history.classList.add("hidden"));
     el.histBack.addEventListener("click", openHistory);
+    el.histExport.addEventListener("click", exportAllHistory);
+    el.histImport.addEventListener("click", () => el.histImportFile.click());
+    el.histImportFile.addEventListener("change", (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      importHistory(f);
+      ev.target.value = "";
+    });
     el.saveHistory.addEventListener("change", () => save({ saveHistory: el.saveHistory.checked }));
     el.layoutPick.addEventListener("click", (ev) => {
       const b = ev.target.closest(".lay-opt");
@@ -23342,7 +23488,21 @@ ${lines}`;
     initResizer();
     wire();
     if (S.apiKey) checkKey();
-    st(S.apiKey ? "status.ready" : "status.readyNoKey");
-    if (S.source === "mic") ensureMicPermission();
+    if (_isPopup && _resume) {
+      const h = await _consumeHandoff();
+      if (h && h.wasRunning && h.source === "mic") {
+        start();
+      } else if (h && h.wasRunning) {
+        st("status.resumePick", null, "run");
+      } else if (h) {
+        st("status.resumed", null, "run");
+      } else {
+        st(S.apiKey ? "status.ready" : "status.readyNoKey");
+        if (S.source === "mic") ensureMicPermission();
+      }
+    } else {
+      st(S.apiKey ? "status.ready" : "status.readyNoKey");
+      if (S.source === "mic") ensureMicPermission();
+    }
   })();
 })();

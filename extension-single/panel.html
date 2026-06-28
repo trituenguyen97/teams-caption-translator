@@ -245,8 +245,11 @@ button.mini.disabled:hover { background: var(--bg3); }   /* hủy hiệu ứng h
       <strong data-i18n="history.title">Lịch sử</strong>
       <button id="hist-back" class="mini hidden" type="button">← <span data-i18n="history.back">Danh sách</span></button>
       <span class="spacer"></span>
+      <button id="hist-export" class="mini" data-i18n-title="history.exportAll" type="button">📤</button>
+      <button id="hist-import" class="mini" data-i18n-title="history.import" type="button">📥</button>
       <button id="hist-close" class="mini" type="button">✕</button>
     </div>
+    <input id="hist-import-file" type="file" accept="application/json,.json" hidden />
     <div id="hist-list" class="hist-list"></div>
     <div id="hist-view" class="hist-view hidden"></div>
   </section>

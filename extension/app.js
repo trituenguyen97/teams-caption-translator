@@ -4,7 +4,7 @@ import { createSummarizer } from './lib/gemini-text.js';
 import { LANG_LABELS } from './lib/langs.js';
 import { GEM_VOICES, DEFAULT_VOICE } from './lib/voices.js';
 import { I18N_LOCALES, flag, t, setLocale, currentLocale, applyI18n } from './lib/i18n.js';
-import { hSave, hList, hGet, hDel } from './lib/history.js';
+import { hSave, hList, hGet, hDel, hAll, hImport } from './lib/history.js';
 
 // ── State + lưu trữ ────────────────────────────────────────────────────────────
 const DEFAULTS = {
@@ -29,6 +29,7 @@ const el = {
   sumFull: $('sum-full'), sumDlHtml: $('sum-dlhtml'), sumExport: $('sum-export'),
   vResizer: $('v-resizer'), dl: $('dl'),
   saveHistory: $('save-history'), historyBtn: $('history-btn'), history: $('history'), histList: $('hist-list'), histView: $('hist-view'), histClose: $('hist-close'), histBack: $('hist-back'),
+  histExport: $('hist-export'), histImport: $('hist-import'), histImportFile: $('hist-import-file'),
 };
 // Ngôn ngữ ĐÍCH (tách khỏi ngôn ngữ giao diện) — giữ 5 như cũ.
 const TARGET_LANGS = [
@@ -331,6 +332,31 @@ function _capPairs() {   // snapshot caption hiện tại → [{o,t,ts}]
     return { o: ls.map(l => l.o).filter(Boolean).join('\n'), t: ls.map(l => l.t).filter(Boolean).join('\n'), ts: e.ts || '' };
   });
 }
+// ── Chuyển phiên sang TAB MỚI (⧉) — KHÔNG mất transcript / không bắt đầu lại ──────────
+// Stream (mic/loa) + WebSocket Gemini KHÔNG chuyển được giữa side panel↔tab (khác context),
+// nên ta lưu snapshot vào storage; tab mới khôi phục transcript+tóm tắt và TỰ thu lại nguồn để dịch tiếp.
+function _capSnapshot() {   // chụp caption ĐÃ CHỐT (giữ lines) để khôi phục đúng giao diện
+  return captions.filter(e => !e.partial).map(e => ({
+    author: e.author || '', original: e.original || '', translated: e.translated || '',
+    lines: (e.lines && e.lines.length) ? e.lines : null, ts: e.ts || '',
+  }));
+}
+async function _consumeHandoff() {   // tab mới: đọc + xoá blob, khôi phục captions/tóm tắt/id phiên; trả blob để quyết auto-start
+  let h; try { const got = await chrome.storage.local.get('handoff'); h = got.handoff; } catch (_) {}
+  if (h) { try { await chrome.storage.local.remove('handoff'); } catch (_) {} }
+  if (!h || !Array.isArray(h.caps) || !h.caps.length || (Date.now() - (h.ts || 0) > 120000)) return null;
+  if (h.sessId) { _sessId = h.sessId; _sessStart = h.sessStart || h.sessId; }   // tiếp tục CÙNG phiên lịch sử
+  h.caps.forEach((c, i) => {
+    const e = { id: 'h' + i, author: c.author || '', translated: c.translated || '', original: c.original || '',
+      lines: c.lines || [{ o: c.original || '', t: c.translated || '' }], ts: c.ts || '', partial: false };
+    captions.push(e); byId.set(e.id, e);
+  });
+  if (h.summaryMd) summaryMd = h.summaryMd;
+  if (h.fullMd) { fullMd = h.fullMd; showingReport = false; }
+  sumPrevCount = captions.length;   // KHÔNG tóm tắt lại phần đã khôi phục
+  reRenderAll(); renderSummary(); refreshCount();
+  return h;
+}
 function saveSession() {   // chụp đồng bộ rồi ghi (an toàn dù captions bị xoá ngay sau)
   if (!S.saveHistory || !_sessId || !captions.length) return;
   const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: S.langCode, transcribe: !!S.transcribeMode, count: captions.length, caps: _capPairs(), summaryMd, fullMd };
@@ -397,6 +423,25 @@ async function exportSess(id, kind) {
   const stamp = _fmtDate(s.startedAt).replace(/[: ]/g, '-');
   if (kind === 'md') download(`transcript-${stamp}.md`, sessionToMd(s), 'text/markdown');
   else download(`transcript-${stamp}.html`, sessionToHtmlDoc(s), 'text/html');
+}
+// Backup TOÀN BỘ lịch sử ra 1 file JSON (chuyển máy / sao lưu — vì IndexedDB không sync theo tài khoản).
+async function exportAllHistory() {
+  let all = []; try { all = await hAll(); } catch (e) { console.warn('[history] export', e); }
+  if (!all.length) { alert(t('history.empty')); return; }
+  const blob = { app: 'captrans-history', version: 1, exportedAt: Date.now(), sessions: all };
+  const stamp = _fmtDate(Date.now()).replace(/[: ]/g, '-');
+  download(`captrans-history-${stamp}.json`, JSON.stringify(blob), 'application/json');
+}
+// Nhập lịch sử từ file JSON (merge theo id) → gộp với phiên đang có.
+async function importHistory(file) {
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const sessions = Array.isArray(data) ? data : (data && data.sessions) || [];
+    const n = await hImport(sessions);
+    if (!n) { alert(t('history.importErr')); return; }
+    alert(t('history.imported', { n })); openHistory();
+  } catch (e) { console.warn('[history] import', e); alert(t('history.importErr')); }
 }
 // Đóng CHÍNH context này: nếu là 1 TAB → chrome.tabs.remove; nếu là side panel/cửa sổ → window.close().
 function closeSelf() {
@@ -640,6 +685,7 @@ async function checkKey() {
 // PiP chỉ mở được từ context TOP-LEVEL (tab) — side panel không phải top-level nên KHÔNG ghim được từ đó.
 let _pipHolder = null, _inPip = false, _myWindowId = null, _pipAuto = false, _autoReturning = false;
 const _isPopup = new URLSearchParams(location.search).get('popup') === '1';
+const _resume = new URLSearchParams(location.search).get('resume') === '1';   // tab mở từ ⧉ → khôi phục phiên đang dịch (không bắt đầu lại)
 const _prevTabId = (() => { const v = new URLSearchParams(location.search).get('prev'); return v != null ? parseInt(v, 10) : null; })();
 function _setPipReturnMode(on) {   // trong PiP: nút 📌 đổi thành 🔙 "đưa về side panel"
   el.pipBtn.textContent = on ? '🔙' : '📌';
@@ -704,10 +750,17 @@ function wire() {
   el.popoutBtn.addEventListener('click', async () => {           // mở UI trong 1 TAB của cửa sổ hiện tại rồi ĐÓNG side panel
     const page = (location.pathname.split('/').pop() || 'sidepanel.html');
     try {
-      if (running) stop();                                       // nhả mic/loa trước khi đóng (tab mới tự chạy lại khi bấm ▶)
+      const wasRunning = running;
+      try {                                                      // chuyển phiên sang tab mới (transcript + tóm tắt + id phiên + đang-chạy)
+        await chrome.storage.local.set({ handoff: {
+          caps: _capSnapshot(), summaryMd, fullMd, sessId: _sessId, sessStart: _sessStart,
+          wasRunning, source: S.source, ts: Date.now(),
+        } });
+      } catch (_) {}
+      if (running) stop();                                       // nhả mic/loa (stream không chuyển context được; tab mới tự thu lại)
       let prev = '';
       try { const [act] = await chrome.tabs.query({ active: true, currentWindow: true }); if (act && act.id != null) prev = '&prev=' + act.id; } catch (_) {}   // nhớ tab nội dung để trả focus sau khi bật PiP
-      await chrome.tabs.create({ url: chrome.runtime.getURL(page + '?popup=1' + prev), active: true });   // TAB → bấm 📌 trong tab để PiP
+      await chrome.tabs.create({ url: chrome.runtime.getURL(page + '?popup=1&resume=1' + prev), active: true });   // TAB → tự khôi phục + tiếp tục dịch
       window.close();                                            // đóng Side Panel đang mở
     } catch (e) { st('status.popoutErr', { err: e && e.message }, 'err'); }
   });
@@ -725,6 +778,9 @@ function wire() {
   el.historyBtn.addEventListener('click', openHistory);
   el.histClose.addEventListener('click', () => el.history.classList.add('hidden'));
   el.histBack.addEventListener('click', openHistory);
+  el.histExport.addEventListener('click', exportAllHistory);
+  el.histImport.addEventListener('click', () => el.histImportFile.click());
+  el.histImportFile.addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; importHistory(f); ev.target.value = ''; });
   el.saveHistory.addEventListener('change', () => save({ saveHistory: el.saveHistory.checked }));
   el.layoutPick.addEventListener('click', (ev) => { const b = ev.target.closest('.lay-opt'); if (!b || b.disabled) return; save({ layout: b.dataset.layout }); setLayoutActive(); reRenderAll(); });
   el.zoom.addEventListener('input', () => { save({ zoom: +el.zoom.value }); applyZoom(); });
@@ -781,6 +837,14 @@ function wire() {
   applyI18n(document); refreshStartBtn(); refreshCount(); renderSummary();
   initResizer(); wire();
   if (S.apiKey) checkKey();
-  st(S.apiKey ? 'status.ready' : 'status.readyNoKey');
-  if (S.source === 'mic') ensureMicPermission();   // mở extension + đang chọn Micro + chưa cấp quyền → xử lý cấp luôn
+  if (_isPopup && _resume) {                                                  // tab mở từ ⧉ → khôi phục phiên đang dịch
+    const h = await _consumeHandoff();
+    if (h && h.wasRunning && h.source === 'mic') { start(); }                 // mic: thu lại được ngay → tiếp tục dịch không gián đoạn
+    else if (h && h.wasRunning) { st('status.resumePick', null, 'run'); }     // screen/tab: trình duyệt bắt chọn lại nguồn 1 lần
+    else if (h) { st('status.resumed', null, 'run'); }                        // đã dừng nhưng khôi phục transcript
+    else { st(S.apiKey ? 'status.ready' : 'status.readyNoKey'); if (S.source === 'mic') ensureMicPermission(); }
+  } else {
+    st(S.apiKey ? 'status.ready' : 'status.readyNoKey');
+    if (S.source === 'mic') ensureMicPermission();   // mở extension + đang chọn Micro + chưa cấp quyền → xử lý cấp luôn
+  }
 })();
