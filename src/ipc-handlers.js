@@ -176,12 +176,17 @@ function registerAll(app) {
     try { return await geminiText.summarizeFull(captions); }
     catch (e) { return { ok: false, error: e.message }; }
   });
+  // Tổng thể CÓ CẤU TRÚC (JSON) → client render HTML "y hệt". Lỗi → caller fallback summarize-meeting.
+  ipcMain.handle('summarize-meeting-structured', async (_, captions) => {
+    try { return await geminiText.summarizeFullStructured(captions); }
+    catch (e) { return { ok: false, error: e.message }; }
+  });
   ipcMain.handle('export-summary', async (_, opts = {}) => {
     try {
       const { filePath, canceled } = await dialog.showSaveDialog(state.win, {
         title: opts.dialogTitle || 'Lưu tóm tắt',
         defaultPath: opts.defaultName || ('summary-' + new Date().toISOString().slice(0, 10) + '.md'),
-        filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'Text', extensions: ['txt'] }],
+        filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'HTML', extensions: ['html'] }, { name: 'Text', extensions: ['txt'] }],
       });
       if (canceled || !filePath) return { ok: false };
       fs.writeFileSync(filePath, opts.markdown || '', 'utf8');

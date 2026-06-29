@@ -145,7 +145,7 @@ function applyZoom() { const z = (S.zoom || 100) / 100; el.list.style.zoom = z; 
 function clearList() {
   saveSession(); _sessId = null;   // chốt + lưu phiên đang có trước khi xoá; phiên sau là phiên mới
   captions.length = 0; byId.clear(); rowById.clear(); el.list.classList.remove('dual'); el.list.innerHTML = ''; refreshCount();
-  summaryMd = ''; sumPrevCount = 0; sumLastTime = 0; fullMd = ''; showingReport = false; renderSummary();
+  summaryMd = ''; sumPrevCount = 0; sumLastTime = 0; fullMd = ''; fullReport = null; showingReport = false; renderSummary();
 }
 
 // ── TTS playback (gapless + trần độ trễ — port từ app.html bản đã vá) ─────────────
@@ -473,6 +473,7 @@ async function ensureMicPermission() {
 // ── Tóm tắt ────────────────────────────────────────────────────────────────────────
 let summaryMd = '', sumPrevCount = 0, sumBusy = false, sumTimer = null, sumPanelOpen = false, sumLastTime = 0;
 let fullMd = '', showingReport = false;   // #5: tóm tắt tổng thể (markdown) + đang hiển thị bản HTML đẹp?
+let fullReport = null;   // báo cáo Tổng thể có cấu trúc (JSON) → xuất HTML "y hệt"; null = markdown thường
 const SUM_INTERVAL_MS = 60000, SUM_POLL_MS = 10000, SUM_MAX_CAPS_PER_CALL = 250;   // rolling cập nhật ~1 PHÚT/lần (không theo số câu); kiểm tra mỗi 10s; vẫn gửi gần hết câu mới (token nhẹ)
 const SUM_MIN_FIRST = 8, SUM_MIN_FIRST_CHARS = 400;   // tóm tắt LẦN ĐẦU chỉ khi ĐỦ nội dung → chống LLM bịa lúc mới có 1-2 câu
 const finalized = () => captions.filter(c => !c.partial);
@@ -489,7 +490,7 @@ async function summarizeTick() {
   if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
   try {
     const res = await summarizer.summarize({ prevSummary: summaryMd, captions: newCaps });
-    if (res && res.ok) { summaryMd = res.markdown; showingReport = false; renderSummary(); sumPrevCount = caps.length; sumLastTime = Date.now(); }
+    if (res && res.ok) { summaryMd = res.markdown; showingReport = false; fullReport = null; renderSummary(); sumPrevCount = caps.length; sumLastTime = Date.now(); }
     else if (res && res.error !== 'empty') st('status.summaryErr', { err: res.error }, 'err');
   } catch (e) { st('status.summaryErr', { err: e.message }, 'err'); }
   finally { sumBusy = false; refreshSpin(); }
@@ -508,7 +509,7 @@ async function regenerateSummary() {
   if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
   try {
     const res = await summarizer.summarize({ prevSummary: '', captions: newCaps });
-    if (res && res.ok) { summaryMd = res.markdown; showingReport = false; renderSummary(); sumPrevCount = caps.length; sumLastTime = Date.now(); }
+    if (res && res.ok) { summaryMd = res.markdown; showingReport = false; fullReport = null; renderSummary(); sumPrevCount = caps.length; sumLastTime = Date.now(); }
     else if (res && res.error !== 'empty') st('status.summaryErr', { err: res.error }, 'err');
   } catch (e) { st('status.summaryErr', { err: e.message }, 'err'); }
   finally { sumBusy = false; refreshSpin(); }
@@ -524,10 +525,127 @@ function renderSummary() {
     : (summaryMd ? md2html(summaryMd) : `<em class="muted">${t('summary.empty')}</em>`);
 }
 // #5: render báo cáo tổng thể thành HTML "đẹp" (card mục + bảng) — tự sinh từ markdown, an toàn.
-const REPORT_CSS = 'body{font:14px/1.65 "Segoe UI",system-ui,sans-serif;color:#1a1a1a;background:#eef1f6;margin:0;padding:24px}.report{max-width:840px;margin:0 auto;background:#fff;border-radius:14px;padding:28px 34px;box-shadow:0 6px 30px #00000014}.report h1{font-size:22px;margin:0 0 14px}.report h2{font-size:16px;margin:22px 0 10px;padding:8px 12px;background:linear-gradient(90deg,#e8f0fe,#ffffff);border-left:4px solid #3794ff;border-radius:6px;color:#16345f}.report h3{font-size:14px;color:#333;margin:14px 0 6px}.report table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;overflow:hidden;border-radius:8px}.report th{background:#3794ff;color:#fff;padding:8px 11px;text-align:left}.report td{border:1px solid #e1e7ef;padding:7px 11px}.report tr:nth-child(even) td{background:#f5f8fc}.report ul,.report ol{margin:8px 0 8px 22px}.report li{margin:3px 0}.report code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-size:.92em}.report strong{color:#16345f}.report hr{border:0;border-top:1px solid #e3e8ef;margin:18px 0}';
+const REPORT_CSS = 'body{margin:0;background:#eef1f4;color:#19283a;font:16px/1.65 system-ui,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding:28px 16px}.report{max-width:840px;margin:0 auto;background:#fff;border:1px solid #e0e5eb;border-radius:10px;box-shadow:0 1px 2px rgba(25,40,58,.04),0 18px 44px -30px rgba(25,40,58,.3);padding:clamp(22px,4vw,46px)}.report>*:first-child{margin-top:0}.report h1{font-family:"Cambria","Georgia",serif;font-size:clamp(24px,4vw,33px);font-weight:700;line-height:1.2;letter-spacing:-.01em;margin:0 0 18px;padding-bottom:14px;border-bottom:3px solid #1b5e7e;color:#19283a}.report h2{font-family:"Cambria","Georgia",serif;font-size:clamp(19px,2.6vw,23px);font-weight:700;color:#154b64;margin:30px 0 12px;padding-left:14px;border-left:4px solid #1b5e7e;line-height:1.25}.report h3{font-size:15.5px;font-weight:700;color:#1b5e7e;margin:20px 0 8px}.report h4{font-size:14px;font-weight:700;color:#33414f;margin:16px 0 6px}.report p{margin:0 0 12px}.report ul,.report ol{margin:8px 0 14px;padding-left:24px}.report li{margin:5px 0;padding-left:3px}.report li::marker{color:#1b5e7e}.report strong{color:#16303f;font-weight:600}.report em{color:#5c6b7e}.report code{background:#eef1f5;color:#154b64;padding:1px 6px;border-radius:4px;font-size:.9em;font-family:Consolas,"Cascadia Code",monospace}.report blockquote{margin:12px 0;padding:8px 16px;border-left:3px solid #b5651d;background:#f7efe4;color:#6a5640;border-radius:0 6px 6px 0;font-style:italic}.report hr{border:0;border-top:1px solid #e0e5eb;margin:24px 0}.report .tbl-wrap{overflow-x:auto;border:1px solid #e0e5eb;border-radius:8px;margin:14px 0}.report table{border-collapse:collapse;width:100%;min-width:520px;font-size:14px;font-variant-numeric:tabular-nums}.report th{background:#1b5e7e;color:#fff;text-align:left;font-weight:600;font-size:12.5px;letter-spacing:.03em;padding:11px 14px;white-space:nowrap}.report td{padding:11px 14px;border-top:1px solid #e6eaef;vertical-align:top;color:#33414f;line-height:1.5}.report tbody tr:nth-child(even) td{background:#fafbfc}.report td:first-child{font-weight:600;color:#19283a}@media print{body{background:#fff;padding:0}.report{border:0;border-radius:0;box-shadow:none;max-width:none}.report h2,.report .tbl-wrap{break-inside:avoid}}';
 function reportBodyHtml(md) { return '<div class="report">' + md2html(md) + '</div>'; }
 function buildReportDoc(md) {
   return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meeting report</title><style>${REPORT_CSS}</style></head><body>${reportBodyHtml(md)}</body></html>`;
+}
+
+// ════ BÁO CÁO "Y HỆT": JSON có cấu trúc (Gemini) → renderer cố định → HTML ════
+const FANCY_CSS = `:root{--ground:#F4F6F8;--paper:#FFFFFF;--ink:#19283A;--muted:#5C6B7E;--faint:#8794A4;--accent:#1B5E7E;--accent-deep:#154B64;--accent-soft:#E8F0F3;--hair:#E0E5EB;--good:#2E7D5B;--good-soft:#E6F1EB;--plan:#1B5E7E;--plan-soft:#E8F0F3;--todo:#B5651D;--todo-soft:#F6EDE2;--warn:#B5651D;--warn-soft:#F7EFE4;--warn-line:#E9D4B6;--serif:"Cambria","Georgia","Times New Roman",serif;--sans:system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+.sheet{max-width:900px;margin:0 auto;padding:clamp(20px,4vw,56px) clamp(14px,4vw,40px)}
+.doc{background:var(--paper);border:1px solid var(--hair);border-radius:6px;box-shadow:0 1px 2px rgba(25,40,58,.04),0 18px 44px -30px rgba(25,40,58,.3);overflow:hidden}
+.head{padding:clamp(28px,5vw,52px) clamp(24px,5vw,56px) clamp(24px,4vw,38px);border-top:4px solid var(--accent)}
+.eyebrow{font-size:12.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+.doc-title{font-family:var(--serif);font-weight:700;font-size:clamp(26px,4.2vw,38px);line-height:1.18;letter-spacing:-.01em;margin:0;text-wrap:balance;color:var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:12px 26px;margin-top:22px;padding-top:18px;border-top:1px solid var(--hair);font-size:14px;color:var(--muted)}
+.meta .m-label{color:var(--faint);font-size:11px;letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:2px}
+.meta strong{color:var(--ink);font-weight:600}
+.body{padding:0 clamp(24px,5vw,56px) clamp(20px,4vw,44px)}
+section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin:0 0 18px}
+.sec-num{font-family:var(--serif);font-size:15px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;min-width:1.4em}
+.sec-title{font-family:var(--serif);font-size:clamp(21px,2.9vw,26px);font-weight:700;letter-spacing:-.005em;margin:0;color:var(--ink);text-wrap:balance}
+.sub{margin-top:30px}
+.sub:first-of-type{margin-top:4px}
+.sub-title{font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--accent-deep);margin:0 0 12px;display:flex;align-items:center;gap:10px}
+.sub-title .ix{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:700}
+.sub-title::after{content:"";flex:1;height:1px;background:var(--hair)}
+.body p{margin:0 0 12px;max-width:72ch;color:#33414f}
+.points{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:13px}
+.points>li{position:relative;padding-left:22px;max-width:72ch;color:#33414f}
+.points>li::before{content:"";position:absolute;left:0;top:.62em;width:7px;height:7px;border-radius:2px;background:var(--accent);transform:rotate(45deg)}
+.points b{color:var(--ink);font-weight:600}
+.subpoints{list-style:none;margin:9px 0 0;padding:0;display:flex;flex-direction:column;gap:7px}
+.subpoints li{position:relative;padding-left:20px;color:var(--muted);font-size:15.5px;line-height:1.55}
+.subpoints li::before{content:"";position:absolute;left:2px;top:.72em;width:9px;height:1.5px;background:var(--faint)}
+.cardrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:4px 0 0}
+.mcard{background:var(--ground);border:1px solid var(--hair);border-radius:6px;padding:16px 18px;border-top:3px solid var(--accent)}
+.mcard h4{margin:0 0 6px;font-size:15px;font-weight:700;color:var(--ink);letter-spacing:.01em}
+.mcard p{margin:0;font-size:14.5px;color:var(--muted);line-height:1.5;max-width:none}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:6px;margin:14px 0 0}
+.doc table{border-collapse:collapse;width:100%;min-width:520px;font-size:15px;font-variant-numeric:tabular-nums}
+.doc thead th{background:var(--accent);color:#fff;text-align:left;font-weight:600;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;padding:11px 14px;white-space:nowrap}
+.doc tbody td{padding:13px 14px;border-top:1px solid var(--hair);vertical-align:top;color:#33414f;line-height:1.5}
+.doc tbody tr:nth-child(even) td{background:#FAFBFC}
+.doc tbody td:first-child{font-weight:600;color:var(--ink)}
+.stat{display:flex;align-items:center;gap:20px;flex-wrap:wrap;background:linear-gradient(180deg,#1B5E7E,#154B64);color:#fff;border-radius:8px;padding:20px 24px;margin-top:14px}
+.stat-fig{font-family:var(--serif);font-size:clamp(28px,5vw,40px);font-weight:700;line-height:1;letter-spacing:-.01em}
+.stat-cap{font-size:14px;color:#CFE2EA;max-width:46ch;line-height:1.45;margin:0}
+.decisions{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+.decision{display:grid;grid-template-columns:152px 1fr;gap:8px 20px;align-items:start;padding:16px 18px;background:var(--ground);border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:5px}
+.decision.is-done{border-left-color:var(--good)}
+.decision.is-plan{border-left-color:var(--plan)}
+.decision.is-todo{border-left-color:var(--todo)}
+.decision p{margin:0;color:#33414f;font-size:15.5px;line-height:1.55;max-width:none}
+.tag{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:999px;white-space:nowrap;align-self:start}
+.tag::before{content:"";width:7px;height:7px;border-radius:50%}
+.is-done .tag{color:var(--good);background:var(--good-soft)}
+.is-done .tag::before{background:var(--good)}
+.is-plan .tag{color:var(--plan);background:var(--plan-soft)}
+.is-plan .tag::before{background:var(--plan)}
+.is-todo .tag{color:var(--todo);background:var(--todo-soft)}
+.is-todo .tag::before{background:var(--todo)}
+.problems{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+.prob{background:var(--warn-soft);border:1px solid var(--warn-line);border-left:3px solid var(--warn);border-radius:6px;padding:15px 18px}
+.prob h4{margin:0 0 7px;font-size:15px;font-weight:700;color:#7d4513;letter-spacing:.01em}
+.prob p{margin:0;color:#5b4a36;font-size:15px;line-height:1.55;max-width:none}
+.prob .subpoints li{color:#6a5640}
+.prob .subpoints li::before{background:var(--warn)}
+.foot{padding:18px clamp(24px,5vw,56px) 26px;border-top:1px solid var(--hair);font-size:12.5px;color:var(--faint);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+@media(max-width:540px){.decision{grid-template-columns:1fr;gap:10px}.stat{gap:8px}}
+@media print{body{background:#fff}.sheet{padding:0;max-width:none}.doc{border:0;border-radius:0;box-shadow:none}section,.tbl-wrap,.stat,.prob,.decision,.mcard{break-inside:avoid}}`;
+function _fesc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function _finl(s) { return _fesc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code>$1</code>'); }
+function _fsub(sub) { return (sub && sub.length) ? ('<ul class="subpoints">' + sub.map(x => `<li>${_finl(x)}</li>`).join('') + '</ul>') : ''; }
+function _flbl(p) { return p.label ? `<b>${_fesc(p.label)}${/[:：]\s*$/.test(p.label) ? '' : ':'}</b> ` : ''; }
+function _fcells(r) { return Array.isArray(r) ? r : ((r && r.cells) || []); }
+function _fhasTable(t) { return t && ((t.columns && t.columns.length) || (t.rows && t.rows.length)); }
+const _FSCLS = { done: 'is-done', plan: 'is-plan', todo: 'is-todo' };
+function _fblocks(o, warn) {
+  let h = '';
+  if (o.intro) h += `<p>${_finl(o.intro)}</p>`;
+  if (o.points && o.points.length) h += warn
+    ? '<div class="problems">' + o.points.map(p => `<div class="prob">${p.label ? `<h4>${_fesc(p.label)}</h4>` : ''}${p.text ? `<p>${_finl(p.text)}</p>` : ''}${_fsub(p.sub)}</div>`).join('') + '</div>'
+    : '<ul class="points">' + o.points.map(p => `<li>${_flbl(p)}${_finl(p.text)}${_fsub(p.sub)}</li>`).join('') + '</ul>';
+  if (o.cards && o.cards.length) h += '<div class="cardrow">' + o.cards.map(c => `<div class="mcard">${c.title ? `<h4>${_fesc(c.title)}</h4>` : ''}<p>${_finl(c.text)}</p></div>`).join('') + '</div>';
+  if (o.stat && o.stat.value) h += `<div class="stat"><span class="stat-fig">${_fesc(o.stat.value)}</span>${o.stat.caption ? `<p class="stat-cap">${_finl(o.stat.caption)}</p>` : ''}</div>`;
+  if (_fhasTable(o.table)) h += `<div class="tbl-wrap"><table><thead><tr>${(o.table.columns || []).map(c => `<th>${_finl(c)}</th>`).join('')}</tr></thead><tbody>${(o.table.rows || []).map(r => `<tr>${_fcells(r).map(c => `<td>${_finl(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  if (o.decisions && o.decisions.length) h += '<div class="decisions">' + o.decisions.map(d => `<div class="decision ${_FSCLS[d.status] || 'is-plan'}"><span class="tag">${_fesc(d.label)}</span><p>${_finl(d.text)}</p></div>`).join('') + '</div>';
+  return h;
+}
+function renderReport(r) {
+  r = r || {};
+  const meta = (r.meta || []).filter(m => m && m.value).map(m => `<div><span class="m-label">${_fesc(m.label)}</span><strong>${_fesc(m.value)}</strong></div>`).join('');
+  const head = `<header class="head">${r.eyebrow ? `<p class="eyebrow">${_fesc(r.eyebrow)}</p>` : ''}<h1 class="doc-title">${_fesc(r.title || 'Báo cáo cuộc họp')}</h1>${meta ? `<div class="meta">${meta}</div>` : ''}</header>`;
+  const body = '<div class="body">' + (r.sections || []).map((s, i) => {
+    const num = String(i + 1).padStart(2, '0'), warn = s.tone === 'warn';
+    let inner = _fblocks(s, warn);
+    if (s.subs && s.subs.length) inner += s.subs.map((sub, j) => `<div class="sub"><p class="sub-title"><span class="ix">${i + 1}.${j + 1}</span> ${_fesc(sub.title)}</p>${_fblocks(sub, sub.tone === 'warn')}</div>`).join('');
+    return `<section><div class="sec-head"><span class="sec-num">${num}</span><h2 class="sec-title">${_fesc(s.heading)}</h2></div>${inner}</section>`;
+  }).join('') + '</div>';
+  const foot = r.footer ? `<footer class="foot"><span>${_fesc(r.footer)}</span></footer>` : '';
+  return `<div class="sheet"><article class="doc">${head}${body}${foot}</article></div>`;
+}
+function buildFancyDoc(r) {
+  return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${_fesc(r && r.title || 'Báo cáo cuộc họp')}</title><style>${FANCY_CSS}</style></head><body>${renderReport(r)}</body></html>`;
+}
+function reportToMd(r) {
+  r = r || {}; const L = [];
+  if (r.title) L.push('# ' + r.title);
+  for (const m of (r.meta || [])) if (m && m.value) L.push(`- **${m.label}:** ${m.value}`);
+  const blk = o => {
+    if (o.intro) { L.push(''); L.push(o.intro); }
+    for (const p of (o.points || [])) { L.push((p.label ? `- **${p.label}:** ` : '- ') + (p.text || '')); for (const s of (p.sub || [])) L.push('    - ' + s); }
+    for (const c of (o.cards || [])) L.push(`- **${c.title || ''}:** ${c.text || ''}`);
+    if (o.stat && o.stat.value) { L.push(''); L.push(`**${o.stat.value}** — ${o.stat.caption || ''}`); }
+    if (o.table && o.table.columns && o.table.columns.length) { L.push(''); L.push('| ' + o.table.columns.join(' | ') + ' |'); L.push('| ' + o.table.columns.map(() => '---').join(' | ') + ' |'); for (const row of (o.table.rows || [])) L.push('| ' + _fcells(row).join(' | ') + ' |'); }
+    for (const d of (o.decisions || [])) L.push(`- **${d.label}:** ${d.text || ''}`);
+  };
+  (r.sections || []).forEach((s, i) => { L.push(''); L.push(`## ${i + 1}. ${s.heading}`); blk(s); (s.subs || []).forEach((sub, j) => { L.push(''); L.push(`### ${i + 1}.${j + 1}. ${sub.title}`); blk(sub); }); });
+  return L.join('\n');
 }
 
 // Markdown → HTML gọn (heading, list, bảng GFM, bold/italic/code, hr).
@@ -558,9 +676,9 @@ function md2html(md) {
     }
     if (ln.includes('|') && i + 1 < lines.length && isSep(lines[i + 1])) {
       const cells = r => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
-      const head = cells(ln); i += 2; out.push('<table><thead><tr>' + head.map(h => '<th>' + inline(h) + '</th>').join('') + '</tr></thead><tbody>');
+      const head = cells(ln); i += 2; out.push('<div class="tbl-wrap"><table><thead><tr>' + head.map(h => '<th>' + inline(h) + '</th>').join('') + '</tr></thead><tbody>');
       while (i < lines.length && lines[i].includes('|')) { out.push('<tr>' + cells(lines[i]).map(c => '<td>' + inline(c) + '</td>').join('') + '</tr>'); i++; }
-      out.push('</tbody></table>'); continue;
+      out.push('</tbody></table></div>'); continue;
     }
     if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(ln)) { out.push('<hr>'); i++; continue; }
     if (ln.trim() === '') { i++; continue; }
@@ -787,16 +905,26 @@ function wire() {
   el.autoscroll.addEventListener('click', () => { autoScroll = !autoScroll; el.autoscroll.classList.toggle('active', autoScroll); if (autoScroll) el.list.scrollTop = el.list.scrollHeight; });
   el.list.addEventListener('scroll', () => { const near = el.list.scrollHeight - el.list.scrollTop - el.list.clientHeight < 40; autoScroll = near; el.autoscroll.classList.toggle('active', near); });
   el.summaryToggle.addEventListener('click', () => sumPanelOpen ? closeSummary() : openSummary());
-  el.sumDlHtml.addEventListener('click', () => { const md = fullMd || summaryMd; if (md) download(`${fullMd ? 'report' : 'summary'}-${new Date().toISOString().slice(0, 10)}.html`, buildReportDoc(md), 'text/html'); });
+  el.sumDlHtml.addEventListener('click', () => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    if (fullReport) { download(`bao-cao-${stamp}.html`, buildFancyDoc(fullReport), 'text/html'); return; }   // báo cáo Tổng thể → giao diện y hệt
+    const md = fullMd || summaryMd; if (md) download(`${fullMd ? 'report' : 'summary'}-${stamp}.html`, buildReportDoc(md), 'text/html');
+  });
   el.sumExport.addEventListener('click', () => { if (summaryMd) download(`summary-${new Date().toISOString().slice(0, 10)}.md`, summaryMd, 'text/markdown'); });
   el.sumFull.addEventListener('click', async () => {
     if (running) { st('status.stopFirst'); return; }
     const caps = finalized(); if (!caps.length) { st('status.noContent'); return; }
     st('status.makingFull'); sumBusy = true; refreshSpin(); showFullOverlay(true);
     try {
-      const r = await summarizer.summarizeFull(caps);
-      if (r && r.ok) { fullMd = summaryMd = r.markdown; showingReport = true; renderSummary(); el.summaryWrap.classList.remove('hidden'); st('status.fullDone'); }
-      else st('status.fullErr', { err: r && r.error }, 'err');
+      let rep = null;
+      try { const sr = await summarizer.summarizeFullStructured(caps); if (sr && sr.ok) rep = sr.report; } catch (e) {}
+      if (rep) {   // JSON cấu trúc → preview markdown + ⬇HTML dựng giao diện y hệt
+        fullReport = rep; fullMd = summaryMd = reportToMd(rep); showingReport = true; renderSummary(); el.summaryWrap.classList.remove('hidden'); st('status.fullDone');
+      } else {     // fallback: báo cáo markdown như cũ
+        const r = await summarizer.summarizeFull(caps);
+        if (r && r.ok) { fullReport = null; fullMd = summaryMd = r.markdown; showingReport = true; renderSummary(); el.summaryWrap.classList.remove('hidden'); st('status.fullDone'); }
+        else st('status.fullErr', { err: r && r.error }, 'err');
+      }
     } catch (e) { st('status.fullErr', { err: e.message }, 'err'); }
     finally { sumBusy = false; refreshSpin(); showFullOverlay(false); }
   });

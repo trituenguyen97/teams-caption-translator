@@ -268,4 +268,75 @@ async function summarizeFull(captions) {
   return _runChain(ai, gemma.length ? gemma : chain, prompt, { withSys: false, maxOut: FULL_OUT_TOKENS });
 }
 
-module.exports = { summarize, summarizeFull };
+// ── TỔNG THỂ CÓ CẤU TRÚC (JSON) → renderer client dựng HTML "y hệt" ──────────────
+// Chỉ flash-lite (JSON schema chuẩn); thất bại → caller fallback summarizeFull (markdown).
+const _S = { type: 'STRING' };
+const _PT = { type: 'OBJECT', properties: { label: { type: 'STRING', nullable: true }, text: _S, sub: { type: 'ARRAY', items: _S } }, required: ['text'] };
+const _CARD = { type: 'OBJECT', properties: { title: { type: 'STRING', nullable: true }, text: _S }, required: ['text'] };
+const _STAT = { type: 'OBJECT', nullable: true, properties: { value: _S, caption: { type: 'STRING', nullable: true } }, required: ['value'] };
+const _TABLE = { type: 'OBJECT', nullable: true, properties: { columns: { type: 'ARRAY', items: _S }, rows: { type: 'ARRAY', items: { type: 'OBJECT', properties: { cells: { type: 'ARRAY', items: _S } }, required: ['cells'] } } } };
+const _DEC = { type: 'OBJECT', properties: { label: _S, status: { type: 'STRING', enum: ['done', 'plan', 'todo'] }, text: _S }, required: ['label', 'text'] };
+const _BLOCKS = { intro: { type: 'STRING', nullable: true }, points: { type: 'ARRAY', items: _PT }, cards: { type: 'ARRAY', items: _CARD }, stat: _STAT, table: _TABLE };
+const _SUB = { type: 'OBJECT', properties: Object.assign({ title: _S, tone: { type: 'STRING', enum: ['default', 'warn'], nullable: true } }, _BLOCKS), required: ['title'] };
+const _SECTION = { type: 'OBJECT', properties: Object.assign({ heading: _S, tone: { type: 'STRING', enum: ['default', 'warn'], nullable: true } }, _BLOCKS, { decisions: { type: 'ARRAY', items: _DEC }, subs: { type: 'ARRAY', items: _SUB } }), required: ['heading'] };
+const REPORT_SCHEMA = { type: 'OBJECT', properties: { eyebrow: { type: 'STRING', nullable: true }, title: _S, meta: { type: 'ARRAY', items: { type: 'OBJECT', properties: { label: _S, value: _S }, required: ['label', 'value'] } }, sections: { type: 'ARRAY', items: _SECTION }, footer: { type: 'STRING', nullable: true } }, required: ['title', 'sections'] };
+
+function _buildStructuredPrompt(captions) {
+  const lines = _toLines(captions);
+  if (state.transcribeMode) { const d = _detectLangLabel(_rawText(captions)); if (d) _detLang = d; }
+  const L = _outLang();
+  return `Bạn là trợ lý tổng hợp cuộc họp. Tạo BÁO CÁO cuộc họp dưới dạng JSON ĐÚNG theo schema được áp đặt, từ Transcript ở cuối.
+
+NGÔN NGỮ: viết MỌI chuỗi (title, eyebrow, heading, label, value, text, caption, columns, cells...) bằng ${L}.
+
+CÁCH MAP NỘI DUNG VÀO TRƯỜNG:
+- eyebrow: nhãn ngắn kiểu "Báo cáo tổng hợp cuộc họp" (bằng ${L}). title: tiêu đề báo cáo ngắn gọn.
+- meta: các thông tin tổng quan dạng {label,value} (thời gian, thành phần tham gia, mục đích...). Không rõ → value = "Chưa xác định".
+- sections: mỗi mục lớn 1 phần tử {heading, ...}. Mục có nhiều ý nhỏ → dùng "subs" (mỗi sub có title + nội dung). Mục về VẤN ĐỀ/KHÓ KHĂN/RỦI RO → đặt tone:"warn".
+- points: gạch đầu dòng (label = phần in đậm dẫn đầu nếu có; sub = ý con). cards: tập mục ngắn song song (công cụ, lựa chọn, mảng chuyên biệt). table: dữ liệu bảng/so sánh/lịch trình (rows là mảng {cells:[...]}). stat: MỘT con số/chỉ tiêu nổi bật (ngân sách, KPI). decisions: việc/quyết định kèm status ("done"=đã làm, "plan"=định hướng/đang làm, "todo"=việc cần làm), label = nhãn ngắn bằng ${L}.
+
+QUY TẮC THUẬT NGỮ: GIỮ NGUYÊN tiếng Anh/nguyên gốc thuật ngữ IT & tên riêng (bug, deploy, PR, API, sprint, release, CRM, ERP...). Từ KATAKANA tiếng Nhật → khôi phục về TIẾNG ANH gốc (デプロイ→deploy...), KHÔNG dịch sang ${L}.
+TRUNG THỰC: chỉ dùng nội dung CÓ trong transcript; KHÔNG bịa chủ đề/số liệu/người/deadline. Thiếu → "Chưa xác định" hoặc bỏ trường.
+${_transcribeNote()}${_extraBlock()}
+---
+TRANSCRIPT:
+${lines}`;
+}
+
+function _parseJson(t) {
+  if (!t) return null;
+  t = String(t).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  try { return JSON.parse(t); } catch (e) {}
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }
+  return null;
+}
+
+// Trả { ok, report } | { ok:false, error }. report = object theo REPORT_SCHEMA.
+async function summarizeFullStructured(captions) {
+  captions = captions || [];
+  if (!state.apiKey || !String(state.apiKey).trim()) return { ok: false, error: 'no-key' };
+  if (!captions.length) return { ok: false, error: 'empty' };
+  const ai = await _ai();
+  const chain = await _resolveChain(ai);
+  const prompt = _buildStructuredPrompt(captions);
+  let lastErr = 'structured-failed';
+  for (const entry of chain.filter(c => !c.gemma)) {   // chỉ flash-lite: JSON schema chuẩn
+    if (_onCooldown(entry.id)) continue;
+    try {
+      const config = { temperature: 0.3, maxOutputTokens: FULL_OUT_TOKENS, responseMimeType: 'application/json', responseSchema: REPORT_SCHEMA, thinkingConfig: { thinkingBudget: 0 } };
+      const res = await ai.models.generateContent({ model: entry.id, contents: prompt, config });
+      const text = (res && (typeof res.text === 'string' ? res.text : (res.text && res.text()))) || '';
+      const obj = _parseJson(text);
+      if (obj && Array.isArray(obj.sections) && obj.sections.length) return { ok: true, report: obj, model: entry.id };
+      lastErr = 'empty-or-invalid-json';
+    } catch (e) {
+      const msg = (e && e.message) || String(e); lastErr = msg;
+      if (_isQuota(msg)) _setCooldown(entry.id, msg);
+      console.warn(`[gemini-text] structured ${entry.id}: ${msg}`);
+    }
+  }
+  return { ok: false, error: lastErr };
+}
+
+module.exports = { summarize, summarizeFull, summarizeFullStructured };
