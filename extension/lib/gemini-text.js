@@ -13,17 +13,21 @@ const MAX_NEW_CAPTIONS = 250;           // gửi gần như TẤT CẢ câu mớ
 const ROLL_OUT_TOKENS = 2048;
 const FULL_OUT_TOKENS = 8192;
 
-// Schema báo cáo có cấu trúc (Gemini responseSchema) → client render HTML "y hệt".
+// Schema BÁO CÁO landing-page (Gemini responseSchema) → renderer cố định dựng HTML "y hệt".
+// 5 phần: hero (headline/sub/4 stats/meta) · problem (thách thức↔giải pháp) · bento (chủ đề) · actions (việc cần làm) · roadmap (lộ trình).
 const _S = { type: 'STRING' };
-const _PT = { type: 'OBJECT', properties: { label: { type: 'STRING', nullable: true }, text: _S, sub: { type: 'ARRAY', items: _S } }, required: ['text'] };
-const _CARD = { type: 'OBJECT', properties: { title: { type: 'STRING', nullable: true }, text: _S }, required: ['text'] };
-const _STAT = { type: 'OBJECT', nullable: true, properties: { value: _S, caption: { type: 'STRING', nullable: true } }, required: ['value'] };
-const _TABLE = { type: 'OBJECT', nullable: true, properties: { columns: { type: 'ARRAY', items: _S }, rows: { type: 'ARRAY', items: { type: 'OBJECT', properties: { cells: { type: 'ARRAY', items: _S } }, required: ['cells'] } } } };
-const _DEC = { type: 'OBJECT', properties: { label: _S, status: { type: 'STRING', enum: ['done', 'plan', 'todo'] }, text: _S }, required: ['label', 'text'] };
-const _BLOCKS = { intro: { type: 'STRING', nullable: true }, points: { type: 'ARRAY', items: _PT }, cards: { type: 'ARRAY', items: _CARD }, stat: _STAT, table: _TABLE };
-const _SUB = { type: 'OBJECT', properties: Object.assign({ title: _S, tone: { type: 'STRING', enum: ['default', 'warn'], nullable: true } }, _BLOCKS), required: ['title'] };
-const _SECTION = { type: 'OBJECT', properties: Object.assign({ heading: _S, tone: { type: 'STRING', enum: ['default', 'warn'], nullable: true } }, _BLOCKS, { decisions: { type: 'ARRAY', items: _DEC }, subs: { type: 'ARRAY', items: _SUB } }), required: ['heading'] };
-const REPORT_SCHEMA = { type: 'OBJECT', properties: { eyebrow: { type: 'STRING', nullable: true }, title: _S, meta: { type: 'ARRAY', items: { type: 'OBJECT', properties: { label: _S, value: _S }, required: ['label', 'value'] } }, sections: { type: 'ARRAY', items: _SECTION }, footer: { type: 'STRING', nullable: true } }, required: ['title', 'sections'] };
+const _SN = { type: 'STRING', nullable: true };
+const _STRS = { type: 'ARRAY', items: _S };
+const _STAT = { type: 'OBJECT', properties: { value: _S, label: _S }, required: ['value', 'label'], propertyOrdering: ['value', 'label'] };
+const _META = { type: 'OBJECT', properties: { label: _S, value: _S }, required: ['label', 'value'], propertyOrdering: ['label', 'value'] };
+const _HERO = { type: 'OBJECT', properties: { eyebrow: _SN, headline: _S, subhead: _S, stats: { type: 'ARRAY', items: _STAT }, meta: { type: 'ARRAY', items: _META } }, required: ['headline', 'subhead'], propertyOrdering: ['eyebrow', 'headline', 'subhead', 'stats', 'meta'] };
+const _SIDE = { type: 'OBJECT', properties: { title: _S, points: _STRS }, required: ['title', 'points'], propertyOrdering: ['title', 'points'] };
+const _PROBLEM = { type: 'OBJECT', nullable: true, properties: { challenge: _SIDE, solution: _SIDE }, propertyOrdering: ['challenge', 'solution'] };
+const _BENTO = { type: 'OBJECT', properties: { icon: _SN, title: _S, points: _STRS, conclusion: _SN }, required: ['title', 'points'], propertyOrdering: ['icon', 'title', 'points', 'conclusion'] };
+const _ACTION = { type: 'OBJECT', properties: { task: _S, owner: _SN, due: _SN, priority: { type: 'STRING', enum: ['high', 'mid', 'low'], nullable: true } }, required: ['task'], propertyOrdering: ['task', 'owner', 'due', 'priority'] };
+const _STEP = { type: 'OBJECT', properties: { time: _SN, title: _S, desc: _SN }, required: ['title'], propertyOrdering: ['time', 'title', 'desc'] };
+const _LABELS = { type: 'OBJECT', nullable: true, properties: { problem: _SN, bento: _SN, actions: _SN, roadmap: _SN }, propertyOrdering: ['problem', 'bento', 'actions', 'roadmap'] };
+const REPORT_SCHEMA = { type: 'OBJECT', properties: { hero: _HERO, labels: _LABELS, problem: _PROBLEM, bento: { type: 'ARRAY', items: _BENTO }, actions: { type: 'ARRAY', items: _ACTION }, roadmap: { type: 'ARRAY', items: _STEP }, footer: _SN }, required: ['hero'], propertyOrdering: ['hero', 'labels', 'problem', 'bento', 'actions', 'roadmap', 'footer'] };
 function _parseJson(t) {
   if (!t) return null;
   t = String(t).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -219,36 +223,52 @@ ${lines}`;
     // Tổng thể: ƯU TIÊN flash-lite (đo thật ~3s) thay vì gemma-31b (~33s); gemma giữ làm FALLBACK khi transcript quá to/đụng quota.
     return _runChain(ai, chain, _buildFullReportPrompt(captions), { withSys: false, maxOut: FULL_OUT_TOKENS });
   }
-  function _buildStructuredPrompt(captions) {
+  // Khối "dữ kiện đã biết" (ngày/thời lượng/người/số dòng) — chính xác từ app → hero.meta & stats không bịa.
+  function _factsBlock(facts) {
+    if (!facts) return '';
+    const f = [];
+    if (facts.date) f.push(`Ngày họp: ${facts.date}`);
+    if (facts.duration) f.push(`Thời lượng: ${facts.duration}`);
+    if (facts.participants && facts.participants.length) f.push(`Người tham gia (${facts.participants.length}): ${facts.participants.join(', ')}`);
+    if (facts.lineCount) f.push(`Số dòng transcript: ${facts.lineCount}`);
+    if (!f.length) return '';
+    return `\n\nDỮ KIỆN ĐÃ BIẾT (CHÍNH XÁC — ưu tiên dùng cho hero.meta & hero.stats; ĐỪNG mâu thuẫn với nó):\n- ${f.join('\n- ')}`;
+  }
+  function _buildReportPrompt(captions, facts) {
     const lines = _toLines(captions);
     if (S().transcribeMode) { const d = _detectLangLabel(_rawText(captions)); if (d) _detLang = d; }
     const L = _outLang();
-    return `Bạn là trợ lý tổng hợp cuộc họp. Tạo BÁO CÁO cuộc họp dưới dạng JSON ĐÚNG theo schema được áp đặt, từ Transcript ở cuối.
+    return `Bạn là chuyên gia thiết kế nội dung kiêm thư ký cuộc họp. Đọc TRANSCRIPT ở cuối và xuất BÁO CÁO cuộc họp dưới dạng JSON ĐÚNG theo schema được áp đặt — sẽ được render thành 1 trang landing-page.
 
-NGÔN NGỮ: viết MỌI chuỗi (title, eyebrow, heading, label, value, text, caption, columns, cells...) bằng ${L}.
+NGÔN NGỮ: viết MỌI chuỗi (headline, subhead, eyebrow, label, value, title, points, conclusion, task, owner, due, time, desc, footer...) bằng ${L}.
 
-CÁCH MAP NỘI DUNG VÀO TRƯỜNG:
-- eyebrow: nhãn ngắn kiểu "Báo cáo tổng hợp cuộc họp" (bằng ${L}). title: tiêu đề báo cáo ngắn gọn.
-- meta: thông tin tổng quan dạng {label,value} (thời gian, thành phần, mục đích...). Không rõ → "Chưa xác định".
-- sections: mỗi mục lớn 1 phần tử {heading, ...}. Mục có nhiều ý nhỏ → dùng "subs". Mục VẤN ĐỀ/KHÓ KHĂN/RỦI RO → tone:"warn".
-- points: gạch đầu dòng (label = phần in đậm dẫn đầu nếu có; sub = ý con). cards: tập mục ngắn song song (công cụ, lựa chọn, mảng chuyên biệt). table: dữ liệu bảng/so sánh/lịch trình (rows là mảng {cells:[...]}). stat: MỘT con số nổi bật (ngân sách, KPI). decisions: việc/quyết định kèm status ("done"=đã làm, "plan"=định hướng/đang làm, "todo"=việc cần làm).
+CÁCH ĐIỀN 5 PHẦN:
+- hero.eyebrow: nhãn ngắn IN HOA kiểu "BÁO CÁO CUỘC HỌP". hero.headline: MỘT câu khẩu hiệu cô đọng kết quả/mục đích lớn nhất — bọc cụm từ THEN CHỐT trong **...** để được tô màu nhấn. hero.subhead: 2-3 câu bối cảnh/lý do.
+- hero.stats: ĐÚNG 4 thẻ số liệu quan trọng nhất {value, label} — value là CON SỐ/đại lượng NGẮN (vd "3", "85%", "2 tuần", "45 phút"), label là nhãn ngắn. Thiếu số liệu thật thì dùng chỉ số ĐẾM ĐƯỢC (số chủ đề, số việc cần làm, số người, thời lượng). KHÔNG bịa số.
+- hero.meta: 3-4 mục {label, value} tổng quan (Ngày, Thời lượng, Số người, Định dạng). Dùng "DỮ KIỆN ĐÃ BIẾT" nếu có; không rõ → "Chưa xác định".
+- labels: nhãn eyebrow IN HOA (bằng ${L}) cho 4 mục — problem≈"VẤN ĐỀ CỐT LÕI", bento≈"CHỦ ĐỀ CHÍNH", actions≈"VIỆC CẦN LÀM", roadmap≈"LỘ TRÌNH".
+- problem: {challenge:{title,points[]}, solution:{title,points[]}} = Thách thức hiện tại ↔ Giải pháp đề xuất; mỗi bên 2-4 gạch đầu dòng. KHÔNG có nội dung tương phản rõ → để null.
+- bento: 3-4 khối CHỦ ĐỀ chính {icon (đúng 1 emoji), title, points (2-3), conclusion}. conclusion = một câu "Đồng thuận/Kết luận" của khối (bỏ trống nếu chưa chốt).
+- actions: việc cần làm {task, owner, due, priority ("high"|"mid"|"low")}. owner/due CHỈ điền khi transcript NÓI RÕ, không thì để null. Việc dang dở/chưa kết luận → vẫn đưa vào với priority "high".
+- roadmap: các bước tiếp theo {time, title, desc} theo trình tự thời gian. Không có lộ trình rõ → mảng rỗng.
+- footer: một dòng disclaimer ngắn (bản tóm tắt tự động từ transcript, kèm ngày nếu biết).
 
-QUY TẮC THUẬT NGỮ: GIỮ NGUYÊN tiếng Anh/nguyên gốc thuật ngữ IT & tên riêng (bug, deploy, PR, API, sprint, release, CRM, ERP...). KATAKANA tiếng Nhật → khôi phục TIẾNG ANH gốc (デプロイ→deploy...), KHÔNG dịch sang ${L}.
-TRUNG THỰC: chỉ dùng nội dung CÓ trong transcript; KHÔNG bịa. Thiếu → "Chưa xác định" hoặc bỏ trường.
-${_transcribeNote()}${_extraBlock()}
+TRUNG THỰC: chỉ thêm phần/khối CÓ nội dung THẬT; phần rỗng → mảng rỗng hoặc null. TUYỆT ĐỐI KHÔNG BỊA chủ đề/quyết định/người/deadline/số liệu không có trong transcript. Transcript quá ngắn → chỉ điền hero (headline+subhead mô tả thực tế) + để các mảng rỗng.
+THUẬT NGỮ: GIỮ NGUYÊN tiếng Anh/nguyên gốc thuật ngữ IT & tên riêng (bug, deploy, PR, API, sprint, release, CRM, ERP...). KATAKANA tiếng Nhật → khôi phục TIẾNG ANH gốc (デプロイ→deploy...), KHÔNG dịch sang ${L}.
+${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}
 ---
 TRANSCRIPT:
 ${lines}`;
   }
 
-  // Trả { ok, report } | { ok:false, error }. Chỉ flash-lite (JSON schema chuẩn); lỗi → caller fallback summarizeFull.
-  async function summarizeFullStructured(captions) {
+  // Trả { ok, report } | { ok:false, error }. Chỉ flash-lite (JSON schema chuẩn); dùng cho CẢ rolling lẫn tổng thể.
+  async function summarizeReport(captions, facts) {
     captions = captions || [];
     if (!S().apiKey || !String(S().apiKey).trim()) return { ok: false, error: 'no-key' };
     if (!captions.length) return { ok: false, error: 'empty' };
     const ai = _ai();
     const chain = await _resolveChain(ai);
-    const prompt = _buildStructuredPrompt(captions);
+    const prompt = _buildReportPrompt(captions, facts);
     let lastErr = 'structured-failed';
     for (const entry of chain.filter(c => !c.gemma)) {
       if (_onCooldown(entry.id)) continue;
@@ -257,15 +277,15 @@ ${lines}`;
         const res = await ai.models.generateContent({ model: entry.id, contents: prompt, config });
         const text = (res && (typeof res.text === 'string' ? res.text : (res.text && res.text()))) || '';
         const obj = _parseJson(text);
-        if (obj && Array.isArray(obj.sections) && obj.sections.length) return { ok: true, report: obj, model: entry.id };
+        if (obj && obj.hero && obj.hero.headline) return { ok: true, report: obj, model: entry.id };
         lastErr = 'empty-or-invalid-json';
       } catch (e) {
         const msg = (e && e.message) || String(e); lastErr = msg;
         if (_isQuota(msg)) _setCooldown(entry.id, msg);
-        console.warn(`[summary] structured ${entry.id}: ${msg}`);
+        console.warn(`[summary] report ${entry.id}: ${msg}`);
       }
     }
     return { ok: false, error: lastErr };
   }
-  return { summarize, summarizeFull, summarizeFullStructured };
+  return { summarize, summarizeFull, summarizeReport };
 }

@@ -1,5 +1,5 @@
 // history.js (browser ESM) — lưu lịch sử phiên transcribe vào IndexedDB (bền vững trong máy, không cần quyền đặc biệt).
-// Mỗi phiên: { id, startedAt, endedAt, langCode, transcribe, count, caps:[{o,t,ts}], summaryMd, fullMd }
+// Mỗi phiên: { id, startedAt, endedAt, langCode, transcribe, count, caps:[{o,t,ts}], summaryMd, report } (fullMd: phiên cũ)
 const DB = 'captrans-history', STORE = 'sessions', VER = 1;
 
 function _open() {
@@ -19,7 +19,7 @@ async function hList() {   // trả MẢNG metadata (không kèm caps nặng) s�
   return new Promise((res, rej) => {
     const out = []; const tx = db.transaction(STORE, 'readonly');
     const cur = tx.objectStore(STORE).openCursor();
-    cur.onsuccess = (e) => { const c = e.target.result; if (c) { const v = c.value; out.push({ id: v.id, startedAt: v.startedAt, endedAt: v.endedAt, langCode: v.langCode, transcribe: v.transcribe, count: v.count, hasSummary: !!(v.summaryMd || v.fullMd) }); c.continue(); } else res(out.sort((a, b) => b.startedAt - a.startedAt)); };
+    cur.onsuccess = (e) => { const c = e.target.result; if (c) { const v = c.value; out.push({ id: v.id, startedAt: v.startedAt, endedAt: v.endedAt, langCode: v.langCode, transcribe: v.transcribe, count: v.count, hasSummary: !!(v.summaryMd || v.fullMd || v.report) }); c.continue(); } else res(out.sort((a, b) => b.startedAt - a.startedAt)); };
     cur.onerror = () => rej(cur.error);
   });
 }
