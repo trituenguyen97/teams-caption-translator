@@ -23,6 +23,7 @@ const el = {
   apikey: $('apikey'), keyStatus: $('key-status'), source: $('source'),
   targetBtn: $('target-btn'), targetMenu: $('target-menu'),
   voiceBtn: $('voice-btn'), voiceMenu: $('voice-menu'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
+  levelMeter: $('level-meter'), lmCover: $('lm-cover'), lmTxt: $('lm-txt'),
   autoscroll: $('autoscroll'), layoutPick: $('layout-pick'), zoom: $('zoom'), zoomVal: $('zoom-val'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
   summaryWrap: $('summary-wrap'), summary: $('summary'), sumSpin: $('sum-spin'), sumOverlay: $('sum-overlay'),
   sumEdit: $('sum-edit'), sumEditBox: $('sum-edit-box'), summaryExtra: $('summary-extra'), sumExtraSave: $('sum-extra-save'),
@@ -199,6 +200,8 @@ function playAudio({ b64, sampleRate }) {
 
 // ── Audio capture (mic / màn hình-tab-cửa sổ) → PCM f32 @16k ──────────────────────
 let recActive = false, audioCtx = null, srcNode = null, procNode = null, zeroGain = null, rawStream = null, watchdog = null, lastTs = 0;
+// Level meter (chẩn đoán câm/có tiếng): _meterPeak = đỉnh khung hiện tại; _meterLastSig = lần cuối có tín hiệu thật; _meterDisp = mức hiển thị đã làm mượt.
+let _meterPeak = 0, _meterLastSig = 0, _meterDisp = 0, _meterRAF = 0;
 const MIC_GATE_RMS = 0.004, MIC_GATE_HANG_MS = 700;   // cổng VAD-lite cho mic: bỏ khung im lặng để model khỏi dịch tạp âm / lặp lại
 let micVoiceUntil = 0;
 async function startCapture() {
@@ -258,14 +261,18 @@ async function startCapture() {
     if (!recActive) return;
     lastTs = Date.now();
     const ch = e.inputBuffer.getChannelData(0);
+    // Đo mức tín hiệu (peak + rms) MỘT lần — dùng cho CẢ cổng im lặng (mic) LẪN level meter chẩn đoán câm/có tiếng.
+    let peak = 0, sum = 0;
+    for (let i = 0; i < ch.length; i++) { const v = ch[i], a = v < 0 ? -v : v; if (a > peak) peak = a; sum += v * v; }
+    _meterPeak = peak; if (peak > 0.0015) _meterLastSig = lastTs;   // có mẫu khác 0 đáng kể → mốc "lần cuối nghe thấy tiếng"
     if (S.source === 'mic') {                 // CỔNG IM LẶNG: chỉ gửi khi có tiếng (+ giữ 700ms sau câu) → giảm dịch lặp/sai
-      let sum = 0; for (let i = 0; i < ch.length; i++) sum += ch[i] * ch[i];
       if (Math.sqrt(sum / ch.length) >= MIC_GATE_RMS) micVoiceUntil = lastTs + MIC_GATE_HANG_MS;
       if (lastTs > micVoiceUntil) return;     // im lặng kéo dài → KHÔNG gửi khung này
     }
     live.pushAudio(new Float32Array(ch));
   };
   srcNode.connect(procNode); procNode.connect(zeroGain); zeroGain.connect(audioCtx.destination);
+  meterStart();   // bật thanh báo mức âm đang thu được (chẩn đoán câm/có tiếng)
   lastTs = Date.now(); clearInterval(watchdog);
   watchdog = setInterval(() => { if (recActive && audioCtx && Date.now() - lastTs > 3000) audioCtx.resume().catch(() => {}); }, 2000);
   tracks[0].addEventListener('ended', () => { if (recActive) stop(); });   // user tự tắt chia sẻ → dừng
@@ -279,6 +286,7 @@ async function startCapture() {
 }
 function stopCapture() {
   recActive = false; clearInterval(watchdog); watchdog = null;
+  meterStop();
   try { if (procNode) { procNode.onaudioprocess = null; procNode.disconnect(); } } catch (e) {}
   try { if (srcNode) srcNode.disconnect(); } catch (e) {}
   try { if (zeroGain) zeroGain.disconnect(); } catch (e) {}
@@ -286,6 +294,34 @@ function stopCapture() {
   procNode = srcNode = zeroGain = audioCtx = null;
   rawStream?.getTracks().forEach(t => t.stop()); rawStream = null;
   try { if ('mediaSession' in navigator) { navigator.mediaSession.setActionHandler('enterpictureinpicture', null); navigator.mediaSession.playbackState = 'none'; } } catch (_) {}
+}
+
+// ── Level meter: hiện realtime mức âm ĐANG THU được → nhìn phát biết câm hay có tiếng (KHÔNG đụng luồng dịch) ──
+function meterStart() {
+  if (!el.levelMeter) return;
+  el.levelMeter.classList.remove('hidden', 'silent');
+  _meterDisp = 0; _meterLastSig = Date.now();   // chừa ~2.5s đầu (đang khởi động) trước khi cảnh báo "câm"
+  cancelAnimationFrame(_meterRAF);
+  const tick = () => {
+    if (!recActive) return;
+    // map peak → dB → 0..1 (dải -60dB..0dB cho mắt dễ nhìn); attack nhanh, release chậm để theo kịp
+    const db = _meterPeak > 0.0001 ? 20 * Math.log10(_meterPeak) : -100;
+    const target = Math.max(0, Math.min(1, (db + 60) / 60));
+    _meterDisp = target > _meterDisp ? target : _meterDisp + (target - _meterDisp) * 0.2;
+    if (el.lmCover) el.lmCover.style.left = (_meterDisp * 100).toFixed(1) + '%';
+    const silent = Date.now() - _meterLastSig > 2500;   // có track nhưng >2.5s không mẫu nào khác 0 = câm
+    el.levelMeter.classList.toggle('silent', silent);
+    if (el.lmTxt) el.lmTxt.textContent = t(silent ? 'meter.silent' : 'meter.live');
+    _meterRAF = requestAnimationFrame(tick);
+  };
+  _meterRAF = requestAnimationFrame(tick);
+}
+function meterStop() {
+  cancelAnimationFrame(_meterRAF); _meterRAF = 0;
+  _meterPeak = 0; _meterDisp = 0;
+  if (el.lmCover) el.lmCover.style.left = '0%';
+  if (el.levelMeter) el.levelMeter.classList.add('hidden');
+  if (el.levelMeter) el.levelMeter.classList.remove('silent');
 }
 
 // ── Start / Stop ──────────────────────────────────────────────────────────────────

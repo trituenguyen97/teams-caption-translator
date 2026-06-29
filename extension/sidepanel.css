@@ -44,6 +44,16 @@ button.primary:disabled { opacity: .5; cursor: default; }
 .status.err { color: var(--err); }
 .status.run { color: var(--ok); }
 
+/* Level meter: thanh hiện mức âm ĐANG THU được → nhìn phát biết câm hay có tiếng */
+.level-meter { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+.lm-ico { font-size: 12px; line-height: 1; opacity: .85; }
+.lm-bar { flex: 1; height: 8px; border-radius: 5px; position: relative; overflow: hidden;
+  background: linear-gradient(90deg, var(--ok) 0%, var(--ok) 55%, #e8d24a 78%, var(--err) 100%); }
+.lm-cover { position: absolute; top: 0; right: 0; bottom: 0; left: 0%; background: var(--bg3); transition: left .05s linear; }
+.lm-txt { white-space: nowrap; }
+.level-meter.silent .lm-txt { color: var(--err); font-weight: 600; }
+.level-meter.silent .lm-bar { box-shadow: 0 0 0 1px var(--err) inset; }
+
 .list { flex: 1; overflow-y: auto; padding: 8px 10px; min-height: 120px; }
 .entry { padding: 6px 0; border-bottom: 1px solid #2a2b2d55; }
 .entry-head { display: flex; gap: 8px; font-size: 11px; color: var(--muted); }

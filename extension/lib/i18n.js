@@ -44,6 +44,7 @@ export const I18N = {
     'status.noContent': 'Chưa có nội dung.', 'status.summaryErr': 'Tóm tắt: {err}',
     'status.stopFirst': 'Dừng ghi trước khi tạo báo cáo tổng thể.', 'status.popoutErr': 'Không mở được cửa sổ riêng: {err}', 'pip.title': 'Ghim cửa sổ nổi (PiP — luôn trên cùng)', 'pip.active': 'Đang hiển thị ở cửa sổ ghim (PiP). Đóng PiP để đưa nội dung về đây.', 'status.pipUnsupported': 'Trình duyệt không hỗ trợ Document Picture-in-Picture.', 'status.pipErr': 'Lỗi mở PiP: {err}', 'pip.return': 'Quay về cửa sổ gốc', 'status.micPermNeeded': 'Đang xin quyền micro ở cửa sổ vừa mở — chọn "Cho phép" rồi bấm Bắt đầu lại.', 'status.micGranted': '✅ Đã cấp quyền micro.', 'status.micPermHint': '🎤 Micro chưa được cấp quyền — bấm Bắt đầu để cấp.',
     'status.summaryApplied': 'Đã áp dụng yêu cầu & tóm tắt lại.', 'status.noKeyShort': 'Thiếu API key.', 'status.geminiErr': 'Gemini: {err}',
+    'meter.title': 'Mức âm thanh đang thu được (chẩn đoán câm/có tiếng)', 'meter.live': 'Đang thu được tiếng', 'meter.silent': '⚠ Không thu được tiếng — kiểm tra nguồn / định tuyến',
   },
   en: {
     settings: 'Settings', 'settings.apiKey': 'Gemini API key', 'settings.source': 'Audio source',
@@ -70,6 +71,7 @@ export const I18N = {
     'status.noContent': 'No content yet.', 'status.summaryErr': 'Summary: {err}',
     'status.stopFirst': 'Stop recording before generating the full report.', 'status.popoutErr': 'Could not open separate window: {err}', 'pip.title': 'Pin floating window (PiP — always on top)', 'pip.active': 'Now shown in the pinned (PiP) window. Close PiP to bring it back here.', 'status.pipUnsupported': 'Browser does not support Document Picture-in-Picture.', 'status.pipErr': 'PiP error: {err}', 'pip.return': 'Return to original window', 'status.micPermNeeded': 'Requesting mic permission in the opened window — choose "Allow", then press Start again.', 'status.micGranted': '✅ Microphone permission granted.', 'status.micPermHint': '🎤 Microphone not granted yet — press Start to grant.',
     'status.summaryApplied': 'Instructions applied & re-summarized.', 'status.noKeyShort': 'Missing API key.', 'status.geminiErr': 'Gemini: {err}',
+    'meter.title': 'Captured input level (silent / live diagnostic)', 'meter.live': 'Receiving audio', 'meter.silent': '⚠ No audio captured — check source / routing',
   },
   ja: {
     settings: '設定', 'settings.apiKey': 'Gemini API キー', 'settings.source': '音声ソース',
@@ -96,6 +98,7 @@ export const I18N = {
     'status.noContent': '内容がまだありません。', 'status.summaryErr': '要約: {err}',
     'status.stopFirst': '全体レポートを作成する前に停止してください。', 'status.popoutErr': '別ウィンドウを開けません: {err}', 'pip.title': 'フローティング固定（PiP・常に最前面）', 'pip.active': '固定（PiP）ウィンドウに表示中。PiP を閉じるとここに戻ります。', 'status.pipUnsupported': 'このブラウザは Document Picture-in-Picture に対応していません。', 'status.pipErr': 'PiP エラー: {err}', 'pip.return': '元のウィンドウに戻す', 'status.micPermNeeded': '開いたウィンドウでマイク権限をリクエスト中 — 「許可」を選んでから「開始」を押し直してください。', 'status.micGranted': '✅ マイク権限を許可しました。', 'status.micPermHint': '🎤 マイク未許可 —「開始」で許可してください。',
     'status.summaryApplied': '指示を適用して再要約しました。', 'status.noKeyShort': 'API キーがありません。', 'status.geminiErr': 'Gemini: {err}',
+    'meter.title': '取得中の入力レベル（無音/受信の診断）', 'meter.live': '音声を受信中', 'meter.silent': '⚠ 音声が取得できません — ソース/ルーティングを確認',
   },
 };
 
