@@ -17,6 +17,10 @@ const state = require('./state');
 const { handlePcm, flushStreaming } = require('./audio-stt');
 
 let _loop = null;
+let _onStatus = null;   // callback báo trạng thái lên UI (ipc-handlers gắn) — vd cảnh báo "thu được nhưng không có audio"
+function setStatusHandler(fn) { _onStatus = fn; }
+let _onLevel = null, _lvlLast = 0;   // callback đẩy mức âm (peak) lên UI → level meter cho đường per-app
+function setLevelHandler(fn) { _onLevel = fn; }
 function lib() {
   if (_loop) return _loop;
   const l = require('application-loopback');
@@ -132,7 +136,9 @@ function _resample(buf) {
 // ── Thu ──────────────────────────────────────────────────────────────────────────────────────────────
 let _activePid = null;
 let _idleTimer = null;
+let _frames = 0, _noAudioTimer = null;   // chẩn đoán: đếm frame audio THẬT đã nhận; cảnh báo nếu thu khởi động mà 0 frame
 const IDLE_MS = 900;   // không có PCM (im lặng, gate drop) > 0.9s → chốt nốt câu đang dở (≈ ngưỡng no-grow 1s của Nemotron)
+const NO_AUDIO_MS = 7000;   // thu chạy >7s mà CHƯA có mẫu nào → app render audio ở nơi khác (Teams: lỗi process-loopback Windows đã biết)
 
 function _armIdle() {
   clearTimeout(_idleTimer);
@@ -143,21 +149,32 @@ function start(pid) {
   if (_activePid) stop();
   _reset();
   _activePid = String(pid);
+  _frames = 0;
   try {
     lib().startAudioCapture(_activePid, {
       onData: (buf) => {
         if (state.audioPaused || !_activePid) return;
         const f32 = _resample(buf);
-        if (f32.length) { handlePcm(f32); _armIdle(); }
+        if (f32.length) {
+          if (_frames === 0) { clearTimeout(_noAudioTimer); _noAudioTimer = null; }   // có audio THẬT → huỷ cảnh báo "không có audio"
+          _frames++;
+          if (_onLevel) { let pk = 0; for (let i = 0; i < f32.length; i++) { const a = f32[i] < 0 ? -f32[i] : f32[i]; if (a > pk) pk = a; } const now = Date.now(); if (now - _lvlLast >= 120) { _lvlLast = now; try { _onLevel(pk); } catch {} } }   // đẩy peak lên level meter (throttle ~120ms)
+          handlePcm(f32); _armIdle();
+        }
       },
     });
     console.log('[process-audio] bắt đầu thu PID', _activePid);
+    clearTimeout(_noAudioTimer);
+    _noAudioTimer = setTimeout(() => {   // thu đã khởi động nhưng KHÔNG mẫu nào → cảnh báo (Teams chặn thu theo tiến trình)
+      if (_activePid && _frames === 0) { console.warn('[process-audio] PID', _activePid, '— thu chạy nhưng 0 mẫu audio sau', NO_AUDIO_MS, 'ms (app có thể render audio ngoài cây tiến trình, vd Microsoft Teams)'); if (_onStatus) { try { _onStatus({ type: 'warn', key: 'status.noAppAudio' }); } catch {} } }
+    }, NO_AUDIO_MS);
     return true;
   } catch (e) { console.warn('[process-audio] start lỗi:', e.message); _activePid = null; return false; }
 }
 
 function stop() {
   clearTimeout(_idleTimer); _idleTimer = null;
+  clearTimeout(_noAudioTimer); _noAudioTimer = null;
   if (_activePid) { try { lib().stopAudioCapture(_activePid); } catch {} ; console.log('[process-audio] dừng thu PID', _activePid); _activePid = null; }
   _reset();
 }
@@ -165,4 +182,4 @@ function stop() {
 function isActive() { return !!_activePid; }
 function activePid() { return _activePid; }
 
-module.exports = { isSupported, listApps, resolveRootPid, start, stop, isActive, activePid };
+module.exports = { isSupported, listApps, resolveRootPid, start, stop, isActive, activePid, setStatusHandler, setLevelHandler };

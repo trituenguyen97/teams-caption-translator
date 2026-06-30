@@ -14,6 +14,8 @@ const processAudio = require('./process-audio');
 const send = (ch, data) => state.win?.webContents?.send(ch, data);
 
 function registerAll(app) {
+  try { processAudio.setStatusHandler((s) => send('status', s)); } catch {}   // cảnh báo "thu được nhưng không có audio" → lên status bar
+  try { processAudio.setLevelHandler((peak) => send('audio-level', { peak })); } catch {}   // mức âm per-app → level meter renderer
   // ── Ngôn ngữ ĐÍCH (live-translate tự nhận nguồn) ──
   ipcMain.on('set-lang', (_, lang) => {
     state.targetLang = LANG_NAMES[lang] || lang;
@@ -42,6 +44,7 @@ function registerAll(app) {
     if (appName && state.captureSource === 'system' && processAudio.isSupported()) {
       processAudio.resolveRootPid(appName).then(pid => {
         if (state.audioPaused) return;   // đã ⏹ trong lúc resolve
+        console.log('[ipc] thu app', JSON.stringify(appName), '→ root PID', pid || '(không tìm thấy)');
         if (!(pid && processAudio.start(pid))) send('start-audio-capture', { source: state.captureSource });
       }).catch(() => { if (!state.audioPaused) send('start-audio-capture', { source: state.captureSource }); });
     } else {
@@ -104,6 +107,9 @@ function registerAll(app) {
     audioProcessName:  Store.get('audioProcessName',  ''),
     audioProcessApp:   Store.get('audioProcessApp',   ''),
     layout:            Store.get('layout',            'translation'),
+    summaryView:       Store.get('summaryView',       'html'),
+    systemWithMic:     Store.get('systemWithMic',     false),
+    saveHistory:       Store.get('saveHistory',       true),
   }));
 
   ipcMain.on('save-settings', (_, s) => {
@@ -133,6 +139,9 @@ function registerAll(app) {
     if (s.geminiAudioOn !== undefined) { Store.set('geminiAudioOn', !!s.geminiAudioOn); state.geminiAudioOn = !!s.geminiAudioOn; try { geminiLive.setAudioOn(!!s.geminiAudioOn); } catch {} }
     if (s.summaryExtra !== undefined) { const v = String(s.summaryExtra || ''); Store.set('summaryExtra', v); state.summaryExtra = v; }   // yêu cầu tóm tắt riêng → áp ngay vòng tóm tắt kế (không cần nối lại phiên)
     if (s.layout !== undefined) { Store.set('layout', s.layout); }   // giao diện hiển thị gốc/dịch (renderer-only)
+    if (s.summaryView !== undefined) { Store.set('summaryView', (s.summaryView === 'md') ? 'md' : 'html'); }   // hiển thị rolling HTML/MD (renderer-only)
+    if (s.systemWithMic !== undefined) { Store.set('systemWithMic', !!s.systemWithMic); }   // Audio hệ thống kèm mic (renderer-only, áp 'Toàn hệ thống')
+    if (s.saveHistory !== undefined) { Store.set('saveHistory', !!s.saveHistory); }   // tự lưu lịch sử phiên (renderer-only, IndexedDB)
     if (s.geminiVoice   !== undefined) { Store.set('geminiVoice', s.geminiVoice); state.geminiVoice = s.geminiVoice; try { geminiLive.onTargetLangChanged(); } catch {} }   // đổi giọng → nối lại phiên áp giọng mới
     send('settings-saved', { ok: true });
   });

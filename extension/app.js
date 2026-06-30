@@ -10,6 +10,7 @@ import { hSave, hList, hGet, hDel, hAll, hImport } from './lib/history.js';
 const DEFAULTS = {
   apiKey: '', langCode: 'vi', geminiVoice: DEFAULT_VOICE,
   geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi', layout: 'translation', zoom: 100, saveHistory: true,
+  summaryView: 'html',   // hiển thị rolling: 'html' (landing-page iframe) | 'md' (markdown)
 };
 const S = { ...DEFAULTS };
 async function loadSettings() { const got = await chrome.storage.local.get(DEFAULTS); Object.assign(S, got); }
@@ -27,7 +28,7 @@ const el = {
   autoscroll: $('autoscroll'), layoutPick: $('layout-pick'), zoom: $('zoom'), zoomVal: $('zoom-val'), summaryToggle: $('summary-toggle'), export: $('export'), clear: $('clear'),
   summaryWrap: $('summary-wrap'), summary: $('summary'), sumSpin: $('sum-spin'), sumOverlay: $('sum-overlay'),
   sumEdit: $('sum-edit'), sumEditBox: $('sum-edit-box'), summaryExtra: $('summary-extra'), sumExtraSave: $('sum-extra-save'),
-  sumFull: $('sum-full'), sumDlHtml: $('sum-dlhtml'), sumExport: $('sum-export'),
+  sumView: $('sum-view'), sumFull: $('sum-full'), sumDlHtml: $('sum-dlhtml'), sumExport: $('sum-export'),
   vResizer: $('v-resizer'), dl: $('dl'),
   saveHistory: $('save-history'), historyBtn: $('history-btn'), history: $('history'), histList: $('hist-list'), histView: $('hist-view'), histClose: $('hist-close'), histBack: $('hist-back'),
   histExport: $('hist-export'), histImport: $('hist-import'), histImportFile: $('hist-import-file'),
@@ -576,7 +577,8 @@ function openSummary() {
 }
 function closeSummary() { sumPanelOpen = false; el.summaryWrap.classList.add('hidden'); el.vResizer.classList.add('hidden'); el.summaryToggle.classList.remove('active'); el.sumEditBox.classList.add('hidden'); refreshSpin(); clearInterval(sumTimer); sumTimer = null; }
 function renderSummary() {
-  if (fullReport) {   // landing-page "y hệt" trong iframe cô lập (style không lẫn với panel; checkbox bấm được)
+  const showHtml = !!fullReport && S.summaryView !== 'md';   // có báo cáo cấu trúc + chọn HTML → iframe; ngược lại → markdown
+  if (showHtml) {   // landing-page "y hệt" trong iframe cô lập (style không lẫn với panel; checkbox bấm được)
     el.summary.classList.add('has-report'); el.summary.innerHTML = '';
     const f = document.createElement('iframe');
     f.className = 'report-frame'; f.setAttribute('sandbox', 'allow-same-origin');   // không allow-scripts → script reveal tắt, nhưng nội dung vẫn hiện đủ
@@ -586,6 +588,15 @@ function renderSummary() {
     el.summary.classList.remove('has-report');
     el.summary.innerHTML = summaryMd ? md2html(summaryMd) : `<em class="muted">${t('summary.empty')}</em>`;
   }
+  _updateViewBtn();
+}
+// Nút HTML↔MD: chỉ bật khi CÓ báo cáo cấu trúc (mới có 2 dạng để đổi); markdown-fallback thuần → ẩn.
+function _updateViewBtn() {
+  if (!el.sumView) return;
+  el.sumView.hidden = !fullReport;
+  const showHtml = !!fullReport && S.summaryView !== 'md';
+  el.sumView.textContent = showHtml ? 'HTML' : 'MD';
+  el.sumView.classList.toggle('active', showHtml);
 }
 // #5: render báo cáo tổng thể thành HTML "đẹp" (card mục + bảng) — tự sinh từ markdown, an toàn.
 const REPORT_CSS = 'body{margin:0;background:#eef1f4;color:#19283a;font:16px/1.65 system-ui,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding:28px 16px}.report{max-width:840px;margin:0 auto;background:#fff;border:1px solid #e0e5eb;border-radius:10px;box-shadow:0 1px 2px rgba(25,40,58,.04),0 18px 44px -30px rgba(25,40,58,.3);padding:clamp(22px,4vw,46px)}.report>*:first-child{margin-top:0}.report h1{font-family:"Cambria","Georgia",serif;font-size:clamp(24px,4vw,33px);font-weight:700;line-height:1.2;letter-spacing:-.01em;margin:0 0 18px;padding-bottom:14px;border-bottom:3px solid #1b5e7e;color:#19283a}.report h2{font-family:"Cambria","Georgia",serif;font-size:clamp(19px,2.6vw,23px);font-weight:700;color:#154b64;margin:30px 0 12px;padding-left:14px;border-left:4px solid #1b5e7e;line-height:1.25}.report h3{font-size:15.5px;font-weight:700;color:#1b5e7e;margin:20px 0 8px}.report h4{font-size:14px;font-weight:700;color:#33414f;margin:16px 0 6px}.report p{margin:0 0 12px}.report ul,.report ol{margin:8px 0 14px;padding-left:24px}.report li{margin:5px 0;padding-left:3px}.report li::marker{color:#1b5e7e}.report strong{color:#16303f;font-weight:600}.report em{color:#5c6b7e}.report code{background:#eef1f5;color:#154b64;padding:1px 6px;border-radius:4px;font-size:.9em;font-family:Consolas,"Cascadia Code",monospace}.report blockquote{margin:12px 0;padding:8px 16px;border-left:3px solid #b5651d;background:#f7efe4;color:#6a5640;border-radius:0 6px 6px 0;font-style:italic}.report hr{border:0;border-top:1px solid #e0e5eb;margin:24px 0}.report .tbl-wrap{overflow-x:auto;border:1px solid #e0e5eb;border-radius:8px;margin:14px 0}.report table{border-collapse:collapse;width:100%;min-width:520px;font-size:14px;font-variant-numeric:tabular-nums}.report th{background:#1b5e7e;color:#fff;text-align:left;font-weight:600;font-size:12.5px;letter-spacing:.03em;padding:11px 14px;white-space:nowrap}.report td{padding:11px 14px;border-top:1px solid #e6eaef;vertical-align:top;color:#33414f;line-height:1.5}.report tbody tr:nth-child(even) td{background:#fafbfc}.report td:first-child{font-weight:600;color:#19283a}@media print{body{background:#fff;padding:0}.report{border:0;border-radius:0;box-shadow:none;max-width:none}.report h2,.report .tbl-wrap{break-inside:avoid}}';
@@ -1037,6 +1048,7 @@ function wire() {
   el.autoscroll.addEventListener('click', () => { autoScroll = !autoScroll; el.autoscroll.classList.toggle('active', autoScroll); if (autoScroll) el.list.scrollTop = el.list.scrollHeight; });
   el.list.addEventListener('scroll', () => { const near = el.list.scrollHeight - el.list.scrollTop - el.list.clientHeight < 40; autoScroll = near; el.autoscroll.classList.toggle('active', near); });
   el.summaryToggle.addEventListener('click', () => sumPanelOpen ? closeSummary() : openSummary());
+  el.sumView.addEventListener('click', () => { save({ summaryView: S.summaryView === 'md' ? 'html' : 'md' }); renderSummary(); });
   el.sumDlHtml.addEventListener('click', () => {
     const stamp = new Date().toISOString().slice(0, 10);
     if (fullReport) { download(`bao-cao-${stamp}.html`, buildFancyDoc(fullReport), 'text/html'); return; }   // landing-page "y hệt"

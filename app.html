@@ -1163,6 +1163,7 @@
     .app-txt { flex:1; min-width:0; display:flex; flex-direction:column; line-height:1.25; }
     .app-nm { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .app-sub { color:var(--m3-on-4); font-weight:500; font-size:9.5px; white-space:normal; }
+    .app-loading { display:flex; align-items:center; gap:8px; padding:9px 8px; color:var(--m3-on-3); font-size:11.5px; font-weight:500; }
     .app-btn.active .app-sub { color:var(--m3-accent-on); opacity:.85; }
     /* Ghi chú nhỏ dưới ô chọn Nguồn (khuyến nghị theo mode) */
     .app-menu .menu-row > span.menu-note { font-size:10.5px; font-weight:500; color:var(--m3-on-4); letter-spacing:0; line-height:1.5; }
@@ -1267,6 +1268,45 @@
     </div>
   </div>
 
+  <!-- Lịch sử phiên (overlay) -->
+  <style>
+    #history-overlay .modal { width:72vw; max-width:1000px; min-width:480px; height:80vh; max-height:calc(100vh - 24px); display:flex; flex-direction:column; }
+    .hist-bar { display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-shrink:0; }
+    .hist-bar h3 { flex:1; margin:0; font-size:16px; font-weight:500; }
+    .hist-bar button { padding:4px 10px; font-size:12px; }
+    .hist-list { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; }
+    .hist-view { flex:1; min-height:0; overflow-y:auto; }
+    .hist-empty { color:var(--m3-on-3); text-align:center; padding:40px 8px; font-size:13px; }
+    .hist-item { display:flex; align-items:center; gap:8px; background:var(--m3-surf-1); border:1px solid var(--m3-line); border-radius:10px; padding:10px 12px; transition:border-color var(--m3-t); }
+    .hist-item:hover { border-color:var(--m3-line-2); }
+    .hist-item .hist-meta { flex:1; min-width:0; cursor:pointer; }
+    .hist-item .hist-date { font-size:13px; font-weight:600; color:var(--m3-on); }
+    .hist-item .hist-sub { font-size:11.5px; color:var(--m3-on-3); margin-top:2px; }
+    .hist-acts { display:flex; gap:4px; flex-shrink:0; }
+    .hist-acts button { padding:4px 9px; font-size:11px; }
+    .hist-view .entry { margin-bottom:8px; }
+    .hist-view .entry-original { display:block; }
+    .hist-sum { margin-top:12px; border-top:1px solid var(--m3-line-2); padding-top:10px; font-size:12.5px; line-height:1.55; }
+    .hist-sum h1,.hist-sum h2,.hist-sum h3,.hist-sum h4 { font-size:13px; margin:10px 0 5px; color:var(--m3-accent); }
+    .hist-sum ul,.hist-sum ol { margin:4px 0 8px; padding-left:18px; }
+    .hist-sum table { border-collapse:collapse; width:100%; margin:6px 0; }
+    .hist-sum th,.hist-sum td { border:1px solid var(--m3-line-2); padding:3px 6px; text-align:left; }
+  </style>
+  <div class="modal-overlay" id="history-overlay">
+    <div class="modal">
+      <div class="hist-bar">
+        <h3>📚 <span data-i18n="history.title">Lịch sử</span></h3>
+        <button id="hist-back" style="display:none">← <span data-i18n="history.back">Danh sách</span></button>
+        <button id="hist-export" data-i18n-title="history.exportAll" title="Xuất toàn bộ (.json)">📤</button>
+        <button id="hist-import" data-i18n-title="history.import" title="Nhập từ .json">📥</button>
+        <button id="hist-close">✕</button>
+      </div>
+      <div class="hist-list" id="hist-list"></div>
+      <div class="hist-view" id="hist-view" style="display:none"></div>
+      <input id="hist-import-file" type="file" accept="application/json,.json" hidden />
+    </div>
+  </div>
+
   <!-- Header -->
   <div class="header">
     <span style="font-size:15px;line-height:1">💬</span>
@@ -1313,10 +1353,6 @@
         </select>
         <span class="menu-note" id="capture-note"></span>
       </div>
-      <div class="menu-row" id="s-mic-row" style="display:none">
-        <span data-i18n="settings.chooseMic">Chọn Microphone</span>
-        <select id="s-mic-device"></select>
-      </div>
       <div class="menu-row" id="s-process-row" style="display:none">
         <span data-i18n="settings.audioProcess">Thu từ ứng dụng</span>
         <div class="app-sel-wrap">
@@ -1327,6 +1363,14 @@
           <div id="s-app-list" class="app-list" style="display:none"></div>
         </div>
       </div>
+      <div class="menu-row" id="s-withmic-row" style="display:none">
+        <span data-i18n="settings.systemWithMic">Kèm micro của bạn</span>
+        <input type="checkbox" id="s-withmic" data-i18n-title="settings.systemWithMicNote" />
+      </div>
+      <div class="menu-row" id="s-mic-row" style="display:none">
+        <span data-i18n="settings.chooseMic">Chọn Microphone</span>
+        <select id="s-mic-device"></select>
+      </div>
       <div class="menu-row">
         <span data-i18n="settings.layout">Giao diện dịch</span>
         <div class="layout-pick" id="layout-pick">
@@ -1335,6 +1379,10 @@
           <button class="lay-opt" data-layout="columns" title="Gốc | dịch (2 cột)" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="10" rx="1" opacity=".5"/><rect x="9" y="3" width="5" height="10" rx="1"/></svg></button>
           <button class="lay-opt" data-layout="dual" title="2 luồng (gốc | dịch)" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="6" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="9" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="9" y="4.5" width="5" height="1.6" rx=".8"/><rect x="9" y="7.5" width="5" height="1.6" rx=".8"/></svg></button>
         </div>
+      </div>
+      <div class="menu-row" id="s-savehistory-row">
+        <span data-i18n="settings.saveHistory">Tự lưu lịch sử phiên</span>
+        <input type="checkbox" id="s-savehistory" />
       </div>
       <div class="menu-sep"></div>
 
@@ -1356,6 +1404,21 @@
   </div>
 
   <!-- Caption list + Summary panel (chia 2 cột khi panel mở) -->
+  <!-- Level meter: mức âm THẬT đang thu được (chẩn đoán câm/có tiếng) — chạy cho cả Toàn-hệ-thống/mic lẫn per-app -->
+  <style>
+    .level-meter { display:flex; align-items:center; gap:8px; padding:5px 12px; font-size:11px; color:var(--m3-on-3); background:var(--m3-surf); border-bottom:1px solid var(--m3-line); flex-shrink:0; }
+    .level-meter .lm-ico { font-size:12px; line-height:1; }
+    .level-meter .lm-bar { flex:1; height:7px; border-radius:5px; background:var(--m3-surf-3); overflow:hidden; }
+    .level-meter .lm-fill { display:block; height:100%; width:0%; background:var(--m3-ok); transition:width .05s linear; }
+    .level-meter .lm-txt { white-space:nowrap; }
+    .level-meter.silent .lm-fill { background:var(--m3-err); }
+    .level-meter.silent .lm-txt { color:var(--m3-err); font-weight:600; }
+  </style>
+  <div id="level-meter" class="level-meter" data-i18n-title="meter.title" style="display:none">
+    <span class="lm-ico">🎙️</span>
+    <span class="lm-bar"><i id="lm-fill" class="lm-fill"></i></span>
+    <span id="lm-txt" class="lm-txt"></span>
+  </div>
   <div class="content-row" id="content-row">
     <div class="list" id="list">
       <div class="empty">
@@ -1367,6 +1430,7 @@
       <div class="sp-head">
         <span class="sp-spinner" id="sp-spinner" style="display:none"><span class="m3-spinner-sm"></span></span>
         <span class="sp-title" data-i18n="summary.liveTitle">📋 Tóm tắt trực tiếp</span>
+        <button id="sp-view-btn" class="sp-mini" data-i18n-title="summary.viewToggleTitle" title="Đổi hiển thị: HTML ↔ Markdown" style="display:none">HTML</button>
         <button id="sp-prompt-btn" class="sp-mini" data-i18n-title="summary.editPromptTitle" title="Sửa prompt tóm tắt">✏️</button>
         <button id="sp-close-btn" class="sp-mini" data-i18n-title="summary.closePanelTitle" title="Đóng panel">✕</button>
       </div>
@@ -1400,6 +1464,7 @@
         </div>
       </span>
       <button id="clear-btn">🗑</button>
+      <button id="history-btn" data-i18n-title="history.title" title="Lịch sử">📚</button>
       <button id="sum-btn" data-i18n-title="footer.summarizeTitle" title="Tóm tắt cuộc họp">📋 <span data-i18n="footer.summarize">Tóm tắt</span></button>
     </div>
     <div class="footer-sum" id="footer-sum">
@@ -1464,6 +1529,10 @@
     let captionsOn  = false;
     let _currentSource  = 'system'; // theo dõi nguồn hiện tại (system/mic)
     let _layout = 'translation';   // giao diện hiển thị: translation | stacked | columns | dual (giống extension)
+    let _spView = 'html';          // hiển thị rolling: 'html' (landing-page iframe) | 'md' (markdown)
+    let _systemWithMic = false;    // Audio hệ thống: trộn thêm micro của user (chỉ áp cho 'Toàn hệ thống' — thu ở renderer)
+    let _saveHistory = true, _sessId = null, _sessStart = 0;   // Lịch sử phiên (IndexedDB): tự lưu + id/mốc phiên (giữ qua start/stop tới khi Xóa)
+    let _meterPeak = 0, _meterLastSig = 0, _meterDisp = 0, _meterRAF = 0;   // Level meter (chẩn đoán câm/có tiếng) — feed từ renderer onaudioprocess HOẶC main (per-app) qua 'audio-level'
     let _currentProvider = 'online';  // theo dõi provider hiện tại
     let _srcLang = 'ja';           // ngôn ngữ nguồn đã chọn (system/mic); Teams thì auto theo Teams
     let _tgtLang = 'vi';           // ngôn ngữ đích hiện tại (đồng bộ với cờ lq-tgt)
@@ -1544,6 +1613,9 @@
       if (!s.srcLang) api.saveSettings({ srcLang: _srcLang });
       _currentSource = s.captureSource || 'system';
       _layout = s.layout || 'translation';
+      _spView = (s.summaryView === 'md') ? 'md' : 'html';
+      _systemWithMic = !!s.systemWithMic; if (sWithMic) sWithMic.checked = _systemWithMic;
+      _saveHistory = s.saveHistory !== false; if (sSaveHistory) sSaveHistory.checked = _saveHistory;
       _audioProcessName = s.audioProcessName || '';
       _audioProcessApp = s.audioProcessApp || '';
       try { renderEmpty(); } catch (e) {}
@@ -1553,7 +1625,7 @@
         const apk = document.getElementById('s-apikey');
         if (apk) { apk.value = s.apiKey || ''; if (apk.value) _validateApiKey(apk.value); }
         if (sCapture)  { sCapture.value = _currentSource; applyCaptureUI(_currentSource); }
-        if (_currentSource === 'mic') loadMicDevices(s.micDeviceId || '');
+        if (_currentSource === 'mic' || (_currentSource === 'system' && _systemWithMic)) loadMicDevices(s.micDeviceId || '');
         if (_currentSource === 'system') loadAudioProcesses(_audioProcessName, _audioProcessApp);
         refreshTtsBtn();
         const _spi = document.getElementById('sp-prompt-input');
@@ -1805,6 +1877,8 @@
     api.onCcState(({ active }) => {
       setCaptionsState(active);
       _isPlaying = !!active;                     // đang play dịch → spinner "live" ở cuối panel tóm tắt
+      if (active) { if (!_sessId) { _sessId = Date.now(); _sessStart = _sessId; } meterStart(); }   // ▶ → bắt đầu phiên lịch sử + bật level meter
+      else { try { saveSession(); } catch (e) {} meterStop(); }                                       // ⏹ → chốt phiên + tắt meter
       try { summaryLive(); } catch (e) {}
       try { updateSpGptBtn(); } catch (e) {}   // dừng ghi + còn nội dung → hiện nút "Tổng thể"
     });
@@ -1814,6 +1888,9 @@
     const sMicRow       = document.getElementById('s-mic-row');
     const sMicDevice    = document.getElementById('s-mic-device');
     const sProcessRow   = document.getElementById('s-process-row');
+    const sWithMicRow   = document.getElementById('s-withmic-row');
+    const sWithMic      = document.getElementById('s-withmic');
+    const sSaveHistory  = document.getElementById('s-savehistory');
     const sProcess      = document.getElementById('s-app-list');
     const sAppSel       = document.getElementById('s-app-sel');
     const providerRadio = document.getElementById('provider-radio');
@@ -1823,9 +1900,10 @@
     //    đổi sẽ đổi cho MỌI người → để Teams tự dò theo người nói).
     //  - system/mic: chọn tay → hiện cờ _srcLang, bấm mở picker.
     function applyCaptureUI(source) {
-      sMicRow.style.display = source === 'mic' ? '' : 'none';
+      sMicRow.style.display = (source === 'mic' || (source === 'system' && _systemWithMic)) ? '' : 'none';   // mic-only HOẶC 'Kèm mic' ở Audio hệ thống → cho chọn micro
       // "Thu từ tiến trình" chỉ áp cho Audio hệ thống (Teams dùng UIA, mic là thiết bị vào — không loopback tiến trình).
       if (sProcessRow) sProcessRow.style.display = source === 'system' ? '' : 'none';
+      if (sWithMicRow) sWithMicRow.style.display = source === 'system' ? '' : 'none';   // "Kèm mic" chỉ áp cho Audio hệ thống
       const lqSrcEl = document.getElementById('lq-src');
       if (lqSrcEl) {
         const teams = source === 'teams';
@@ -1907,7 +1985,7 @@
     sCapture.addEventListener('change', () => {
       _currentSource = sCapture.value;
       applyCaptureUI(sCapture.value);
-      if (sCapture.value === 'mic') loadMicDevices(sMicDevice.value);
+      if (sCapture.value === 'mic' || (sCapture.value === 'system' && _systemWithMic)) loadMicDevices(sMicDevice.value);
       if (sCapture.value === 'system') loadAudioProcesses(_audioProcessName, _audioProcessApp);
       // Đổi nguồn → bỏ hint banner Teams/empty cũ còn sót, hiện empty đúng nguồn mới (không xoá nếu đã có caption).
       try { if (listEl.querySelector('.entry')) listEl.querySelector('.hint-banner')?.remove(); else renderEmpty(true); } catch (e) {}
@@ -1916,12 +1994,26 @@
 
     sMicDevice.addEventListener('change', () => {
       api.saveSettings({ micDeviceId: sMicDevice.value });
+      if (_recordingActive && (_lastCaptureSource === 'mic' || (_lastCaptureSource === 'system' && _systemWithMic))) { stopAudioCapture(); startAudioCapture(_lastCaptureSource); }   // đổi mic giữa chừng → áp ngay
+    });
+
+    sWithMic?.addEventListener('change', () => {   // "Kèm mic" → lưu; hiện/ẩn ô chọn micro; nếu ĐANG thu Toàn hệ thống thì thu lại ngay
+      _systemWithMic = !!sWithMic.checked;
+      api.saveSettings({ systemWithMic: _systemWithMic });
+      if (sMicRow) sMicRow.style.display = (_currentSource === 'mic' || (_currentSource === 'system' && _systemWithMic)) ? '' : 'none';
+      if (_systemWithMic && _currentSource === 'system') loadMicDevices(sMicDevice.value || '');   // hiện picker → nạp danh sách mic
+      if (_recordingActive && _lastCaptureSource === 'system') { stopAudioCapture(); startAudioCapture('system'); }
+    });
+
+    sSaveHistory?.addEventListener('change', () => {   // Tự lưu lịch sử phiên
+      _saveHistory = !!sSaveHistory.checked;
+      api.saveSettings({ saveHistory: _saveHistory });
     });
 
     // ── Thu theo ỨNG DỤNG (Audio hệ thống): "Toàn hệ thống" + danh sách APP có cửa sổ ──
     // Chọn 1 APP → main thu CẢ CÂY tiến trình của app đó (mọi cửa sổ/tab/meeting con) → KHÔNG thu TTS của
     // chính app dịch → hết feedback. Khoá lưu = TÊN exe (ổn định qua khởi động lại); PID resolve lúc bấm ▶.
-    let _audioProcessName = '', _audioProcessApp = '';
+    let _audioProcessName = '', _audioProcessApp = '', _apLoading = false;
     // 1 dòng app trong picker: icon + tên app (+ ghi chú phụ). data-app = TÊN SẠCH (không kèm hậu tố).
     function _appBtn(name, label, iconHtml, active, sub) {
       return '<button type="button" class="app-btn' + (active ? ' active' : '') + '" data-name="' + esc(name) + '" data-app="' + esc(label) + '">'
@@ -1937,25 +2029,33 @@
     function _closeAppList() { if (sProcess) sProcess.style.display = 'none'; if (sAppSel) sAppSel.setAttribute('aria-expanded', 'false'); }
     async function loadAudioProcesses(curName, curApp) {
       if (!sProcess) return;
-      let apps = [];
-      try { apps = await api.listAudioProcesses() || []; } catch (e) {}
-      const has = apps.some(a => a.name === curName);
-      // "Toàn hệ thống" (kèm cảnh báo gồm tiếng TTS) + app đã chọn (kể cả khi hiện không có cửa sổ) + danh sách app.
-      let h = _appBtn('', t('process.wholeSystem'), '<span class="app-ico fb">🔊</span>', !curName, t('process.wholeSystemHint'));
-      if (curName && !has) h += _appBtn(curName, curApp || curName, '<span class="app-ico fb">▣</span>', true, t('process.savedSuffix'));
-      for (const a of apps) {
-        const ico = a.icon ? '<img class="app-ico" src="' + esc(a.icon) + '" alt="">' : '<span class="app-ico fb">▣</span>';
-        h += _appBtn(a.name, a.app, ico, a.name === curName, '');
-      }
-      sProcess.innerHTML = h;
-      // Đồng bộ nút select thu gọn theo lựa chọn hiện tại.
-      let cLabel = t('process.wholeSystem'), cIco = '<span class="app-ico fb">🔊</span>';
-      if (curName) {
-        const a = apps.find(x => x.name === curName);
-        if (a) { cLabel = a.app; cIco = a.icon ? ('<img class="app-ico" src="' + esc(a.icon) + '" alt="">') : '<span class="app-ico fb">▣</span>'; }
-        else { cLabel = curApp || curName; cIco = '<span class="app-ico fb">▣</span>'; }
-      }
-      _setAppSel(cLabel, cIco);
+      if (_apLoading) return;   // đang nạp dở (mở + refresh menu cùng lúc) → bỏ qua, lần nạp kia sẽ điền danh sách
+      _apLoading = true;
+      // Liệt kê tiến trình âm thanh hơi lâu → nếu dropdown đang RỖNG, hiện "đang tải" NGAY (đồng bộ) để không thấy danh sách trống lúc mở.
+      // Nếu đã có danh sách (mở lại / refresh) thì GIỮ nguyên, chỉ cập nhật tại chỗ khi xong (không nháy).
+      if (!sProcess.querySelector('.app-btn'))
+        sProcess.innerHTML = '<div class="app-loading"><span class="m3-spinner-sm"></span><span>' + t('process.loading') + '</span></div>';
+      try {
+        let apps = [];
+        try { apps = await api.listAudioProcesses() || []; } catch (e) {}
+        const has = apps.some(a => a.name === curName);
+        // "Toàn hệ thống" (kèm cảnh báo gồm tiếng TTS) + app đã chọn (kể cả khi hiện không có cửa sổ) + danh sách app.
+        let h = _appBtn('', t('process.wholeSystem'), '<span class="app-ico fb">🔊</span>', !curName, t('process.wholeSystemHint'));
+        if (curName && !has) h += _appBtn(curName, curApp || curName, '<span class="app-ico fb">▣</span>', true, t('process.savedSuffix'));
+        for (const a of apps) {
+          const ico = a.icon ? '<img class="app-ico" src="' + esc(a.icon) + '" alt="">' : '<span class="app-ico fb">▣</span>';
+          h += _appBtn(a.name, a.app, ico, a.name === curName, '');
+        }
+        sProcess.innerHTML = h;
+        // Đồng bộ nút select thu gọn theo lựa chọn hiện tại.
+        let cLabel = t('process.wholeSystem'), cIco = '<span class="app-ico fb">🔊</span>';
+        if (curName) {
+          const a = apps.find(x => x.name === curName);
+          if (a) { cLabel = a.app; cIco = a.icon ? ('<img class="app-ico" src="' + esc(a.icon) + '" alt="">') : '<span class="app-ico fb">▣</span>'; }
+          else { cLabel = curApp || curName; cIco = '<span class="app-ico fb">▣</span>'; }
+        }
+        _setAppSel(cLabel, cIco);
+      } finally { _apLoading = false; }
     }
     if (sProcess) sProcess.addEventListener('click', (e) => {
       const b = e.target.closest('.app-btn'); if (!b || !sProcess.contains(b)) return;
@@ -2277,13 +2377,16 @@
     // nên phía main (sherpa-onnx-node) KHÔNG cần Python/PyAV/ffmpeg để decode.
     let _recordingActive = false;
     let _audioCtx = null, _srcNode = null, _procNode = null, _zeroGain = null;
+    let _micStream = null, _micSrcNode = null, _lastCaptureSource = null;   // "Kèm mic": stream/nguồn mic phụ trộn vào graph
     let _lastPcmTs = 0, _audioWatchdog = null;   // tự-lành: phát hiện onaudioprocess ngừng bắn → resume ctx
 
     async function startAudioCapture(source) {
       try {
+        _lastCaptureSource = source;
         let stream;
         if (source === 'mic') {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          const mid = (sMicDevice && sMicDevice.value) || '';
+          stream = await navigator.mediaDevices.getUserMedia({ audio: mid ? { deviceId: { exact: mid } } : true, video: false });
         } else {
           stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: { width: 320, height: 240, frameRate: 1 } });
         }
@@ -2292,6 +2395,18 @@
         const audioTracks = stream.getAudioTracks();
         _audioStream = new MediaStream(audioTracks);
         if (!audioTracks.length) { statusMsg.textContent = t('audio.noTrack'); return; }
+
+        // "Kèm mic": thu thêm micro → trộn vào CÙNG AudioContext (1 đồng hồ mẫu → cộng tín hiệu chuẩn, không xé tiếng).
+        // Chỉ áp cho 'Toàn hệ thống' (thu loopback ở renderer); 'mic' thì khỏi, app cụ thể thì thu ở main nên không qua đây.
+        _micStream = null;
+        if (source !== 'mic' && _systemWithMic) {
+          try {
+            const mid = (sMicDevice && sMicDevice.value) || '';
+            const ac = { echoCancellation: true, noiseSuppression: true };
+            if (mid) ac.deviceId = { exact: mid };
+            _micStream = await navigator.mediaDevices.getUserMedia({ audio: ac, video: false });
+          } catch (e) { console.warn('[audio] kèm mic lỗi:', e.message); _micStream = null; }
+        }
 
         _recordingActive = true;
 
@@ -2312,6 +2427,8 @@
           // cắt theo khoảng lặng (không cắt mù giữa câu). Độ trễ thấp + endpoint chính xác.
           _lastPcmTs = Date.now();   // nhịp tim cho watchdog (ScriptProcessor bắn đều ~256ms kể cả khi im lặng)
           const ch = e.inputBuffer.getChannelData(0);   // mono float32 @ 16k
+          let pk = 0; for (let i = 0; i < ch.length; i++) { const a = ch[i] < 0 ? -ch[i] : ch[i]; if (a > pk) pk = a; }   // đỉnh khung → level meter
+          _meterPeak = pk; if (pk > 0.0015) _meterLastSig = Date.now();
           api.sendAudioPcm(new Float32Array(ch).buffer);
         };
         // Watchdog: nếu >3s không có khung PCM nào (ctx kẹt/suspend ngầm sau tua/đổi thiết bị) → resume (an toàn,
@@ -2325,9 +2442,10 @@
           }
         }, 2000);
         _srcNode.connect(_procNode);
+        if (_micStream) { _micSrcNode = _audioCtx.createMediaStreamSource(_micStream); _micSrcNode.connect(_procNode); }   // trộn mic + system vào cùng ScriptProcessor = cộng tín hiệu
         _procNode.connect(_zeroGain);
         _zeroGain.connect(_audioCtx.destination);   // ScriptProcessor cần ở trong graph tới destination
-        console.log('[audio] Web Audio PCM @16k | ctx rate =', _audioCtx.sampleRate);
+        console.log('[audio] Web Audio PCM @16k | mix-mic =', !!_micStream, '| ctx rate =', _audioCtx.sampleRate);
       } catch (err) {
         _recordingActive = false;
         console.error('[audio]', err);
@@ -2344,17 +2462,52 @@
       clearInterval(_audioWatchdog); _audioWatchdog = null;
       try { if (_procNode) { _procNode.onaudioprocess = null; _procNode.disconnect(); } } catch (e) {}
       try { if (_srcNode) _srcNode.disconnect(); } catch (e) {}
+      try { if (_micSrcNode) _micSrcNode.disconnect(); } catch (e) {}
       try { if (_zeroGain) _zeroGain.disconnect(); } catch (e) {}
       try { if (_audioCtx) _audioCtx.close(); } catch (e) {}
-      _procNode = _srcNode = _zeroGain = _audioCtx = null;
+      _procNode = _srcNode = _micSrcNode = _zeroGain = _audioCtx = null;
       _audioStream?.getTracks().forEach(t => t.stop());
       _rawStream?.getTracks().forEach(t => t.stop());
+      _micStream?.getTracks().forEach(t => t.stop());
       _audioStream = null;
       _rawStream = null;
+      _micStream = null;
     }
 
     api.onStartAudioCapture(({ source }) => startAudioCapture(source));
     api.onStopAudioCapture(() => stopAudioCapture());
+
+    // ── Level meter (chẩn đoán câm/có tiếng) — chạy cho CẢ 2 đường thu: renderer (Toàn hệ thống/mic) + main (per-app) ──
+    // Mục đích: chọn app Teams → thanh ĐỨNG IM (per-app loopback = im lặng); chọn 'Toàn hệ thống' → thanh NHẢY (device loopback bắt được Teams).
+    const levelMeterEl = document.getElementById('level-meter');
+    const lmFillEl = document.getElementById('lm-fill');
+    const lmTxtEl = document.getElementById('lm-txt');
+    function meterStart() {
+      if (!levelMeterEl) return;
+      levelMeterEl.style.display = ''; levelMeterEl.classList.remove('silent');
+      _meterPeak = 0; _meterDisp = 0; _meterLastSig = Date.now();   // chừa ~2.5s đầu (đang khởi động) trước khi báo "câm"
+      cancelAnimationFrame(_meterRAF);
+      const tick = () => {
+        if (!captionsOn) return;   // chỉ chạy khi đang thu
+        const db = _meterPeak > 0.0001 ? 20 * Math.log10(_meterPeak) : -100;
+        const target = Math.max(0, Math.min(1, (db + 60) / 60));   // -60dB..0dB → 0..1
+        _meterDisp = target > _meterDisp ? target : _meterDisp + (target - _meterDisp) * 0.2;   // attack nhanh, release chậm
+        if (lmFillEl) lmFillEl.style.width = (_meterDisp * 100).toFixed(1) + '%';
+        const silent = Date.now() - _meterLastSig > 2500;   // có thu nhưng >2.5s không mẫu nào ≠ 0 = câm
+        levelMeterEl.classList.toggle('silent', silent);
+        if (lmTxtEl) lmTxtEl.textContent = t(silent ? 'meter.silent' : 'meter.live');
+        _meterRAF = requestAnimationFrame(tick);
+      };
+      _meterRAF = requestAnimationFrame(tick);
+    }
+    function meterStop() {
+      cancelAnimationFrame(_meterRAF); _meterRAF = 0;
+      _meterPeak = 0; _meterDisp = 0;
+      if (lmFillEl) lmFillEl.style.width = '0%';
+      if (levelMeterEl) { levelMeterEl.style.display = 'none'; levelMeterEl.classList.remove('silent'); }
+    }
+    // Mức từ đường thu ở MAIN (per-app loopback). Teams qua per-app = 0 mẫu (lỗi #414) → thanh đứng im → thấy ngay nguyên nhân.
+    api.onAudioLevel(({ peak }) => { _meterPeak = peak || 0; if ((peak || 0) > 0.0015) _meterLastSig = Date.now(); });
 
     // ── Gemini Live: phát audio dịch (TTS) — STREAM liên tục theo playhead (gapless) ──
     let _gemCtx = null, _gemPlayhead = 0, _gemNodes = [];
@@ -2521,6 +2674,8 @@
     }
 
     document.getElementById('clear-btn').addEventListener('click', () => {
+      try { saveSession(); } catch (e) {}   // chốt phiên đang có TRƯỚC khi xóa
+      _sessId = null;                         // phiên kế = phiên mới
       renderEmpty(true);
       entryEls.clear();
       captionData.clear();
@@ -2875,6 +3030,11 @@ html.js .reveal.in{opacity:1;transform:none}
     }
 
     document.getElementById('sp-close-btn').addEventListener('click', closeSummaryPanel);
+    document.getElementById('sp-view-btn')?.addEventListener('click', () => {   // đổi hiển thị rolling HTML ↔ Markdown (không gọi lại API)
+      _spView = _spView === 'html' ? 'md' : 'html';
+      try { api.saveSettings({ summaryView: _spView }); } catch (e) {}
+      spShow();
+    });
 
     // ── Ô soạn "Yêu cầu tóm tắt riêng" (✏️ trên đầu panel) — chèn thêm vào prompt tóm tắt, giữ nguyên prompt gốc ──
     const spPromptBtn = document.getElementById('sp-prompt-btn');
@@ -2918,24 +3078,33 @@ html.js .reveal.in{opacity:1;transform:none}
       const date = startMs ? (d => d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()))(new Date(startMs)) : '';
       return { date, duration, participants: authors, lineCount: caps.length };
     }
-    // Báo cáo landing-page → iframe cô lập (style/font không lẫn với app; CSP frame-src 'self').
-    function spRenderReport(rep) {
-      _spReport = rep; _spMarkdown = reportToMd(rep);
-      spBody.style.padding = '0'; spBody.style.overflow = 'hidden'; spBody.innerHTML = '';
-      const f = document.createElement('iframe');
-      f.setAttribute('sandbox', 'allow-same-origin');   // không allow-scripts → reveal-JS tắt nhưng nội dung vẫn hiện đủ
-      f.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#F7F3EB';
-      f.srcdoc = buildFancyDoc(rep);
-      spBody.appendChild(f);
-      _spSetExportable(true);
+    // Hiển thị nội dung tóm tắt HIỆN CÓ theo _spView (không gọi lại API) — dùng cho cả render mới lẫn nút đổi HTML↔MD.
+    function spShow() {
+      if (_spReport && _spView === 'html') {   // landing-page → iframe cô lập (style/font không lẫn với app; CSP frame-src 'self')
+        spBody.style.padding = '0'; spBody.style.overflow = 'hidden'; spBody.innerHTML = '';
+        const f = document.createElement('iframe');
+        f.setAttribute('sandbox', 'allow-same-origin');   // không allow-scripts → reveal-JS tắt nhưng nội dung vẫn hiện đủ
+        f.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#F7F3EB';
+        f.srcdoc = buildFancyDoc(_spReport);
+        spBody.appendChild(f);
+      } else {   // markdown (chọn MD, hoặc chỉ có bản markdown-fallback)
+        spBody.style.padding = ''; spBody.style.overflow = '';
+        spBody.innerHTML = _spMarkdown ? md2html(_spMarkdown) : ('<div class="sp-placeholder">' + SP_HINT() + '</div>');
+        summaryLive();                                          // gắn lại spinner "đang nghe" ở cuối (nếu đang play)
+        if (_spMarkdown) spBody.scrollTop = spBody.scrollHeight;   // có nội dung → cuộn xuống cuối
+      }
+      _updateSpViewBtn();
     }
-    function spRender(md) {
-      _spReport = null;
-      spBody.style.padding = ''; spBody.style.overflow = '';   // thoát layout iframe báo cáo (nếu có)
-      _spMarkdown = md || ''; spBody.innerHTML = md2html(_spMarkdown); _spSetExportable(!!_spMarkdown);
-      summaryLive();                            // gắn lại spinner "đang nghe" ở cuối (nếu đang play)
-      spBody.scrollTop = spBody.scrollHeight;   // có nội dung mới → tự cuộn xuống cuối
+    // Nút HTML↔MD: chỉ bật khi CÓ báo cáo cấu trúc; markdown-fallback thuần → ẩn.
+    function _updateSpViewBtn() {
+      const b = document.getElementById('sp-view-btn'); if (!b) return;
+      b.style.display = _spReport ? '' : 'none';
+      const showHtml = !!_spReport && _spView === 'html';
+      b.textContent = showHtml ? 'HTML' : 'MD';
+      b.classList.toggle('active', showHtml);
     }
+    function spRenderReport(rep) { _spReport = rep; _spMarkdown = reportToMd(rep); _spSetExportable(true); spShow(); }
+    function spRender(md)        { _spReport = null; _spMarkdown = md || ''; _spSetExportable(!!_spMarkdown); spShow(); }
     // Spinner xoay ở CUỐI panel khi ĐANG play dịch (báo "còn nội dung tới"). innerHTML của spRender đã xoá nó → gắn lại.
     function summaryLive() {
       if (!_sumPanelOpen) return;
@@ -3086,6 +3255,112 @@ html.js .reveal.in{opacity:1;transform:none}
         return t('err.auth');
       return s.length > 100 ? s.slice(0, 100) + '…' : s;
     }
+
+    // ════ LỊCH SỬ PHIÊN (IndexedDB) — lưu transcript + tóm tắt; xem lại / export / import ════
+    const HDB = 'captrans-history', HSTORE = 'sessions';
+    function _hOpen() {
+      return new Promise((res, rej) => {
+        const r = indexedDB.open(HDB, 1);
+        r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains(HSTORE)) db.createObjectStore(HSTORE, { keyPath: 'id' }); };
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+    }
+    function hSave(s) { return _hOpen().then(db => new Promise((res, rej) => { const tx = db.transaction(HSTORE, 'readwrite'); tx.objectStore(HSTORE).put(s); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); })); }
+    function hList() { return _hOpen().then(db => new Promise((res, rej) => { const out = []; const cur = db.transaction(HSTORE, 'readonly').objectStore(HSTORE).openCursor(); cur.onsuccess = (e) => { const c = e.target.result; if (c) { const v = c.value; out.push({ id: v.id, startedAt: v.startedAt, endedAt: v.endedAt, langCode: v.langCode, count: v.count, hasSummary: !!(v.summaryMd || v.report) }); c.continue(); } else res(out.sort((a, b) => b.startedAt - a.startedAt)); }; cur.onerror = () => rej(cur.error); })); }
+    function hGet(id) { return _hOpen().then(db => new Promise((res, rej) => { const rq = db.transaction(HSTORE, 'readonly').objectStore(HSTORE).get(id); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); })); }
+    function hDel(id) { return _hOpen().then(db => new Promise((res, rej) => { const tx = db.transaction(HSTORE, 'readwrite'); tx.objectStore(HSTORE).delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); })); }
+    function hAll() { return _hOpen().then(db => new Promise((res, rej) => { const rq = db.transaction(HSTORE, 'readonly').objectStore(HSTORE).getAll(); rq.onsuccess = () => res((rq.result || []).sort((a, b) => b.startedAt - a.startedAt)); rq.onerror = () => rej(rq.error); })); }
+    function hImport(sessions) { const arr = Array.isArray(sessions) ? sessions.filter(s => s && s.id != null && Array.isArray(s.caps)) : []; if (!arr.length) return Promise.resolve(0); return _hOpen().then(db => new Promise((res, rej) => { const tx = db.transaction(HSTORE, 'readwrite'); const os = tx.objectStore(HSTORE); for (const s of arr) os.put(s); tx.oncomplete = () => res(arr.length); tx.onerror = () => rej(tx.error); })); }
+
+    function _hEsc(x) { return String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function _hFmtDate(ts) { const d = new Date(ts), p = n => (n < 10 ? '0' : '') + n; return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+    function _hCapPairs() { return [...captionData.values()].sort((a, b) => (a.tsMs || 0) - (b.tsMs || 0)).map(c => ({ o: (c.original || '').trim(), t: (c.translated || '').trim(), ts: c.ts || '' })); }
+
+    // Chốt phiên hiện tại vào IndexedDB (gọi khi ⏹ / Xóa). Bỏ qua nếu tắt auto-save / chưa có phiên / rỗng.
+    function saveSession() {
+      if (!_saveHistory || !_sessId || !captionData.size) return;
+      const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: _srcLang || '', count: captionData.size, caps: _hCapPairs(), summaryMd: _spMarkdown || '', report: _spReport || null };
+      hSave(s).catch(e => console.warn('[history] lưu lỗi:', e && e.message));
+    }
+    function _histSummaryMd(s) { return s.report ? reportToMd(s.report) : (s.summaryMd || ''); }
+    function sessionToMd(s) {
+      const out = [`# Transcript — ${_hFmtDate(s.startedAt)}`, ''];
+      for (const c of (s.caps || [])) { const o = (c.o || '').replace(/\n/g, ' ').trim(), tt = (c.t || '').replace(/\n/g, ' ').trim(); if (o) out.push(`**${o}**  `); if (tt) out.push(tt); if (o || tt) out.push(''); }
+      const sm = _histSummaryMd(s); if (sm) out.push('---', '', `# ${t('summary.title')}`, '', sm);
+      return out.join('\n');
+    }
+    function sessionToHtmlDoc(s) {
+      let body = `<div class="report"><h1>Transcript — ${_hEsc(_hFmtDate(s.startedAt))}</h1>`;
+      for (const c of (s.caps || [])) { const o = (c.o || '').trim(), tt = (c.t || '').trim(); if (!o && !tt) continue; body += '<div class="tx">' + (o ? `<div class="o">${_hEsc(o)}</div>` : '') + (tt ? `<div class="t">${_hEsc(tt)}</div>` : '') + '</div>'; }
+      const sm = _histSummaryMd(s); if (sm) body += `<hr><h1>${_hEsc(t('summary.title'))}</h1>` + md2html(sm);
+      body += '</div>';
+      const css = REPORT_CSS + '.tx{margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #eef1f5}.tx .o{color:#5a6573;font-size:13px;margin-bottom:2px}.tx .t{color:#1a1a1a;font-weight:500}';
+      return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Transcript</title><style>${css}</style></head><body>${body}</body></html>`;
+    }
+
+    const histOverlay = document.getElementById('history-overlay');
+    const histListEl = document.getElementById('hist-list');
+    const histViewEl = document.getElementById('hist-view');
+    const histBackBtn = document.getElementById('hist-back');
+    async function openHistory() {
+      if (!histOverlay) return;
+      histOverlay.classList.add('open');
+      histViewEl.style.display = 'none'; histListEl.style.display = ''; histBackBtn.style.display = 'none';
+      histListEl.innerHTML = '<div class="hist-empty">…</div>';
+      let items = []; try { items = await hList(); } catch (e) { console.warn('[history]', e); }
+      if (!items.length) { histListEl.innerHTML = `<div class="hist-empty">${_hEsc(t('history.empty'))}</div>`; return; }
+      histListEl.innerHTML = '';
+      for (const m of items) {
+        const div = document.createElement('div'); div.className = 'hist-item';
+        div.innerHTML = '<div class="hist-meta"><div class="hist-date"></div><div class="hist-sub"></div></div><div class="hist-acts">'
+          + `<button data-act="md" title="${_hEsc(t('history.exportMd'))}">⬇MD</button><button data-act="html" title="${_hEsc(t('history.exportHtml'))}">⬇HTML</button><button data-act="del" title="${_hEsc(t('history.del'))}">🗑</button></div>`;
+        div.querySelector('.hist-date').textContent = _hFmtDate(m.startedAt);
+        div.querySelector('.hist-sub').textContent = `${m.langCode || ''} · ${t('history.lines', { n: m.count })}${m.hasSummary ? ' · 📋' : ''}`;
+        div.querySelector('.hist-meta').addEventListener('click', () => viewSession(m.id));
+        div.querySelector('[data-act="md"]').addEventListener('click', () => exportSess(m.id, 'md'));
+        div.querySelector('[data-act="html"]').addEventListener('click', () => exportSess(m.id, 'html'));
+        div.querySelector('[data-act="del"]').addEventListener('click', async () => { if (confirm(t('history.confirmDel'))) { try { await hDel(m.id); } catch (_) {} openHistory(); } });
+        histListEl.appendChild(div);
+      }
+    }
+    async function viewSession(id) {
+      const s = await hGet(id); if (!s) return;
+      histListEl.style.display = 'none'; histViewEl.style.display = ''; histBackBtn.style.display = '';
+      histViewEl.innerHTML = '';
+      for (const c of (s.caps || [])) {
+        const e = document.createElement('div'); e.className = 'entry';
+        if (c.o && c.o.trim()) { const o = document.createElement('div'); o.className = 'entry-original'; o.textContent = c.o; e.appendChild(o); }
+        if (c.t && c.t.trim()) { const tt = document.createElement('div'); tt.className = 'entry-translated'; tt.textContent = c.t; e.appendChild(tt); }
+        if (e.childNodes.length) histViewEl.appendChild(e);
+      }
+      if (s.report) { const fr = document.createElement('iframe'); fr.setAttribute('sandbox', 'allow-same-origin'); fr.srcdoc = buildFancyDoc(s.report); fr.style.cssText = 'width:100%;height:70vh;border:0;border-radius:8px;margin-top:12px;background:#F7F3EB'; histViewEl.appendChild(fr); }
+      else if (s.summaryMd) { const sm = document.createElement('div'); sm.className = 'hist-sum'; sm.innerHTML = md2html(s.summaryMd); histViewEl.appendChild(sm); }
+      histViewEl.scrollTop = 0;
+    }
+    async function exportSess(id, kind) {
+      const s = await hGet(id); if (!s) return;
+      const stamp = _hFmtDate(s.startedAt).replace(/[: ]/g, '-');
+      if (kind === 'md') api.exportSummary({ markdown: sessionToMd(s), defaultName: `transcript-${stamp}.md`, dialogTitle: t('history.exportMd') });
+      else api.exportSummary({ markdown: sessionToHtmlDoc(s), defaultName: `transcript-${stamp}.html`, dialogTitle: t('history.exportHtml') });
+    }
+    async function exportAllHistory() {
+      let all = []; try { all = await hAll(); } catch (e) {}
+      if (!all.length) { alert(t('history.empty')); return; }
+      const blob = { app: 'captrans-history', version: 1, exportedAt: Date.now(), sessions: all };
+      const stamp = new Date().toISOString().slice(0, 10);
+      api.exportSummary({ markdown: JSON.stringify(blob), defaultName: `captrans-history-${stamp}.json`, dialogTitle: t('history.exportAll') });
+    }
+    async function importHistory(file) {
+      if (!file) return;
+      try { const data = JSON.parse(await file.text()); const sessions = Array.isArray(data) ? data : (data && data.sessions) || []; const n = await hImport(sessions); if (!n) { alert(t('history.importErr')); return; } alert(t('history.imported', { n })); openHistory(); }
+      catch (e) { console.warn('[history] import', e); alert(t('history.importErr')); }
+    }
+    document.getElementById('history-btn')?.addEventListener('click', openHistory);
+    document.getElementById('hist-close')?.addEventListener('click', () => histOverlay.classList.remove('open'));
+    histBackBtn?.addEventListener('click', () => { histViewEl.style.display = 'none'; histListEl.style.display = ''; histBackBtn.style.display = 'none'; });
+    document.getElementById('hist-export')?.addEventListener('click', exportAllHistory);
+    document.getElementById('hist-import')?.addEventListener('click', () => document.getElementById('hist-import-file').click());
+    document.getElementById('hist-import-file')?.addEventListener('change', (ev) => { const f = ev.target.files && ev.target.files[0]; importHistory(f); ev.target.value = ''; });
   </script>
 </body>
 </html>

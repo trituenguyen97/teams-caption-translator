@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('__caption', {
   onSettingsSaved: cb => ipcRenderer.on('settings-saved', (_, d) => cb(d)),
   onStartAudioCapture: cb => ipcRenderer.on('start-audio-capture', (_, d) => cb(d)),
   onStopAudioCapture:  cb => ipcRenderer.on('stop-audio-capture',  ()    => cb()),
+  onAudioLevel:        cb => ipcRenderer.on('audio-level',         (_, d) => cb(d)),
   onMaxState:     cb   => ipcRenderer.on('window-max-state', (_, d) => cb(d)),
 
   // Gemini Live: audio dịch 24kHz + clear + trạng thái
