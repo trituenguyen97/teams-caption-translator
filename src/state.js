@@ -10,9 +10,8 @@ module.exports = {
   langCode: 'vi',
 
   pinned: false,
-  _tempPin: false,   // pin tạm khi bật caption Teams (Alt+Shift+C không che app)
 
-  // Nguồn: 'teams' (UIA caption) | 'system' (loopback) | 'mic'
+  // Nguồn: 'system' (loopback toàn hệ thống / theo app) | 'mic'
   captureSource: 'system',
   captureSourceChanged: false,
   userActive: false,     // user đã bấm ▶
@@ -23,10 +22,6 @@ module.exports = {
   apiKey: '',
   geminiAudioOn: true,   // bật/tắt đọc to (TTS dịch)
   geminiVoice: 'Achernar',
-
-  // Chép lời (transcribe): hiện ĐÚNG lời nói gốc (mọi ngôn ngữ), KHÔNG dịch — dùng ghi biên bản họp.
-  // Khi bật: gemini-live dùng inputTranscription thay outputTranscription + echoTargetLanguage:true + tắt TTS.
-  transcribeMode: false,
 
   // Yêu cầu tóm tắt RIÊNG do người dùng tự gõ trên app — chèn thêm vào prompt tóm tắt (giữ nguyên prompt gốc).
   summaryExtra: '',

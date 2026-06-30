@@ -50,6 +50,7 @@ export function createLiveTranslator(opts) {
   const _emit = {};    // id → khoá nội dung đã gửi (chỉ vẽ lại hàng nào ĐỔI)
   let _maxId = 0;      // id cao nhất đang hiện trong LƯỢT (để xoá hàng thừa khi DP gộp lại còn ít hàng hơn)
   let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
+  let _noTransTurn = false;   // lượt này KHÔNG có bản dịch (nói trùng ngôn ngữ đích) → echo lời gốc làm bản dịch; reset mỗi lượt
 
   const isConfigured = () => !!(st().apiKey && String(st().apiKey).trim());
 
@@ -199,11 +200,15 @@ export function createLiveTranslator(opts) {
     for (let k = 0; k < nIn; k++) if (_inT[k] === undefined) _inT[k] = _now;
     if (!transcribe) for (let j = 0; j < nOut; j++) if (_outT[j] === undefined) _outT[j] = _now;
     let rows;
-    if (transcribe) rows = inSent.slice(0, nIn).map(s => ({ o: '', t: s.text }));   // chép lời: mỗi câu gốc 1 hàng
+    if (transcribe) rows = inSent.slice(0, nIn).map(s => ({ o: '', t: s.text }));   // (chép lời đã gỡ — nhánh trơ, transcribe luôn false)
     else if (nIn > 0 && nOut > 0) {
+      _noTransTurn = false;   // CÓ bản dịch → không phải lượt trùng ngôn ngữ
       rows = _fillerPostproc(_alignTimeRows(inSent.slice(0, nIn), outSent.slice(0, nOut), _inT, _outT, _outAcc.length / Math.max(1, _inAcc.length)));
       rows = rows.filter(r => !(_isFillerSrc(r.o) && !_tHasContent(r.t)));   // ẩn BACK-CHANNEL: hàng gốc filler mà dịch rỗng/chỉ-toàn-filler (はい→Vâng); GIỮ nếu lỡ ôm nội dung thật
       rows = _mergeEmptyRows(rows, turnEnd);   // POLISH B: gộp hàng gốc còn-lại-nhưng-dịch-rỗng (1:N residual) lên hàng trước
+    } else if (nIn > 0 && (final || _noTransTurn)) {   // có lời GỐC nhưng KHÔNG có bản dịch (nói TRÙNG ngôn ngữ đích) → echo lời gốc làm "bản dịch". final/cờ ổn định → không nháy lúc dịch đang về.
+      _noTransTurn = true;
+      rows = inSent.slice(0, nIn).map(s => ({ o: '', t: s.text }));
     } else rows = [];
     for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? '' : rows[i].o, rows[i].t, false);
     let nextId = _lineBase + rows.length;
@@ -216,7 +221,7 @@ export function createLiveTranslator(opts) {
     if (turnEnd) { _lineBase += rows.length; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _clearTurn(); }
   }
   function _flush() { clearTimeout(_emitTimer); clearTimeout(_flushTimer); _pump(true); }
-  function _clearTurn() { for (const k in _emit) delete _emit[k]; for (const k in _rowTs) delete _rowTs[k]; _maxId = _lineBase - 1; }
+  function _clearTurn() { for (const k in _emit) delete _emit[k]; for (const k in _rowTs) delete _rowTs[k]; _maxId = _lineBase - 1; _noTransTurn = false; }
   // Đóng CỨNG lượt (stop / đổi ngôn ngữ giữa lượt): nhảy id qua mọi hàng đã hiện để KHỎI đè lượt mới, reset trạng thái.
   function _endTurnHard() { _lineBase = _maxId + 1; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _clearTurn(); }
 
@@ -287,7 +292,7 @@ export function createLiveTranslator(opts) {
       responseModalities: [Modality.AUDIO],
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      translationConfig: { targetLanguageCode: bcp47(st().langCode), echoTargetLanguage: st().transcribeMode ? true : false },
+      translationConfig: { targetLanguageCode: bcp47(st().langCode), echoTargetLanguage: false },   // luôn DỊCH (chép-lời đã gỡ); nói trùng ngôn ngữ đích → echo ở tầng _pump
       contextWindowCompression: { slidingWindow: {} },
       sessionResumption: _handle ? { handle: _handle } : {},
     };

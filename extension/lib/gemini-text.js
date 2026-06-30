@@ -234,15 +234,9 @@ ${lines}`;
     if (!f.length) return '';
     return `\n\nDỮ KIỆN ĐÃ BIẾT (CHÍNH XÁC — ưu tiên dùng cho hero.meta & hero.stats; ĐỪNG mâu thuẫn với nó):\n- ${f.join('\n- ')}`;
   }
-  function _buildReportPrompt(captions, facts) {
-    const lines = _toLines(captions);
-    if (S().transcribeMode) { const d = _detectLangLabel(_rawText(captions)); if (d) _detLang = d; }
-    const L = _outLang();
-    return `Bạn là chuyên gia thiết kế nội dung kiêm thư ký cuộc họp. Đọc TRANSCRIPT ở cuối và xuất BÁO CÁO cuộc họp dưới dạng JSON ĐÚNG theo schema được áp đặt — sẽ được render thành 1 trang landing-page.
-
-NGÔN NGỮ: viết MỌI chuỗi (headline, subhead, eyebrow, label, value, title, points, conclusion, task, owner, due, time, desc, footer...) bằng ${L}.
-
-CÁCH ĐIỀN 5 PHẦN:
+  // Quy tắc điền 5 phần — dùng chung cho cả tạo MỚI lẫn CẬP NHẬT (incremental).
+  function _reportRules(L) {
+    return `CÁCH ĐIỀN 5 PHẦN:
 - hero.eyebrow: nhãn ngắn IN HOA kiểu "BÁO CÁO CUỘC HỌP". hero.headline: MỘT câu khẩu hiệu cô đọng kết quả/mục đích lớn nhất — bọc cụm từ THEN CHỐT trong **...** để được tô màu nhấn. hero.subhead: 2-3 câu bối cảnh/lý do.
 - hero.stats: ĐÚNG 4 thẻ số liệu quan trọng nhất {value, label} — value là CON SỐ/đại lượng NGẮN (vd "3", "85%", "2 tuần", "45 phút"), label là nhãn ngắn. Thiếu số liệu thật thì dùng chỉ số ĐẾM ĐƯỢC (số chủ đề, số việc cần làm, số người, thời lượng). KHÔNG bịa số.
 - hero.meta: 3-4 mục {label, value} tổng quan (Ngày, Thời lượng, Số người, Định dạng). Dùng "DỮ KIỆN ĐÃ BIẾT" nếu có; không rõ → "Chưa xác định".
@@ -254,21 +248,37 @@ CÁCH ĐIỀN 5 PHẦN:
 - footer: một dòng disclaimer ngắn (bản tóm tắt tự động từ transcript, kèm ngày nếu biết).
 
 TRUNG THỰC: chỉ thêm phần/khối CÓ nội dung THẬT; phần rỗng → mảng rỗng hoặc null. TUYỆT ĐỐI KHÔNG BỊA chủ đề/quyết định/người/deadline/số liệu không có trong transcript. Transcript quá ngắn → chỉ điền hero (headline+subhead mô tả thực tế) + để các mảng rỗng.
-THUẬT NGỮ: GIỮ NGUYÊN tiếng Anh/nguyên gốc thuật ngữ IT & tên riêng (bug, deploy, PR, API, sprint, release, CRM, ERP...). KATAKANA tiếng Nhật → khôi phục TIẾNG ANH gốc (デプロイ→deploy...), KHÔNG dịch sang ${L}.
-${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}
----
-TRANSCRIPT:
-${lines}`;
+THUẬT NGỮ: GIỮ NGUYÊN tiếng Anh/nguyên gốc thuật ngữ IT & tên riêng (bug, deploy, PR, API, sprint, release, CRM, ERP...). KATAKANA tiếng Nhật → khôi phục TIẾNG ANH gốc (デプロイ→deploy...), KHÔNG dịch sang ${L}.`;
+  }
+  // prevReport != null → INCREMENTAL: gửi báo cáo cũ (JSON) + CHỈ câu mới → token phẳng (không O(n²)).
+  function _buildReportPrompt(captions, facts, prevReport) {
+    const cap = prevReport ? MAX_NEW_CAPTIONS : 0;
+    const lines = _toLines(captions, cap || undefined);
+    if (S().transcribeMode) { const d = _detectLangLabel(_rawText(captions, cap || undefined)); if (d) _detLang = d; }
+    const L = _outLang();
+    const head = prevReport
+      ? `Bạn là chuyên gia thiết kế nội dung kiêm thư ký cuộc họp. Bạn đang DUY TRÌ báo cáo cuộc họp ĐANG DIỄN RA (JSON landing-page). Dưới đây là BÁO CÁO HIỆN TẠI (JSON) + CÁC CÂU MỚI. CẬP NHẬT báo cáo: gộp thông tin mới vào ĐÚNG phần (hero/problem/bento/actions/roadmap), gộp ý trùng cho cô đọng, GIỮ NGUYÊN nội dung cũ còn đúng (đừng xoá), cập nhật hero.stats & hero.meta theo dữ kiện mới. Trả về TOÀN BỘ báo cáo JSON đã cập nhật, ĐÚNG schema.`
+      : `Bạn là chuyên gia thiết kế nội dung kiêm thư ký cuộc họp. Đọc TRANSCRIPT ở cuối và xuất BÁO CÁO cuộc họp dưới dạng JSON ĐÚNG theo schema được áp đặt — sẽ được render thành 1 trang landing-page.`;
+    const tail = prevReport
+      ? `\n--- BÁO CÁO HIỆN TẠI (JSON) ---\n${JSON.stringify(prevReport)}\n\n--- CÁC CÂU MỚI ---\n${lines || '(không có câu mới)'}`
+      : `\n---\nTRANSCRIPT:\n${lines}`;
+    return `${head}
+
+NGÔN NGỮ: viết MỌI chuỗi (headline, subhead, eyebrow, label, value, title, points, conclusion, task, owner, due, time, desc, footer...) bằng ${L}.
+
+${_reportRules(L)}
+${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
   }
 
   // Trả { ok, report } | { ok:false, error }. Chỉ flash-lite (JSON schema chuẩn); dùng cho CẢ rolling lẫn tổng thể.
-  async function summarizeReport(captions, facts) {
+  // prevReport != null → cập nhật incremental (captions = CHỈ câu mới).
+  async function summarizeReport(captions, facts, prevReport) {
     captions = captions || [];
     if (!S().apiKey || !String(S().apiKey).trim()) return { ok: false, error: 'no-key' };
     if (!captions.length) return { ok: false, error: 'empty' };
     const ai = _ai();
     const chain = await _resolveChain(ai);
-    const prompt = _buildReportPrompt(captions, facts);
+    const prompt = _buildReportPrompt(captions, facts, prevReport);
     let lastErr = 'structured-failed';
     for (const entry of chain.filter(c => !c.gemma)) {
       if (_onCooldown(entry.id)) continue;

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:">
+        content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'self'">
   <title>Caption Translator</title>
   <style>
     /* ============================================================
@@ -652,6 +652,26 @@
       white-space: pre-wrap;   /* tôn trọng \n chèn để xuống dòng tại . ? ! */
     }
 
+    /* ── Giao diện hiển thị (giống extension): áp class lay-* trên #list ── */
+    /* translation (mặc định): chỉ bản dịch — .entry-original đã display:none ở trên */
+    .list.lay-stacked .entry-original { display: block; }   /* gốc TRÊN, dịch DƯỚI */
+    .list.lay-columns .entry { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; align-items: start; }
+    .list.lay-columns .entry-meta { grid-column: 1 / -1; }
+    .list.lay-columns .entry-original { display: block; grid-column: 1; margin-bottom: 0; }   /* TRÁI = gốc */
+    .list.lay-columns .entry-translated { grid-column: 2; }                                   /* PHẢI = dịch */
+    /* dual: 2 luồng độc lập (gốc | dịch) — dựng bởi renderDual() */
+    .list.lay-dual { display: flex; gap: 14px; align-items: flex-start; }
+    .list.lay-dual .dual-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .list.lay-dual .dual-line { white-space: pre-wrap; padding: 4px 0; border-bottom: 1px solid var(--m3-line); line-height: 1.5; }
+    .list.lay-dual .dual-col.dual-o .dual-line { color: var(--m3-on-3); font-size: 12px; }
+    .list.lay-dual .dual-col.dual-t .dual-line { font-size: 13.5px; color: var(--m3-on); }
+    /* Bộ chọn layout trong Settings */
+    .layout-pick { display: flex; gap: 6px; flex: 1; }
+    .lay-opt { flex: 1; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--m3-line); border-radius: 8px; padding: 7px; cursor: pointer; color: var(--m3-on-3); }
+    .lay-opt svg { width: 20px; height: 20px; fill: currentColor; }
+    .lay-opt:hover { border-color: var(--m3-accent); }
+    .lay-opt.active { border-color: var(--m3-accent); color: var(--m3-accent-d); }
+
     /* ── Live entry (currently being spoken) — FOCAL POINT ──
        Flat-blue left accent strip leads the eye to the translated line
        (graft: B mechanism, C's single blue, no gradient). */
@@ -1263,7 +1283,7 @@
 
   <!-- Status -->
   <div class="status" id="status">
-    <button id="cc-btn" data-i18n-title="status.ccTitle" title="Bật/tắt Live Captions trên Teams">▶</button>
+    <button id="cc-btn" title="Bắt đầu / Dừng ghi">▶</button>
     <div class="lang-quick" id="lang-quick">
       <button class="lq-flag" id="lq-src" title="Ngôn ngữ nguồn"></button>
       <span class="lq-arrow" aria-hidden="true">→</span>
@@ -1288,7 +1308,6 @@
       <div class="menu-row">
         <span data-i18n="settings.audioSource">Nguồn âm thanh</span>
         <select id="s-capture">
-          <option value="teams" data-i18n="capture.teams">💬 Teams Live Caption</option>
           <option value="system" data-i18n="capture.system">🔊 Audio hệ thống</option>
           <option value="mic" data-i18n="capture.mic">🎤 Microphone</option>
         </select>
@@ -1306,6 +1325,15 @@
             <span class="app-sel-chev">▾</span>
           </button>
           <div id="s-app-list" class="app-list" style="display:none"></div>
+        </div>
+      </div>
+      <div class="menu-row">
+        <span data-i18n="settings.layout">Giao diện dịch</span>
+        <div class="layout-pick" id="layout-pick">
+          <button class="lay-opt" data-layout="translation" title="Chỉ dịch" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="5" width="12" height="2" rx="1"/><rect x="2" y="9" width="9" height="2" rx="1"/></svg></button>
+          <button class="lay-opt" data-layout="stacked" title="Gốc + dịch (trên/dưới)" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="4" rx="1" opacity=".5"/><rect x="2" y="9" width="12" height="4" rx="1"/></svg></button>
+          <button class="lay-opt" data-layout="columns" title="Gốc | dịch (2 cột)" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="10" rx="1" opacity=".5"/><rect x="9" y="3" width="5" height="10" rx="1"/></svg></button>
+          <button class="lay-opt" data-layout="dual" title="2 luồng (gốc | dịch)" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="6" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="9" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="9" y="4.5" width="5" height="1.6" rx=".8"/><rect x="9" y="7.5" width="5" height="1.6" rx=".8"/></svg></button>
         </div>
       </div>
       <div class="menu-sep"></div>
@@ -1434,7 +1462,8 @@
     let pinned      = false;
     let count       = 0;
     let captionsOn  = false;
-    let _currentSource  = 'teams'; // theo dõi nguồn hiện tại
+    let _currentSource  = 'system'; // theo dõi nguồn hiện tại (system/mic)
+    let _layout = 'translation';   // giao diện hiển thị: translation | stacked | columns | dual (giống extension)
     let _currentProvider = 'online';  // theo dõi provider hiện tại
     let _srcLang = 'ja';           // ngôn ngữ nguồn đã chọn (system/mic); Teams thì auto theo Teams
     let _tgtLang = 'vi';           // ngôn ngữ đích hiện tại (đồng bộ với cờ lq-tgt)
@@ -1501,7 +1530,7 @@
       // Khôi phục ngôn ngữ ĐÍCH (quick selector cạnh ▶) + báo backend.
       const _lang = s.lang || 'vi';
       _tgtLang = _lang;
-      _transcribeMode = !!s.transcribeMode;
+      _transcribeMode = false;   // chế độ chép lời đã gỡ — luôn dịch (nói trùng ngôn ngữ đích → echo lời gốc ở gemini-live)
       try { setTgtDisplay(); } catch (e) {}
       api.setLang(_lang);
       _ttsOn = false;   // TTS local (Supertonic) vẫn tắt — không đọc to dù settings cũ ttsEnabled=true
@@ -1514,9 +1543,11 @@
       try { setFlagActive(lqSrcPop, _srcLang); } catch (e) {}
       if (!s.srcLang) api.saveSettings({ srcLang: _srcLang });
       _currentSource = s.captureSource || 'system';
+      _layout = s.layout || 'translation';
       _audioProcessName = s.audioProcessName || '';
       _audioProcessApp = s.audioProcessApp || '';
       try { renderEmpty(); } catch (e) {}
+      try { applyLayout(); } catch (e) {}
       _currentProvider = 'gemini-live';   // engine duy nhất giờ là Gemini Live Translate
       try {
         const apk = document.getElementById('s-apikey');
@@ -1592,6 +1623,68 @@
       el._author = a; el._ts = tm; el._orig = orig; el._tr = tr;
     }
 
+    // ── Giao diện hiển thị gốc/dịch (giống extension): translation | stacked | columns | dual ──
+    function curLayout() { return _layout || 'translation'; }
+    function _splitSentApp(s) {   // tách câu cho mode "2 luồng" (bỏ qua '.' thập phân & '.' giữa câu)
+      s = s || ''; const out = []; let start = 0;
+      for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c === '.') { if (/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '')) continue; let j = i + 1; while (j < s.length && s[j] === ' ') j++; if (j < s.length && /\p{Ll}/u.test(s[j])) continue; }
+        if ('.!?。！？．'.includes(c)) { const seg = s.slice(start, i + 1).trim(); if (seg) out.push(seg); start = i + 1; }
+      }
+      const tail = s.slice(start).trim(); if (tail) out.push(tail);
+      return out;
+    }
+    function setLayoutActive() {
+      const lay = curLayout();
+      document.querySelectorAll('#layout-pick .lay-opt').forEach(b => b.classList.toggle('active', b.dataset.layout === lay));
+    }
+    function renderDual() {   // 2 luồng độc lập: gom toàn bộ GỐC | DỊCH, tách câu, hiện 2 cột
+      listEl.classList.remove('lay-translation', 'lay-stacked', 'lay-columns'); listEl.classList.add('lay-dual');
+      entryEls.clear();
+      const oArr = [], tArr = [];
+      for (const c of captionData.values()) { if (c.original && c.original.trim()) oArr.push(c.original.trim()); if (c.translated && c.translated.trim()) tArr.push(c.translated.trim()); }
+      const oS = _splitSentApp(oArr.join(' ')), tS = _splitSentApp(tArr.join(' '));
+      listEl.innerHTML = '<div class="dual-col dual-o"></div><div class="dual-col dual-t"></div>';
+      const oc = listEl.firstChild, tc = listEl.lastChild;
+      for (const s of oS) { const d = document.createElement('div'); d.className = 'dual-line'; d.textContent = s; oc.appendChild(d); }
+      for (const s of tS) { const d = document.createElement('div'); d.className = 'dual-line'; d.textContent = s; tc.appendChild(d); }
+      scheduleScroll();
+    }
+    function reRenderAll() {   // dựng lại list khi đổi layout (vào/ra dual)
+      const lay = curLayout();
+      setLayoutActive();   // đồng bộ highlight nút layout (reRenderAll dùng khi vào/ra dual)
+      if (lay === 'dual') { renderDual(); return; }
+      listEl.classList.remove('lay-dual', 'lay-stacked', 'lay-columns', 'lay-translation'); listEl.classList.add('lay-' + lay);
+      listEl.innerHTML = ''; entryEls.clear(); _retired.clear();
+      const all = [...captionData.entries()];
+      const startI = Math.max(0, all.length - MAX_ENTRIES);
+      count = 0;
+      for (let i = startI; i < all.length; i++) {
+        const [id, c] = all[i];
+        const el = document.createElement('div'); el.className = 'entry'; el.dataset.id = id; buildEntry(el); listEl.appendChild(el); entryEls.set(id, el); count++;
+        el._author.textContent = c.author || ''; el._ts.textContent = c.ts || '';
+        el._origFull = c.original || ''; el._origShown = (c.original || '').length; el._orig.textContent = c.original || '';
+        el._tr.textContent = c.translated || '';
+      }
+      for (let i = 0; i < startI; i++) _retired.add(all[i][0]);
+      if (countEl) countEl.textContent = t('footer.count', { n: count });
+      scheduleScroll();
+    }
+    function applyLayout() {
+      const lay = curLayout();
+      setLayoutActive();
+      if (lay === 'dual') renderDual();
+      else { listEl.classList.remove('lay-dual', 'lay-stacked', 'lay-columns', 'lay-translation'); listEl.classList.add('lay-' + lay); }
+      if (lay === 'columns' || lay === 'dual') { try { api.ensureWidth(820); } catch (e) {} }   // 2 cột → nới cửa sổ đủ chỗ chứa gốc+dịch
+    }
+    document.getElementById('layout-pick')?.addEventListener('click', (ev) => {
+      const b = ev.target.closest('.lay-opt'); if (!b) return;
+      const old = _layout, next = b.dataset.layout; if (!next || next === old) return;
+      _layout = next; try { api.saveSettings({ layout: next }); } catch (e) {}
+      if (next === 'dual' || old === 'dual') reRenderAll(); else applyLayout();
+    });
+
     // rAF auto-scroll: gộp nhiều caption vào 1 reflow/frame thay vì ép layout đồng bộ mỗi câu.
     let _scrollPending = false;
     function scheduleScroll() {
@@ -1623,7 +1716,16 @@
     }
 
     // ── Caption: hiển/cập nhật entry (pending rồi được dịch) ──
-    api.onCaptionLive(({ id, author, original, translated, ts, tsMs, isPartial }) => {
+    api.onCaptionLive(({ id, author, original, translated, ts, tsMs, isPartial, remove }) => {
+      if (remove) {   // engine báo xoá hàng (DP gộp lại còn ít hàng hơn / dòng LIVE biến mất) → tránh "hàng ma"
+        const el0 = entryEls.get(id);
+        const counted = !!el0 || _retired.has(id);   // entry này từng được tính vào count?
+        if (el0) { el0.remove(); entryEls.delete(id); }
+        if (counted) { count = Math.max(0, count - 1); countEl.textContent = t('footer.count', { n: count }); }
+        captionData.delete(id); _retired.delete(id);
+        if (curLayout() === 'dual') renderDual();
+        return;
+      }
       listEl.querySelector('.empty, .hint-banner')?.remove();
 
       const isPending  = translated === '…';
@@ -1647,6 +1749,8 @@
         if (_sumPanelOpen && !_sumBusy && (captionData.size - _sumPrevCount) >= SUM_MIN_NEW) { try { summarizeTick(); } catch (e) {} }
       }
 
+      // Layout "2 luồng" (dual): dựng lại 2 cột từ captionData → KHÔNG render per-entry.
+      if (curLayout() === 'dual') { renderDual(); return; }
       // Entry đã bị evict khỏi DOM (họp dài) → chỉ giữ data ở trên, KHÔNG tái tạo node
       // (tránh node mọc sai thứ tự + đếm 'câu' sai khi bản dịch tới muộn).
       if (_retired.has(id)) return;
@@ -1954,15 +2058,7 @@
       if (wasTr) api.saveSettings({ transcribeMode: false });   // tắt chép-lời → nối lại phiên dịch
       setTgtDisplay(); refreshTtsBtn();
     });
-    // Thêm option "📝 Chép lời" vào CUỐI popup đích (data-i18n để applyI18n tự dịch lại khi đổi ngôn ngữ UI).
-    (function addTranscribeOpt() {
-      if (!lqTgtPop) return;
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'flag-btn lq-transcribe-opt'; b.dataset.code = '__transcribe__';
-      b.setAttribute('data-i18n-title', 'lang.transcribeHint');
-      b.innerHTML = '<span class="fl auto">📝</span><span class="fl-name" data-i18n="lang.transcribe">Chép lời</span>';
-      lqTgtPop.appendChild(b);
-    })();
+    // (Đã GỠ option "📝 Chép lời" — app luôn dịch; nói trùng ngôn ngữ đích → echo lời gốc ở gemini-live.)
     lqSrc.addEventListener('click', (e) => {
       e.stopPropagation();
       if (lqSrc.classList.contains('lq-disabled')) return;   // Teams: nguồn auto → không mở picker
@@ -2499,122 +2595,192 @@
       api.exportSummary({ markdown: buildReportDoc(md), defaultName: `bao-cao-${date}.html`, dialogTitle: t('dialog.saveSummaryTitle') });
     }
 
-    // ════ BÁO CÁO "Y HỆT": JSON có cấu trúc (Gemini) → renderer cố định → HTML ════
-    const FANCY_CSS = `:root{--ground:#F4F6F8;--paper:#FFFFFF;--ink:#19283A;--muted:#5C6B7E;--faint:#8794A4;--accent:#1B5E7E;--accent-deep:#154B64;--accent-soft:#E8F0F3;--hair:#E0E5EB;--good:#2E7D5B;--good-soft:#E6F1EB;--plan:#1B5E7E;--plan-soft:#E8F0F3;--todo:#B5651D;--todo-soft:#F6EDE2;--warn:#B5651D;--warn-soft:#F7EFE4;--warn-line:#E9D4B6;--serif:"Cambria","Georgia","Times New Roman",serif;--sans:system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+    // ════ BÁO CÁO LANDING-PAGE: JSON có cấu trúc (Gemini) → renderer cố định → HTML "y hệt" extension ════
+    // 5 phần: hero · problem (thách thức↔giải pháp) · bento · action items (checkbox) · roadmap.
+    const FONT_LINK = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">';
+    const REVEAL_JS = '<scr' + 'ipt>document.documentElement.classList.add("js");(function(){try{if(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches)return;var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target);}});},{threshold:.12,rootMargin:"0px 0px -8% 0px"});document.querySelectorAll(".reveal").forEach(function(el){io.observe(el);});}catch(_){document.querySelectorAll(".reveal").forEach(function(el){el.classList.add("in");});}})();</scr' + 'ipt>';
+    const FANCY_CSS = `:root{
+--bg:#F7F3EB;--bg-2:#F0EADE;--surface:#FCFAF4;--surface-2:#F3EEE3;
+--ink:#36312A;--ink-soft:#5E564A;--ink-faint:#988E7D;
+--line:#E5DDCF;--line-strong:#D7CCB9;
+--cel:#6E9F8E;--cel-deep:#517C6D;--cel-tint:#E3EDE7;
+--hi:#B36A4D;--hi-bg:#F2E2D8;--hi-dot:#C2745A;
+--md:#9A7A2E;--md-bg:#F1E9D2;--md-dot:#C7A24E;
+--lo:#5E7E6E;--lo-bg:#E1EAE4;--lo-dot:#7E9B8C;
+--disp:"Bricolage Grotesque",-apple-system,system-ui,"Segoe UI",sans-serif;
+--body:"Inter",-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;
+--mono:"Space Mono","SFMono-Regular",Consolas,"Cascadia Code",monospace}
 *{box-sizing:border-box}
-body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-.sheet{max-width:900px;margin:0 auto;padding:clamp(20px,4vw,56px) clamp(14px,4vw,40px)}
-.doc{background:var(--paper);border:1px solid var(--hair);border-radius:6px;box-shadow:0 1px 2px rgba(25,40,58,.04),0 18px 44px -30px rgba(25,40,58,.3);overflow:hidden}
-.head{padding:clamp(28px,5vw,52px) clamp(24px,5vw,56px) clamp(24px,4vw,38px);border-top:4px solid var(--accent)}
-.eyebrow{font-size:12.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
-.doc-title{font-family:var(--serif);font-weight:700;font-size:clamp(26px,4.2vw,38px);line-height:1.18;letter-spacing:-.01em;margin:0;text-wrap:balance;color:var(--ink)}
-.meta{display:flex;flex-wrap:wrap;gap:12px 26px;margin-top:22px;padding-top:18px;border-top:1px solid var(--hair);font-size:14px;color:var(--muted)}
-.meta .m-label{color:var(--faint);font-size:11px;letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:2px}
-.meta strong{color:var(--ink);font-weight:600}
-.body{padding:0 clamp(24px,5vw,56px) clamp(20px,4vw,44px)}
-section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
-.sec-head{display:flex;align-items:baseline;gap:14px;margin:0 0 18px}
-.sec-num{font-family:var(--serif);font-size:15px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;min-width:1.4em}
-.sec-title{font-family:var(--serif);font-size:clamp(21px,2.9vw,26px);font-weight:700;letter-spacing:-.005em;margin:0;color:var(--ink);text-wrap:balance}
-.sub{margin-top:30px}
-.sub:first-of-type{margin-top:4px}
-.sub-title{font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--accent-deep);margin:0 0 12px;display:flex;align-items:center;gap:10px}
-.sub-title .ix{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:700}
-.sub-title::after{content:"";flex:1;height:1px;background:var(--hair)}
-.body p{margin:0 0 12px;max-width:72ch;color:#33414f}
-.points{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:13px}
-.points>li{position:relative;padding-left:22px;max-width:72ch;color:#33414f}
-.points>li::before{content:"";position:absolute;left:0;top:.62em;width:7px;height:7px;border-radius:2px;background:var(--accent);transform:rotate(45deg)}
-.points b{color:var(--ink);font-weight:600}
-.subpoints{list-style:none;margin:9px 0 0;padding:0;display:flex;flex-direction:column;gap:7px}
-.subpoints li{position:relative;padding-left:20px;color:var(--muted);font-size:15.5px;line-height:1.55}
-.subpoints li::before{content:"";position:absolute;left:2px;top:.72em;width:9px;height:1.5px;background:var(--faint)}
-.cardrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:4px 0 0}
-.mcard{background:var(--ground);border:1px solid var(--hair);border-radius:6px;padding:16px 18px;border-top:3px solid var(--accent)}
-.mcard h4{margin:0 0 6px;font-size:15px;font-weight:700;color:var(--ink);letter-spacing:.01em}
-.mcard p{margin:0;font-size:14.5px;color:var(--muted);line-height:1.5;max-width:none}
-.tbl-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:6px;margin:14px 0 0}
-.doc table{border-collapse:collapse;width:100%;min-width:520px;font-size:15px;font-variant-numeric:tabular-nums}
-.doc thead th{background:var(--accent);color:#fff;text-align:left;font-weight:600;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;padding:11px 14px;white-space:nowrap}
-.doc tbody td{padding:13px 14px;border-top:1px solid var(--hair);vertical-align:top;color:#33414f;line-height:1.5}
-.doc tbody tr:nth-child(even) td{background:#FAFBFC}
-.doc tbody td:first-child{font-weight:600;color:var(--ink)}
-.stat{display:flex;align-items:center;gap:20px;flex-wrap:wrap;background:linear-gradient(180deg,#1B5E7E,#154B64);color:#fff;border-radius:8px;padding:20px 24px;margin-top:14px}
-.stat-fig{font-family:var(--serif);font-size:clamp(28px,5vw,40px);font-weight:700;line-height:1;letter-spacing:-.01em}
-.stat-cap{font-size:14px;color:#CFE2EA;max-width:46ch;line-height:1.45;margin:0}
-.decisions{display:flex;flex-direction:column;gap:14px;margin-top:4px}
-.decision{display:grid;grid-template-columns:152px 1fr;gap:8px 20px;align-items:start;padding:16px 18px;background:var(--ground);border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:5px}
-.decision.is-done{border-left-color:var(--good)}
-.decision.is-plan{border-left-color:var(--plan)}
-.decision.is-todo{border-left-color:var(--todo)}
-.decision p{margin:0;color:#33414f;font-size:15.5px;line-height:1.55;max-width:none}
-.tag{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:999px;white-space:nowrap;align-self:start}
-.tag::before{content:"";width:7px;height:7px;border-radius:50%}
-.is-done .tag{color:var(--good);background:var(--good-soft)}
-.is-done .tag::before{background:var(--good)}
-.is-plan .tag{color:var(--plan);background:var(--plan-soft)}
-.is-plan .tag::before{background:var(--plan)}
-.is-todo .tag{color:var(--todo);background:var(--todo-soft)}
-.is-todo .tag::before{background:var(--todo)}
-.problems{display:flex;flex-direction:column;gap:14px;margin-top:4px}
-.prob{background:var(--warn-soft);border:1px solid var(--warn-line);border-left:3px solid var(--warn);border-radius:6px;padding:15px 18px}
-.prob h4{margin:0 0 7px;font-size:15px;font-weight:700;color:#7d4513;letter-spacing:.01em}
-.prob p{margin:0;color:#5b4a36;font-size:15px;line-height:1.55;max-width:none}
-.prob .subpoints li{color:#6a5640}
-.prob .subpoints li::before{background:var(--warn)}
-.foot{padding:18px clamp(24px,5vw,56px) 26px;border-top:1px solid var(--hair);font-size:12.5px;color:var(--faint);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
-@media(max-width:540px){.decision{grid-template-columns:1fr;gap:10px}.stat{gap:8px}}
-@media print{body{background:#fff}.sheet{padding:0;max-width:none}.doc{border:0;border-radius:0;box-shadow:none}section,.tbl-wrap,.stat,.prob,.decision,.mcard{break-inside:avoid}}`;
-    const _fesc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const _finl = s => _fesc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`(.+?)`/g,'<code>$1</code>');
-    const _fsub = sub => (sub && sub.length) ? ('<ul class="subpoints">' + sub.map(x => `<li>${_finl(x)}</li>`).join('') + '</ul>') : '';
-    const _flbl = p => p.label ? `<b>${_fesc(p.label)}${/[:：]\s*$/.test(p.label) ? '' : ':'}</b> ` : '';
-    const _fcells = r => Array.isArray(r) ? r : ((r && r.cells) || []);
-    const _fhasTable = t => t && ((t.columns && t.columns.length) || (t.rows && t.rows.length));
-    const _FSCLS = { done: 'is-done', plan: 'is-plan', todo: 'is-todo' };
-    function _fblocks(o, warn) {
-      let h = '';
-      if (o.intro) h += `<p>${_finl(o.intro)}</p>`;
-      if (o.points && o.points.length) h += warn
-        ? '<div class="problems">' + o.points.map(p => `<div class="prob">${p.label ? `<h4>${_fesc(p.label)}</h4>` : ''}${p.text ? `<p>${_finl(p.text)}</p>` : ''}${_fsub(p.sub)}</div>`).join('') + '</div>'
-        : '<ul class="points">' + o.points.map(p => `<li>${_flbl(p)}${_finl(p.text)}${_fsub(p.sub)}</li>`).join('') + '</ul>';
-      if (o.cards && o.cards.length) h += '<div class="cardrow">' + o.cards.map(c => `<div class="mcard">${c.title ? `<h4>${_fesc(c.title)}</h4>` : ''}<p>${_finl(c.text)}</p></div>`).join('') + '</div>';
-      if (o.stat && o.stat.value) h += `<div class="stat"><span class="stat-fig">${_fesc(o.stat.value)}</span>${o.stat.caption ? `<p class="stat-cap">${_finl(o.stat.caption)}</p>` : ''}</div>`;
-      if (_fhasTable(o.table)) h += `<div class="tbl-wrap"><table><thead><tr>${(o.table.columns || []).map(c => `<th>${_finl(c)}</th>`).join('')}</tr></thead><tbody>${(o.table.rows || []).map(r => `<tr>${_fcells(r).map(c => `<td>${_finl(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
-      if (o.decisions && o.decisions.length) h += '<div class="decisions">' + o.decisions.map(d => `<div class="decision ${_FSCLS[d.status] || 'is-plan'}"><span class="tag">${_fesc(d.label)}</span><p>${_finl(d.text)}</p></div>`).join('') + '</div>';
-      return h;
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{max-width:100%}
+h1,h2,h3,h4{font-family:var(--disp);font-weight:700;letter-spacing:-.02em;line-height:1.12;margin:0}
+p{margin:0}
+ul,ol{margin:0;padding:0;list-style:none}
+a:focus-visible,button:focus-visible,label:focus-visible,input:focus-visible{outline:2px solid var(--cel-deep);outline-offset:2px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 clamp(16px,4vw,40px)}
+.eyebrow{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--cel-deep);margin:0 0 18px}
+.eyebrow::before{content:"";width:26px;height:2px;background:var(--cel);border-radius:2px;flex:0 0 auto}
+section{padding:clamp(26px,3.4vw,40px) 0}
+section+section,.foot{border-top:1px solid var(--line)}
+/* Hero */
+.hero{padding:clamp(28px,4.5vw,46px) 0 clamp(22px,3vw,34px)}
+.headline{font-family:var(--disp);font-weight:800;font-size:clamp(30px,6vw,56px);letter-spacing:-.025em;line-height:1.05;text-wrap:balance;max-width:20ch}
+.headline .hl{color:var(--cel-deep)}
+.sub{margin-top:20px;font-size:clamp(16px,2.1vw,19px);color:var(--ink-soft);max-width:62ch;line-height:1.6}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px}
+.stat{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px 20px 18px;overflow:hidden}
+.stat::before{content:"";position:absolute;top:0;left:22px;width:30px;height:3px;background:var(--cel);border-radius:0 0 3px 3px}
+.stat-val{font-family:var(--mono);font-weight:700;font-size:clamp(23px,3.2vw,34px);line-height:1;color:var(--ink);letter-spacing:-.02em}
+.stat-label{margin-top:11px;font-family:var(--mono);font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint);line-height:1.3}
+.meta{display:flex;flex-wrap:wrap;gap:10px 26px;margin-top:28px;padding-top:20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
+.meta-k{color:var(--ink-soft);font-weight:700}
+/* Problem ↔ Solution */
+.problem{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.pcard{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:clamp(20px,3vw,30px)}
+.pcard.is-solution{background:var(--cel-tint);border-color:var(--cel)}
+.pc-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.pc-ico{font-size:22px;line-height:1}
+.pc-head h3{font-size:clamp(18px,2.4vw,22px)}
+.pts{display:flex;flex-direction:column;gap:11px}
+.pts li{position:relative;padding-left:21px;color:var(--ink-soft);line-height:1.55}
+.pts li::before{content:"";position:absolute;left:2px;top:.6em;width:7px;height:7px;border-radius:2px;background:var(--cel);transform:rotate(45deg)}
+.pcard strong,.b strong{color:var(--ink);font-weight:600}
+code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding:1px 6px;border-radius:5px}
+/* Bento */
+.bento{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+.b{grid-column:1 / -1;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:clamp(20px,3vw,30px);transition:transform .25s ease,box-shadow .25s ease}
+.b:hover{transform:translateY(-4px);box-shadow:0 18px 40px -28px rgba(54,49,42,.5)}
+.b-ico{font-size:26px;line-height:1;margin-bottom:12px}
+.b h3{font-size:clamp(18px,2.3vw,22px);margin-bottom:14px}
+.b .pts{margin-bottom:16px}
+.b-concl{display:inline-block;background:var(--surface-2);color:var(--ink-soft);border-radius:999px;padding:8px 16px;font-size:13.5px;line-height:1.4}
+.b-concl::before{content:"\\2713  ";color:var(--cel-deep);font-weight:700}
+@media(min-width:760px){.b.w5{grid-column:span 5}.b.w7{grid-column:span 7}.b.w12{grid-column:1 / -1}}
+/* Action items */
+.actions-sec .panel{background:var(--bg-2);border:1px solid var(--line);border-radius:18px;padding:clamp(20px,4vw,34px)}
+.actions{display:flex;flex-direction:column;gap:10px;margin-top:2px}
+.ai{display:grid;grid-template-columns:auto 1fr auto auto auto;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 16px;cursor:pointer}
+.ai input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.ai .box{flex:0 0 auto;width:20px;height:20px;border:2px solid var(--line-strong);border-radius:6px;display:grid;place-items:center;transition:.18s}
+.ai .box::after{content:"";width:10px;height:6px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) scale(0);margin-top:-2px;transition:transform .18s}
+.ai input:checked+.box{background:var(--cel);border-color:var(--cel)}
+.ai input:checked+.box::after{transform:rotate(-45deg) scale(1)}
+.ai input:focus-visible+.box{outline:2px solid var(--cel-deep);outline-offset:2px}
+.ai .task{color:var(--ink);line-height:1.45;transition:.18s}
+.ai input:checked~.task{text-decoration:line-through;color:var(--ink-faint)}
+.ai .who,.ai .due{font-family:var(--mono);font-size:12px;color:var(--ink-soft);white-space:nowrap}
+.ai .due{color:var(--ink-faint)}
+.pri{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:999px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.pri::before{content:"";width:7px;height:7px;border-radius:50%}
+.pri-hi{color:var(--hi);background:var(--hi-bg)}.pri-hi::before{background:var(--hi-dot)}
+.pri-md{color:var(--md);background:var(--md-bg)}.pri-md::before{background:var(--md-dot)}
+.pri-lo{color:var(--lo);background:var(--lo-bg)}.pri-lo::before{background:var(--lo-dot)}
+@media(max-width:640px){.ai{grid-template-columns:auto 1fr;row-gap:7px}.ai .task,.ai .who,.ai .due,.ai .pri{grid-column:2}.ai .pri{justify-self:start}}
+/* Roadmap timeline */
+.road{display:flex;flex-direction:column}
+.step{position:relative;padding:0 0 26px 30px}
+.step:last-child{padding-bottom:0}
+.step-dot{position:absolute;left:0;top:4px;width:15px;height:15px;border-radius:50%;background:var(--cel);border:3px solid var(--bg);box-shadow:0 0 0 1.5px var(--cel);z-index:1}
+.step::after{content:"";position:absolute;left:7px;top:4px;bottom:-4px;width:2px;background:var(--line-strong)}
+.step:last-child::after{display:none}
+.step-time{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--cel-deep);margin-bottom:6px;letter-spacing:.04em}
+.step-title{font-family:var(--disp);font-size:16.5px;margin-bottom:6px}
+.step-desc{color:var(--ink-soft);font-size:14.5px;line-height:1.5}
+@media(min-width:760px){.road{flex-direction:row}.step{flex:1;padding:32px 24px 0 0}.step-dot{top:6px}.step::after{left:15px;right:0;top:12.5px;bottom:auto;width:auto;height:2px}}
+/* Footer */
+.foot{padding:30px 0 50px;margin-top:8px;font-family:var(--mono);font-size:12px;color:var(--ink-faint);text-align:center}
+/* Reveal (chỉ ẩn khi JS chạy được) */
+html.js .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+html.js .reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){html.js .reveal,html.js .reveal.in{opacity:1;transform:none;transition:none}}
+@media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.problem{grid-template-columns:1fr}}
+@media(max-width:420px){.stats{grid-template-columns:1fr}}
+@media print{body{background:#fff}.b:hover{transform:none;box-shadow:none}section,.b,.pcard,.ai,.step{break-inside:avoid}}`;
+    const _fesc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const _finl = s => _fesc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code>$1</code>');
+    const _fhl = s => _fesc(s).replace(/\*\*(.+?)\*\*/g, '<span class="hl">$1</span>');
+    const _ful = pts => { const a = (pts || []).filter(x => x && String(x).trim()); return a.length ? '<ul class="pts">' + a.map(x => `<li>${_finl(x)}</li>`).join('') + '</ul>' : ''; };
+    function _bentoSpans(n) {
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        if (n % 2 === 1 && i === n - 1) { out.push('w12'); continue; }
+        const wide = (Math.floor(i / 2) % 2 === 0) === (i % 2 === 0);
+        out.push(wide ? 'w7' : 'w5');
+      }
+      return out;
     }
+    const _PRI = Object.assign(Object.create(null), { high: ['pri-hi', 'Cao'], mid: ['pri-md', 'Trung bình'], low: ['pri-lo', 'Thấp'] });
     function renderReport(r) {
-      r = r || {};
-      const meta = (r.meta || []).filter(m => m && m.value).map(m => `<div><span class="m-label">${_fesc(m.label)}</span><strong>${_fesc(m.value)}</strong></div>`).join('');
-      const head = `<header class="head">${r.eyebrow ? `<p class="eyebrow">${_fesc(r.eyebrow)}</p>` : ''}<h1 class="doc-title">${_fesc(r.title || 'Báo cáo cuộc họp')}</h1>${meta ? `<div class="meta">${meta}</div>` : ''}</header>`;
-      const body = '<div class="body">' + (r.sections || []).map((s, i) => {
-        const num = String(i + 1).padStart(2, '0'), warn = s.tone === 'warn';
-        let inner = _fblocks(s, warn);
-        if (s.subs && s.subs.length) inner += s.subs.map((sub, j) => `<div class="sub"><p class="sub-title"><span class="ix">${i + 1}.${j + 1}</span> ${_fesc(sub.title)}</p>${_fblocks(sub, sub.tone === 'warn')}</div>`).join('');
-        return `<section><div class="sec-head"><span class="sec-num">${num}</span><h2 class="sec-title">${_fesc(s.heading)}</h2></div>${inner}</section>`;
-      }).join('') + '</div>';
-      const foot = r.footer ? `<footer class="foot"><span>${_fesc(r.footer)}</span></footer>` : '';
-      return `<div class="sheet"><article class="doc">${head}${body}${foot}</article></div>`;
+      r = r || {}; const h = r.hero || {}, lab = r.labels || {};
+      const stats = (h.stats || []).filter(s => s && s.value).slice(0, 4)
+        .map(s => `<div class="stat"><div class="stat-val">${_fesc(s.value)}</div><div class="stat-label">${_fesc(s.label)}</div></div>`).join('');
+      const meta = (h.meta || []).filter(m => m && m.value)
+        .map(m => `<span class="meta-item"><span class="meta-k">${_fesc(m.label)}:</span> ${_fesc(m.value)}</span>`).join('');
+      const hero = `<header class="hero reveal">${h.eyebrow ? `<p class="eyebrow">${_fesc(h.eyebrow)}</p>` : ''}`
+        + `<h1 class="headline">${_fhl(h.headline || 'Tóm tắt cuộc họp')}</h1>`
+        + (h.subhead ? `<p class="sub">${_finl(h.subhead)}</p>` : '')
+        + (stats ? `<div class="stats">${stats}</div>` : '')
+        + (meta ? `<div class="meta">${meta}</div>` : '') + `</header>`;
+      let problem = '';
+      const p = r.problem;
+      if (p && ((p.challenge && p.challenge.title) || (p.solution && p.solution.title))) {
+        const side = (s, cls, ico) => (s && s.title) ? `<article class="pcard ${cls}"><div class="pc-head"><span class="pc-ico">${ico}</span><h3>${_fesc(s.title)}</h3></div>${_ful(s.points)}</article>` : '';
+        problem = `<section class="reveal"><p class="eyebrow">${_fesc(lab.problem || 'Vấn đề cốt lõi')}</p><div class="problem">${side(p.challenge, '', '⚠️')}${side(p.solution, 'is-solution', '💡')}</div></section>`;
+      }
+      let bento = '';
+      const bs = (r.bento || []).filter(b => b && b.title);
+      if (bs.length) {
+        const sp = _bentoSpans(bs.length);
+        bento = `<section class="reveal"><p class="eyebrow">${_fesc(lab.bento || 'Chủ đề chính')}</p><div class="bento">`
+          + bs.map((b, i) => `<article class="b ${sp[i] || ''}">${b.icon ? `<div class="b-ico">${_fesc(b.icon)}</div>` : ''}<h3>${_fesc(b.title)}</h3>${_ful(b.points)}${b.conclusion ? `<p class="b-concl">${_finl(b.conclusion)}</p>` : ''}</article>`).join('')
+          + `</div></section>`;
+      }
+      let actions = '';
+      const as = (r.actions || []).filter(a => a && a.task);
+      if (as.length) {
+        actions = `<section class="actions-sec reveal"><div class="panel"><p class="eyebrow">${_fesc(lab.actions || 'Việc cần làm')}</p><div class="actions">`
+          + as.map(a => { const pr = _PRI[a.priority] || _PRI.mid;
+            return `<label class="ai"><input type="checkbox"><span class="box"></span><span class="task">${_finl(a.task)}</span><span class="who">${a.owner ? _fesc(a.owner) : '—'}</span><span class="due">${a.due ? _fesc(a.due) : '—'}</span><span class="pri ${pr[0]}">${pr[1]}</span></label>`;
+          }).join('')
+          + `</div></div></section>`;
+      }
+      let road = '';
+      const rs = (r.roadmap || []).filter(s => s && s.title);
+      if (rs.length) {
+        road = `<section class="reveal"><p class="eyebrow">${_fesc(lab.roadmap || 'Lộ trình tiếp theo')}</p><ol class="road">`
+          + rs.map(s => `<li class="step"><span class="step-dot"></span>${s.time ? `<div class="step-time">${_fesc(s.time)}</div>` : ''}<h4 class="step-title">${_fesc(s.title)}</h4>${s.desc ? `<p class="step-desc">${_finl(s.desc)}</p>` : ''}</li>`).join('')
+          + `</ol></section>`;
+      }
+      const foot = `<footer class="foot">${r.footer ? _fesc(r.footer) : 'Bản tóm tắt tự động từ transcript cuộc họp.'}</footer>`;
+      return `<div class="wrap">${hero}${problem}${bento}${actions}${road}${foot}</div>`;
     }
     function buildFancyDoc(r) {
       const lang = document.documentElement.lang || 'vi';
-      return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${_fesc(r && r.title || 'Báo cáo cuộc họp')}</title><style>${FANCY_CSS}</style></head><body>${renderReport(r)}</body></html>`;
+      const title = _fesc(String((r && r.hero && r.hero.headline) || 'Báo cáo cuộc họp').replace(/\*\*/g, ''));
+      return `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>${FONT_LINK}<style>${FANCY_CSS}</style></head><body>${renderReport(r)}${REVEAL_JS}</body></html>`;
     }
-    // report → markdown (cho hiển thị panel + xuất .md/copy)
+    // report (JSON landing-page) → markdown (hiển thị panel + xuất .md/copy)
     function reportToMd(r) {
-      r = r || {}; const L = [];
-      if (r.title) L.push('# ' + r.title);
-      for (const m of (r.meta || [])) if (m && m.value) L.push(`- **${m.label}:** ${m.value}`);
-      const blk = o => {
-        if (o.intro) { L.push(''); L.push(o.intro); }
-        for (const p of (o.points || [])) { L.push((p.label ? `- **${p.label}:** ` : '- ') + (p.text || '')); for (const s of (p.sub || [])) L.push('    - ' + s); }
-        for (const c of (o.cards || [])) L.push(`- **${c.title || ''}:** ${c.text || ''}`);
-        if (o.stat && o.stat.value) { L.push(''); L.push(`**${o.stat.value}** — ${o.stat.caption || ''}`); }
-        if (o.table && o.table.columns && o.table.columns.length) { L.push(''); L.push('| ' + o.table.columns.join(' | ') + ' |'); L.push('| ' + o.table.columns.map(() => '---').join(' | ') + ' |'); for (const row of (o.table.rows || [])) L.push('| ' + _fcells(row).join(' | ') + ' |'); }
-        for (const d of (o.decisions || [])) L.push(`- **${d.label}:** ${d.text || ''}`);
-      };
-      (r.sections || []).forEach((s, i) => { L.push(''); L.push(`## ${i + 1}. ${s.heading}`); blk(s); (s.subs || []).forEach((sub, j) => { L.push(''); L.push(`### ${i + 1}.${j + 1}. ${sub.title}`); blk(sub); }); });
+      r = r || {}; const h = r.hero || {}, L = [];
+      L.push('# ' + String(h.headline || 'Tóm tắt cuộc họp').replace(/\*\*/g, ''));
+      if (h.subhead) { L.push(''); L.push(h.subhead); }
+      const meta = (h.meta || []).filter(m => m && m.value);
+      if (meta.length) { L.push(''); for (const m of meta) L.push(`- **${m.label}:** ${m.value}`); }
+      const stats = (h.stats || []).filter(s => s && s.value);
+      if (stats.length) { L.push(''); L.push('## Số liệu chính'); for (const s of stats) L.push(`- **${s.value}** — ${s.label || ''}`); }
+      const p = r.problem;
+      if (p && ((p.challenge && p.challenge.title) || (p.solution && p.solution.title))) {
+        L.push(''); L.push('## Vấn đề cốt lõi');
+        const side = (s, ico) => { if (!s || !s.title) return; L.push(''); L.push(`### ${ico} ${s.title}`); for (const x of (s.points || [])) L.push(`- ${x}`); };
+        side(p.challenge, '⚠️'); side(p.solution, '💡');
+      }
+      const bs = (r.bento || []).filter(b => b && b.title);
+      if (bs.length) { L.push(''); L.push('## Chủ đề chính'); for (const b of bs) { L.push(''); L.push(`### ${b.icon ? b.icon + ' ' : ''}${b.title}`); for (const x of (b.points || [])) L.push(`- ${x}`); if (b.conclusion) L.push(`> **Kết luận:** ${b.conclusion}`); } }
+      const as = (r.actions || []).filter(a => a && a.task);
+      if (as.length) { L.push(''); L.push('## Việc cần làm'); L.push(''); L.push('| Việc | Phụ trách | Hạn | Ưu tiên |'); L.push('| --- | --- | --- | --- |'); const PR = { high: 'Cao', mid: 'Trung bình', low: 'Thấp' }; for (const a of as) L.push(`| ${a.task} | ${a.owner || '—'} | ${a.due || '—'} | ${PR[a.priority] || 'Trung bình'} |`); }
+      const rs = (r.roadmap || []).filter(s => s && s.title);
+      if (rs.length) { L.push(''); L.push('## Lộ trình tiếp theo'); for (const s of rs) L.push(`- **${s.time ? s.time + ' — ' : ''}${s.title}**${s.desc ? ': ' + s.desc : ''}`); }
       return L.join('\n');
     }
     function exportFancyReport(r) {
@@ -2646,7 +2812,7 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
 
     function openSummaryPanel() {
       if (_sumPanelOpen) return;
-      _sumPanelOpen = true; _sumStopped = false; _sumPrevCount = 0; _sumLastTime = 0;
+      _sumPanelOpen = true; _sumStopped = false; _sumPrevCount = 0; _sumLastTime = 0; _spReport = null;   // mở lại panel → dựng báo cáo MỚI (không incremental theo bản cũ đã lệch range)
       summaryPanel.classList.add('open');
       document.getElementById('footer-sum').classList.add('open');
       document.getElementById('sum-btn').style.display = 'none';   // ẩn nút Tóm tắt khi panel mở
@@ -2668,38 +2834,43 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
     }
     function toggleSummaryPanel() { _sumPanelOpen ? closeSummaryPanel() : openSummaryPanel(); }
 
+    // Dựng/CẬP NHẬT báo cáo landing-page (giống extension) + FALLBACK markdown (gemma) khi flash-lite lỗi/hết quota.
+    // prev≠null → incremental (chỉ gửi câu MỚI + báo cáo cũ); cập nhật _spReport/_spMarkdown + render iframe.
+    async function makeReport(sendCaps, prev, allCaps, n) {
+      let sr = null;
+      try { sr = await api.summarizeReport({ captions: sendCaps, facts: summaryFacts(), prevReport: prev }); } catch (e) { sr = { ok: false, error: e.message }; }
+      if (!_sumPanelOpen) return { kind: 'closed' };
+      if (sr && sr.ok && sr.report) { spRenderReport(sr.report); _sumPrevCount = n; return { kind: 'report' }; }
+      if (sr && sr.error === 'no-key') return { kind: 'no-key' };
+      if (sr && sr.error === 'empty') return { kind: 'empty' };
+      let mr = null;   // flash-lite hỏng/hết quota → markdown qua flash-lite→gemma (gemma TPM ∞)
+      try { mr = await api.summarizeMeeting(allCaps); } catch (e) { mr = { ok: false, error: e.message }; }
+      if (!_sumPanelOpen) return { kind: 'closed' };
+      if (mr && mr.ok) { spRender(mr.markdown); _sumPrevCount = n; return { kind: 'markdown' }; }
+      return { kind: (mr && mr.error === 'no-key') ? 'no-key' : 'error', error: (mr && mr.error) || (sr && sr.error) || 'failed' };
+    }
     async function summarizeTick() {
       if (!_sumPanelOpen || _sumBusy || _sumStopped) return;
       const caps = [...captionData.values()];
-      if (!caps.length) { spBody.innerHTML = '<div class="sp-placeholder" data-i18n="summary.autoHint">' + SP_HINT() + '</div>'; return; }
-      if (caps.length < _sumPrevCount) _sumPrevCount = 0;   // đã bấm Xóa → coi như mới
+      if (!caps.length) { spBody.style.padding = ''; spBody.style.overflow = ''; spBody.innerHTML = '<div class="sp-placeholder" data-i18n="summary.autoHint">' + SP_HINT() + '</div>'; return; }
+      if (caps.length < _sumPrevCount) { _sumPrevCount = 0; _spReport = null; }   // đã bấm Xóa → coi như mới
       const newCount = caps.length - _sumPrevCount;
-      // tóm tắt khi: đủ ≥SUM_MIN_NEW câu dịch mới (~2 phút), HOẶC lần đầu mở mà đã có nội dung.
+      // cập nhật khi: đủ ≥SUM_MIN_NEW câu mới (~2 phút), HOẶC lần đầu mở mà đã có nội dung.
       const should = (newCount >= SUM_MIN_NEW) || (_sumLastTime === 0);
-      if (!should) return;   // chưa đủ câu mới → KHÔNG hiện đếm chờ ở foot (foot chỉ hiện khi đã CÓ bản tóm tắt)
+      if (!should) return;
       _sumBusy = true; if (spSpinner) spSpinner.style.display = '';   // loading
-      // rolling: chỉ gửi câu MỚI kể từ lần tóm trước. Trần 25 câu/lần (kể cả lần đầu mở có sẵn backlog lớn)
-      // → mỗi request nhỏ, súc tích, nhẹ TPM (3.1-flash-lite 250K; gemma TPM không giới hạn).
-      let newCaps = caps.slice(_sumPrevCount);
-      const SUM_MAX_CAPS_PER_CALL = 25;
-      if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
-      let res = null;
-      try { res = await api.summarizeGemini({ prevSummary: _spMarkdown, captions: newCaps }); } catch (e) { res = { ok: false, error: e.message }; }
+      const n = caps.length;
+      _sumLastTime = Date.now();   // CHỐT NHỊP NGAY (kể cả khi lỗi/cooldown) → không kẹt retry, không spam mỗi 12s
+      const prev = _spReport;                                  // đã có báo cáo → CẬP NHẬT incremental (chỉ câu mới)
+      const sendCaps = prev ? caps.slice(_sumPrevCount) : caps;  // lần đầu/sau fallback → gửi toàn bộ (prompt builder tự cắt MAX_NEW_CAPTIONS)
+      let r = null;
+      try { r = await makeReport(sendCaps, prev, caps, n); } catch (e) { r = { kind: 'error', error: e.message }; }
       _sumBusy = false; if (spSpinner) spSpinner.style.display = 'none';
-      if (!_sumPanelOpen) return;   // đã đóng giữa lúc chờ
-      if (!res || !res.ok) {
-        if (res && res.error === 'no-key') {   // không key → báo lỗi + DỪNG (yêu cầu đổi setting)
-          _sumStopped = true; clearInterval(_sumTimer); _sumTimer = null;
-          spBody.innerHTML = '<div class="sp-error">' + t('summary.needKey') + '</div>';
-        } else if (res && (res.error === 'empty' || res.error === 'empty-response')) {
-          spBody.innerHTML = '<div class="sp-placeholder" data-i18n="summary.autoHint">' + SP_HINT() + '</div>';
-        }
-        // lỗi tạm khác (429/mạng) → tự thử lại vòng sau; KHÔNG ghi đè foot để giữ "Tóm tắt lúc …" gần nhất
-        return;
-      }
-      _sumPrevCount = caps.length; _sumLastTime = Date.now();
-      spRender(res.markdown);
-      const d = new Date(), p = n => (n < 10 ? '0' : '') + n;
+      if (!r || r.kind === 'closed') return;
+      if (r.kind === 'no-key') { _sumStopped = true; clearInterval(_sumTimer); _sumTimer = null; spBody.style.padding = ''; spBody.style.overflow = ''; spBody.innerHTML = '<div class="sp-error">' + t('summary.needKey') + '</div>'; return; }
+      if (r.kind === 'empty' || r.kind === 'error') return;   // lỗi tạm (429/mạng) → tự thử lại vòng sau
+      _sumLastTime = Date.now();
+      const d = new Date(), p = nn => (nn < 10 ? '0' : '') + nn;
       spFoot.textContent = t('summary.footDone', { time: p(d.getHours()) + ':' + p(d.getMinutes()), n: caps.length });
     }
 
@@ -2720,7 +2891,7 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
       spPromptEditor.style.display = 'none';
       // Áp NGAY: gọi tóm tắt lại nội dung hiện có theo prompt mới/mặc định (KHÔNG wipe — giữ bản cũ tới khi có kết quả).
       // Các vòng rolling sau vẫn theo prompt hiện hành. _sumLastTime=0 để bỏ ngưỡng "đủ câu mới" → chạy ngay vòng này.
-      _sumStopped = false; _sumLastTime = 0;
+      _sumStopped = false; _sumLastTime = 0; _spReport = null; _sumPrevCount = 0;   // đổi prompt → dựng LẠI báo cáo từ đầu (không incremental theo bản cũ)
       setTimeout(() => { try { summarizeTick(); } catch (e) {} }, 0);   // sau khi save-settings tới main
     };
     document.getElementById('sp-prompt-save')?.addEventListener('click', () => _spPromptSaveVal((spPromptInput.value || '').trim()));
@@ -2733,10 +2904,34 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
     const spCopyBtn   = document.getElementById('sp-copy-btn');
     const spClearBtn  = document.getElementById('sp-clear-btn');
     let _spMarkdown = '';
-    let _spReport = null;   // báo cáo Tổng thể có cấu trúc (JSON) → xuất HTML y hệt; null = bản markdown thường
+    let _spReport = null;   // báo cáo Tổng thể có cấu trúc (JSON landing-page) → render iframe + xuất HTML đẹp; null = bản markdown thường
     function _spSetExportable(on) { if (spExportBtn) spExportBtn.disabled = !on; if (spExportHtmlBtn) spExportHtmlBtn.disabled = !on; if (spCopyBtn) spCopyBtn.disabled = !on; }
+    // Dữ kiện CHÍNH XÁC cho hero.meta/stats (ngày/thời lượng/người/số dòng) → model không phải đoán.
+    function summaryFacts() {
+      const caps = [...captionData.values()];
+      const authors = [...new Set(caps.map(c => (c.author || '').trim()).filter(a => a && !/^STT$/i.test(a)))];
+      const ts = caps.map(c => c.tsMs || 0).filter(Boolean);
+      const startMs = ts.length ? Math.min(...ts) : 0, endMs = ts.length ? Math.max(...ts) : 0;
+      const p = n => (n < 10 ? '0' : '') + n;
+      let duration = '';
+      if (startMs && endMs > startMs) { const m = Math.max(1, Math.round((endMs - startMs) / 60000)); duration = m >= 60 ? `${Math.floor(m / 60)} giờ ${m % 60} phút` : `${m} phút`; }
+      const date = startMs ? (d => d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()))(new Date(startMs)) : '';
+      return { date, duration, participants: authors, lineCount: caps.length };
+    }
+    // Báo cáo landing-page → iframe cô lập (style/font không lẫn với app; CSP frame-src 'self').
+    function spRenderReport(rep) {
+      _spReport = rep; _spMarkdown = reportToMd(rep);
+      spBody.style.padding = '0'; spBody.style.overflow = 'hidden'; spBody.innerHTML = '';
+      const f = document.createElement('iframe');
+      f.setAttribute('sandbox', 'allow-same-origin');   // không allow-scripts → reveal-JS tắt nhưng nội dung vẫn hiện đủ
+      f.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#F7F3EB';
+      f.srcdoc = buildFancyDoc(rep);
+      spBody.appendChild(f);
+      _spSetExportable(true);
+    }
     function spRender(md) {
       _spReport = null;
+      spBody.style.padding = ''; spBody.style.overflow = '';   // thoát layout iframe báo cáo (nếu có)
       _spMarkdown = md || ''; spBody.innerHTML = md2html(_spMarkdown); _spSetExportable(!!_spMarkdown);
       summaryLive();                            // gắn lại spinner "đang nghe" ở cuối (nếu đang play)
       spBody.scrollTop = spBody.scrollHeight;   // có nội dung mới → tự cuộn xuống cuối
@@ -2763,11 +2958,10 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
       spBody.innerHTML = '<div class="sp-placeholder"><span class="m3-spinner-sm"></span> ' + t('summary.overallGenerating') + '</div>';
       const caps = [...captionData.values()];
       let rep = null;
-      try { const sr = await api.summarizeMeetingStructured(caps); if (sr && sr.ok) rep = sr.report; } catch (e) {}
-      if (rep) {   // có JSON cấu trúc → preview markdown trong panel; ⬇.html dựng giao diện y hệt
-        _spReport = rep; _spMarkdown = reportToMd(rep);
-        spBody.innerHTML = md2html(_spMarkdown); _spSetExportable(true); summaryLive(); spBody.scrollTop = spBody.scrollHeight;
-      } else {     // fallback: báo cáo markdown như cũ
+      try { const sr = await api.summarizeReport({ captions: caps, facts: summaryFacts() }); if (sr && sr.ok) rep = sr.report; } catch (e) {}
+      if (rep) {   // landing-page JSON → render iframe đẹp trong panel; ⬇.html xuất bản đầy đủ
+        spRenderReport(rep);
+      } else {     // fallback: báo cáo markdown như cũ (flash-lite lỗi/hết quota)
         let res = null;
         try { res = await api.summarizeMeeting(caps); } catch (e) { res = { ok: false, error: e.message }; }
         if (!res || !res.ok) { spGptBtn.disabled = false; spBody.innerHTML = '<div class="sp-error">❌ ' + esc(shortErr(res && res.error)) + '</div>'; return; }
@@ -2784,6 +2978,7 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
     if (spCopyBtn) spCopyBtn.addEventListener('click', () => { if (_spMarkdown) api.copyToClipboard(_spMarkdown); });
     if (spClearBtn) spClearBtn.addEventListener('click', () => {
       _spMarkdown = ''; _spReport = null; _spSetExportable(false); _sumPrevCount = 0; _sumLastTime = 0; _sumStopped = false;
+      spBody.style.padding = ''; spBody.style.overflow = '';
       spBody.innerHTML = '<div class="sp-placeholder" data-i18n="summary.autoHint">' + SP_HINT() + '</div>'; spFoot.textContent = '';
     });
 

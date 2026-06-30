@@ -20867,6 +20867,7 @@
     const _emit = {};
     let _maxId = 0;
     let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
+    let _noTransTurn = false;
     const isConfigured = () => !!(st2().apiKey && String(st2().apiKey).trim());
     function _splitPos(s) {
       s = s || "";
@@ -21140,9 +21141,13 @@
       let rows;
       if (transcribe) rows = inSent.slice(0, nIn).map((s) => ({ o: "", t: s.text }));
       else if (nIn > 0 && nOut > 0) {
+        _noTransTurn = false;
         rows = _fillerPostproc(_alignTimeRows(inSent.slice(0, nIn), outSent.slice(0, nOut), _inT, _outT, _outAcc.length / Math.max(1, _inAcc.length)));
         rows = rows.filter((r) => !(_isFillerSrc(r.o) && !_tHasContent(r.t)));
         rows = _mergeEmptyRows(rows, turnEnd);
+      } else if (nIn > 0 && (final || _noTransTurn)) {
+        _noTransTurn = true;
+        rows = inSent.slice(0, nIn).map((s) => ({ o: "", t: s.text }));
       } else rows = [];
       for (let i = 0; i < rows.length; i++) _emitRow(_lineBase + i, transcribe ? "" : rows[i].o, rows[i].t, false);
       let nextId = _lineBase + rows.length;
@@ -21174,6 +21179,7 @@
       for (const k in _emit) delete _emit[k];
       for (const k in _rowTs) delete _rowTs[k];
       _maxId = _lineBase - 1;
+      _noTransTurn = false;
     }
     function _endTurnHard() {
       _lineBase = _maxId + 1;
@@ -21292,7 +21298,8 @@
         responseModalities: [Modality.AUDIO],
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        translationConfig: { targetLanguageCode: bcp47(st2().langCode), echoTargetLanguage: st2().transcribeMode ? true : false },
+        translationConfig: { targetLanguageCode: bcp47(st2().langCode), echoTargetLanguage: false },
+        // luôn DỊCH (chép-lời đã gỡ); nói trùng ngôn ngữ đích → echo ở tầng _pump
         contextWindowCompression: { slidingWindow: {} },
         sessionResumption: _handle ? { handle: _handle } : {}
       };
@@ -21460,15 +21467,18 @@
   var ROLL_OUT_TOKENS = 2048;
   var FULL_OUT_TOKENS = 8192;
   var _S = { type: "STRING" };
-  var _PT = { type: "OBJECT", properties: { label: { type: "STRING", nullable: true }, text: _S, sub: { type: "ARRAY", items: _S } }, required: ["text"] };
-  var _CARD = { type: "OBJECT", properties: { title: { type: "STRING", nullable: true }, text: _S }, required: ["text"] };
-  var _STAT = { type: "OBJECT", nullable: true, properties: { value: _S, caption: { type: "STRING", nullable: true } }, required: ["value"] };
-  var _TABLE = { type: "OBJECT", nullable: true, properties: { columns: { type: "ARRAY", items: _S }, rows: { type: "ARRAY", items: { type: "OBJECT", properties: { cells: { type: "ARRAY", items: _S } }, required: ["cells"] } } } };
-  var _DEC = { type: "OBJECT", properties: { label: _S, status: { type: "STRING", enum: ["done", "plan", "todo"] }, text: _S }, required: ["label", "text"] };
-  var _BLOCKS = { intro: { type: "STRING", nullable: true }, points: { type: "ARRAY", items: _PT }, cards: { type: "ARRAY", items: _CARD }, stat: _STAT, table: _TABLE };
-  var _SUB = { type: "OBJECT", properties: Object.assign({ title: _S, tone: { type: "STRING", enum: ["default", "warn"], nullable: true } }, _BLOCKS), required: ["title"] };
-  var _SECTION = { type: "OBJECT", properties: Object.assign({ heading: _S, tone: { type: "STRING", enum: ["default", "warn"], nullable: true } }, _BLOCKS, { decisions: { type: "ARRAY", items: _DEC }, subs: { type: "ARRAY", items: _SUB } }), required: ["heading"] };
-  var REPORT_SCHEMA = { type: "OBJECT", properties: { eyebrow: { type: "STRING", nullable: true }, title: _S, meta: { type: "ARRAY", items: { type: "OBJECT", properties: { label: _S, value: _S }, required: ["label", "value"] } }, sections: { type: "ARRAY", items: _SECTION }, footer: { type: "STRING", nullable: true } }, required: ["title", "sections"] };
+  var _SN = { type: "STRING", nullable: true };
+  var _STRS = { type: "ARRAY", items: _S };
+  var _STAT = { type: "OBJECT", properties: { value: _S, label: _S }, required: ["value", "label"], propertyOrdering: ["value", "label"] };
+  var _META = { type: "OBJECT", properties: { label: _S, value: _S }, required: ["label", "value"], propertyOrdering: ["label", "value"] };
+  var _HERO = { type: "OBJECT", properties: { eyebrow: _SN, headline: _S, subhead: _S, stats: { type: "ARRAY", items: _STAT }, meta: { type: "ARRAY", items: _META } }, required: ["headline", "subhead"], propertyOrdering: ["eyebrow", "headline", "subhead", "stats", "meta"] };
+  var _SIDE = { type: "OBJECT", properties: { title: _S, points: _STRS }, required: ["title", "points"], propertyOrdering: ["title", "points"] };
+  var _PROBLEM = { type: "OBJECT", nullable: true, properties: { challenge: _SIDE, solution: _SIDE }, propertyOrdering: ["challenge", "solution"] };
+  var _BENTO = { type: "OBJECT", properties: { icon: _SN, title: _S, points: _STRS, conclusion: _SN }, required: ["title", "points"], propertyOrdering: ["icon", "title", "points", "conclusion"] };
+  var _ACTION = { type: "OBJECT", properties: { task: _S, owner: _SN, due: _SN, priority: { type: "STRING", enum: ["high", "mid", "low"], nullable: true } }, required: ["task"], propertyOrdering: ["task", "owner", "due", "priority"] };
+  var _STEP = { type: "OBJECT", properties: { time: _SN, title: _S, desc: _SN }, required: ["title"], propertyOrdering: ["time", "title", "desc"] };
+  var _LABELS = { type: "OBJECT", nullable: true, properties: { problem: _SN, bento: _SN, actions: _SN, roadmap: _SN }, propertyOrdering: ["problem", "bento", "actions", "roadmap"] };
+  var REPORT_SCHEMA = { type: "OBJECT", properties: { hero: _HERO, labels: _LABELS, problem: _PROBLEM, bento: { type: "ARRAY", items: _BENTO }, actions: { type: "ARRAY", items: _ACTION }, roadmap: { type: "ARRAY", items: _STEP }, footer: _SN }, required: ["hero"], propertyOrdering: ["hero", "labels", "problem", "bento", "actions", "roadmap", "footer"] };
   function _parseJson(t2) {
     if (!t2) return null;
     t2 = String(t2).trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
@@ -21706,37 +21716,66 @@ ${lines}`;
       const chain = await _resolveChain(ai);
       return _runChain(ai, chain, _buildFullReportPrompt(captions2), { withSys: false, maxOut: FULL_OUT_TOKENS });
     }
-    function _buildStructuredPrompt(captions2) {
-      const lines = _toLines(captions2);
+    function _factsBlock(facts) {
+      if (!facts) return "";
+      const f = [];
+      if (facts.date) f.push(`Ng\xE0y h\u1ECDp: ${facts.date}`);
+      if (facts.duration) f.push(`Th\u1EDDi l\u01B0\u1EE3ng: ${facts.duration}`);
+      if (facts.participants && facts.participants.length) f.push(`Ng\u01B0\u1EDDi tham gia (${facts.participants.length}): ${facts.participants.join(", ")}`);
+      if (facts.lineCount) f.push(`S\u1ED1 d\xF2ng transcript: ${facts.lineCount}`);
+      if (!f.length) return "";
+      return `
+
+D\u1EEE KI\u1EC6N \u0110\xC3 BI\u1EBET (CH\xCDNH X\xC1C \u2014 \u01B0u ti\xEAn d\xF9ng cho hero.meta & hero.stats; \u0110\u1EEANG m\xE2u thu\u1EABn v\u1EDBi n\xF3):
+- ${f.join("\n- ")}`;
+    }
+    function _reportRules(L) {
+      return `C\xC1CH \u0110I\u1EC0N 5 PH\u1EA6N:
+- hero.eyebrow: nh\xE3n ng\u1EAFn IN HOA ki\u1EC3u "B\xC1O C\xC1O CU\u1ED8C H\u1ECCP". hero.headline: M\u1ED8T c\xE2u kh\u1EA9u hi\u1EC7u c\xF4 \u0111\u1ECDng k\u1EBFt qu\u1EA3/m\u1EE5c \u0111\xEDch l\u1EDBn nh\u1EA5t \u2014 b\u1ECDc c\u1EE5m t\u1EEB THEN CH\u1ED0T trong **...** \u0111\u1EC3 \u0111\u01B0\u1EE3c t\xF4 m\xE0u nh\u1EA5n. hero.subhead: 2-3 c\xE2u b\u1ED1i c\u1EA3nh/l\xFD do.
+- hero.stats: \u0110\xDANG 4 th\u1EBB s\u1ED1 li\u1EC7u quan tr\u1ECDng nh\u1EA5t {value, label} \u2014 value l\xE0 CON S\u1ED0/\u0111\u1EA1i l\u01B0\u1EE3ng NG\u1EAEN (vd "3", "85%", "2 tu\u1EA7n", "45 ph\xFAt"), label l\xE0 nh\xE3n ng\u1EAFn. Thi\u1EBFu s\u1ED1 li\u1EC7u th\u1EADt th\xEC d\xF9ng ch\u1EC9 s\u1ED1 \u0110\u1EBEM \u0110\u01AF\u1EE2C (s\u1ED1 ch\u1EE7 \u0111\u1EC1, s\u1ED1 vi\u1EC7c c\u1EA7n l\xE0m, s\u1ED1 ng\u01B0\u1EDDi, th\u1EDDi l\u01B0\u1EE3ng). KH\xD4NG b\u1ECBa s\u1ED1.
+- hero.meta: 3-4 m\u1EE5c {label, value} t\u1ED5ng quan (Ng\xE0y, Th\u1EDDi l\u01B0\u1EE3ng, S\u1ED1 ng\u01B0\u1EDDi, \u0110\u1ECBnh d\u1EA1ng). D\xF9ng "D\u1EEE KI\u1EC6N \u0110\xC3 BI\u1EBET" n\u1EBFu c\xF3; kh\xF4ng r\xF5 \u2192 "Ch\u01B0a x\xE1c \u0111\u1ECBnh".
+- labels: nh\xE3n eyebrow IN HOA (b\u1EB1ng ${L}) cho 4 m\u1EE5c \u2014 problem\u2248"V\u1EA4N \u0110\u1EC0 C\u1ED0T L\xD5I", bento\u2248"CH\u1EE6 \u0110\u1EC0 CH\xCDNH", actions\u2248"VI\u1EC6C C\u1EA6N L\xC0M", roadmap\u2248"L\u1ED8 TR\xCCNH".
+- problem: {challenge:{title,points[]}, solution:{title,points[]}} = Th\xE1ch th\u1EE9c hi\u1EC7n t\u1EA1i \u2194 Gi\u1EA3i ph\xE1p \u0111\u1EC1 xu\u1EA5t; m\u1ED7i b\xEAn 2-4 g\u1EA1ch \u0111\u1EA7u d\xF2ng. KH\xD4NG c\xF3 n\u1ED9i dung t\u01B0\u01A1ng ph\u1EA3n r\xF5 \u2192 \u0111\u1EC3 null.
+- bento: 3-4 kh\u1ED1i CH\u1EE6 \u0110\u1EC0 ch\xEDnh {icon (\u0111\xFAng 1 emoji), title, points (2-3), conclusion}. conclusion = m\u1ED9t c\xE2u "\u0110\u1ED3ng thu\u1EADn/K\u1EBFt lu\u1EADn" c\u1EE7a kh\u1ED1i (b\u1ECF tr\u1ED1ng n\u1EBFu ch\u01B0a ch\u1ED1t).
+- actions: vi\u1EC7c c\u1EA7n l\xE0m {task, owner, due, priority ("high"|"mid"|"low")}. owner/due CH\u1EC8 \u0111i\u1EC1n khi transcript N\xD3I R\xD5, kh\xF4ng th\xEC \u0111\u1EC3 null. Vi\u1EC7c dang d\u1EDF/ch\u01B0a k\u1EBFt lu\u1EADn \u2192 v\u1EABn \u0111\u01B0a v\xE0o v\u1EDBi priority "high".
+- roadmap: c\xE1c b\u01B0\u1EDBc ti\u1EBFp theo {time, title, desc} theo tr\xECnh t\u1EF1 th\u1EDDi gian. Kh\xF4ng c\xF3 l\u1ED9 tr\xECnh r\xF5 \u2192 m\u1EA3ng r\u1ED7ng.
+- footer: m\u1ED9t d\xF2ng disclaimer ng\u1EAFn (b\u1EA3n t\xF3m t\u1EAFt t\u1EF1 \u0111\u1ED9ng t\u1EEB transcript, k\xE8m ng\xE0y n\u1EBFu bi\u1EBFt).
+
+TRUNG TH\u1EF0C: ch\u1EC9 th\xEAm ph\u1EA7n/kh\u1ED1i C\xD3 n\u1ED9i dung TH\u1EACT; ph\u1EA7n r\u1ED7ng \u2192 m\u1EA3ng r\u1ED7ng ho\u1EB7c null. TUY\u1EC6T \u0110\u1ED0I KH\xD4NG B\u1ECAA ch\u1EE7 \u0111\u1EC1/quy\u1EBFt \u0111\u1ECBnh/ng\u01B0\u1EDDi/deadline/s\u1ED1 li\u1EC7u kh\xF4ng c\xF3 trong transcript. Transcript qu\xE1 ng\u1EAFn \u2192 ch\u1EC9 \u0111i\u1EC1n hero (headline+subhead m\xF4 t\u1EA3 th\u1EF1c t\u1EBF) + \u0111\u1EC3 c\xE1c m\u1EA3ng r\u1ED7ng.
+THU\u1EACT NG\u1EEE: GI\u1EEE NGUY\xCAN ti\u1EBFng Anh/nguy\xEAn g\u1ED1c thu\u1EADt ng\u1EEF IT & t\xEAn ri\xEAng (bug, deploy, PR, API, sprint, release, CRM, ERP...). KATAKANA ti\u1EBFng Nh\u1EADt \u2192 kh\xF4i ph\u1EE5c TI\u1EBENG ANH g\u1ED1c (\u30C7\u30D7\u30ED\u30A4\u2192deploy...), KH\xD4NG d\u1ECBch sang ${L}.`;
+    }
+    function _buildReportPrompt(captions2, facts, prevReport) {
+      const cap = prevReport ? MAX_NEW_CAPTIONS : 0;
+      const lines = _toLines(captions2, cap || void 0);
       if (S2().transcribeMode) {
-        const d = _detectLangLabel(_rawText(captions2));
+        const d = _detectLangLabel(_rawText(captions2, cap || void 0));
         if (d) _detLang = d;
       }
       const L = _outLang();
-      return `B\u1EA1n l\xE0 tr\u1EE3 l\xFD t\u1ED5ng h\u1EE3p cu\u1ED9c h\u1ECDp. T\u1EA1o B\xC1O C\xC1O cu\u1ED9c h\u1ECDp d\u01B0\u1EDBi d\u1EA1ng JSON \u0110\xDANG theo schema \u0111\u01B0\u1EE3c \xE1p \u0111\u1EB7t, t\u1EEB Transcript \u1EDF cu\u1ED1i.
+      const head = prevReport ? `B\u1EA1n l\xE0 chuy\xEAn gia thi\u1EBFt k\u1EBF n\u1ED9i dung ki\xEAm th\u01B0 k\xFD cu\u1ED9c h\u1ECDp. B\u1EA1n \u0111ang DUY TR\xCC b\xE1o c\xE1o cu\u1ED9c h\u1ECDp \u0110ANG DI\u1EC4N RA (JSON landing-page). D\u01B0\u1EDBi \u0111\xE2y l\xE0 B\xC1O C\xC1O HI\u1EC6N T\u1EA0I (JSON) + C\xC1C C\xC2U M\u1EDAI. C\u1EACP NH\u1EACT b\xE1o c\xE1o: g\u1ED9p th\xF4ng tin m\u1EDBi v\xE0o \u0110\xDANG ph\u1EA7n (hero/problem/bento/actions/roadmap), g\u1ED9p \xFD tr\xF9ng cho c\xF4 \u0111\u1ECDng, GI\u1EEE NGUY\xCAN n\u1ED9i dung c\u0169 c\xF2n \u0111\xFAng (\u0111\u1EEBng xo\xE1), c\u1EADp nh\u1EADt hero.stats & hero.meta theo d\u1EEF ki\u1EC7n m\u1EDBi. Tr\u1EA3 v\u1EC1 TO\xC0N B\u1ED8 b\xE1o c\xE1o JSON \u0111\xE3 c\u1EADp nh\u1EADt, \u0110\xDANG schema.` : `B\u1EA1n l\xE0 chuy\xEAn gia thi\u1EBFt k\u1EBF n\u1ED9i dung ki\xEAm th\u01B0 k\xFD cu\u1ED9c h\u1ECDp. \u0110\u1ECDc TRANSCRIPT \u1EDF cu\u1ED1i v\xE0 xu\u1EA5t B\xC1O C\xC1O cu\u1ED9c h\u1ECDp d\u01B0\u1EDBi d\u1EA1ng JSON \u0110\xDANG theo schema \u0111\u01B0\u1EE3c \xE1p \u0111\u1EB7t \u2014 s\u1EBD \u0111\u01B0\u1EE3c render th\xE0nh 1 trang landing-page.`;
+      const tail = prevReport ? `
+--- B\xC1O C\xC1O HI\u1EC6N T\u1EA0I (JSON) ---
+${JSON.stringify(prevReport)}
 
-NG\xD4N NG\u1EEE: vi\u1EBFt M\u1ECCI chu\u1ED7i (title, eyebrow, heading, label, value, text, caption, columns, cells...) b\u1EB1ng ${L}.
-
-C\xC1CH MAP N\u1ED8I DUNG V\xC0O TR\u01AF\u1EDCNG:
-- eyebrow: nh\xE3n ng\u1EAFn ki\u1EC3u "B\xE1o c\xE1o t\u1ED5ng h\u1EE3p cu\u1ED9c h\u1ECDp" (b\u1EB1ng ${L}). title: ti\xEAu \u0111\u1EC1 b\xE1o c\xE1o ng\u1EAFn g\u1ECDn.
-- meta: th\xF4ng tin t\u1ED5ng quan d\u1EA1ng {label,value} (th\u1EDDi gian, th\xE0nh ph\u1EA7n, m\u1EE5c \u0111\xEDch...). Kh\xF4ng r\xF5 \u2192 "Ch\u01B0a x\xE1c \u0111\u1ECBnh".
-- sections: m\u1ED7i m\u1EE5c l\u1EDBn 1 ph\u1EA7n t\u1EED {heading, ...}. M\u1EE5c c\xF3 nhi\u1EC1u \xFD nh\u1ECF \u2192 d\xF9ng "subs". M\u1EE5c V\u1EA4N \u0110\u1EC0/KH\xD3 KH\u0102N/R\u1EE6I RO \u2192 tone:"warn".
-- points: g\u1EA1ch \u0111\u1EA7u d\xF2ng (label = ph\u1EA7n in \u0111\u1EADm d\u1EABn \u0111\u1EA7u n\u1EBFu c\xF3; sub = \xFD con). cards: t\u1EADp m\u1EE5c ng\u1EAFn song song (c\xF4ng c\u1EE5, l\u1EF1a ch\u1ECDn, m\u1EA3ng chuy\xEAn bi\u1EC7t). table: d\u1EEF li\u1EC7u b\u1EA3ng/so s\xE1nh/l\u1ECBch tr\xECnh (rows l\xE0 m\u1EA3ng {cells:[...]}). stat: M\u1ED8T con s\u1ED1 n\u1ED5i b\u1EADt (ng\xE2n s\xE1ch, KPI). decisions: vi\u1EC7c/quy\u1EBFt \u0111\u1ECBnh k\xE8m status ("done"=\u0111\xE3 l\xE0m, "plan"=\u0111\u1ECBnh h\u01B0\u1EDBng/\u0111ang l\xE0m, "todo"=vi\u1EC7c c\u1EA7n l\xE0m).
-
-QUY T\u1EAEC THU\u1EACT NG\u1EEE: GI\u1EEE NGUY\xCAN ti\u1EBFng Anh/nguy\xEAn g\u1ED1c thu\u1EADt ng\u1EEF IT & t\xEAn ri\xEAng (bug, deploy, PR, API, sprint, release, CRM, ERP...). KATAKANA ti\u1EBFng Nh\u1EADt \u2192 kh\xF4i ph\u1EE5c TI\u1EBENG ANH g\u1ED1c (\u30C7\u30D7\u30ED\u30A4\u2192deploy...), KH\xD4NG d\u1ECBch sang ${L}.
-TRUNG TH\u1EF0C: ch\u1EC9 d\xF9ng n\u1ED9i dung C\xD3 trong transcript; KH\xD4NG b\u1ECBa. Thi\u1EBFu \u2192 "Ch\u01B0a x\xE1c \u0111\u1ECBnh" ho\u1EB7c b\u1ECF tr\u01B0\u1EDDng.
-${_transcribeNote()}${_extraBlock()}
+--- C\xC1C C\xC2U M\u1EDAI ---
+${lines || "(kh\xF4ng c\xF3 c\xE2u m\u1EDBi)"}` : `
 ---
 TRANSCRIPT:
 ${lines}`;
+      return `${head}
+
+NG\xD4N NG\u1EEE: vi\u1EBFt M\u1ECCI chu\u1ED7i (headline, subhead, eyebrow, label, value, title, points, conclusion, task, owner, due, time, desc, footer...) b\u1EB1ng ${L}.
+
+${_reportRules(L)}
+${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
     }
-    async function summarizeFullStructured(captions2) {
+    async function summarizeReport(captions2, facts, prevReport) {
       captions2 = captions2 || [];
       if (!S2().apiKey || !String(S2().apiKey).trim()) return { ok: false, error: "no-key" };
       if (!captions2.length) return { ok: false, error: "empty" };
       const ai = _ai();
       const chain = await _resolveChain(ai);
-      const prompt = _buildStructuredPrompt(captions2);
+      const prompt = _buildReportPrompt(captions2, facts, prevReport);
       let lastErr = "structured-failed";
       for (const entry of chain.filter((c) => !c.gemma)) {
         if (_onCooldown(entry.id)) continue;
@@ -21745,18 +21784,18 @@ ${lines}`;
           const res = await ai.models.generateContent({ model: entry.id, contents: prompt, config });
           const text = res && (typeof res.text === "string" ? res.text : res.text && res.text()) || "";
           const obj = _parseJson(text);
-          if (obj && Array.isArray(obj.sections) && obj.sections.length) return { ok: true, report: obj, model: entry.id };
+          if (obj && obj.hero && obj.hero.headline) return { ok: true, report: obj, model: entry.id };
           lastErr = "empty-or-invalid-json";
         } catch (e) {
           const msg = e && e.message || String(e);
           lastErr = msg;
           if (_isQuota(msg)) _setCooldown(entry.id, msg);
-          console.warn(`[summary] structured ${entry.id}: ${msg}`);
+          console.warn(`[summary] report ${entry.id}: ${msg}`);
         }
       }
       return { ok: false, error: lastErr };
     }
-    return { summarize, summarizeFull, summarizeFullStructured };
+    return { summarize, summarizeFull, summarizeReport };
   }
 
   // extension/lib/voices.js
@@ -21853,8 +21892,7 @@ ${lines}`;
       "footer.origTitle": "Hi\u1EC7n/\u1EA9n l\u1EDDi g\u1ED1c",
       "summary.title": "T\xF3m t\u1EAFt",
       "summary.full": "\u{1F4CA} T\u1ED5ng th\u1EC3",
-      "summary.fullTitle": "B\xE1o c\xE1o t\u1ED5ng th\u1EC3 (khi \u0111\xE3 d\u1EEBng)",
-      "summary.fullDisabledTitle": "Ch\u1EC9 t\xF3m t\u1EAFt \u0111\u01B0\u1EE3c khi \u0111\xE3 d\u1EEBng d\u1ECBch",
+      "summary.fullTitle": "T\u1EA1o l\u1EA1i b\xE1o c\xE1o t\u1ED5ng th\u1EC3 ngay",
       "summary.copyTitle": "Copy",
       "summary.exportTitle": "T\u1EA3i .md",
       "summary.dlHtmlTitle": "T\u1EA3i b\xE1o c\xE1o HTML",
@@ -21895,7 +21933,10 @@ ${lines}`;
       "status.micPermHint": "\u{1F3A4} Micro ch\u01B0a \u0111\u01B0\u1EE3c c\u1EA5p quy\u1EC1n \u2014 b\u1EA5m B\u1EAFt \u0111\u1EA7u \u0111\u1EC3 c\u1EA5p.",
       "status.summaryApplied": "\u0110\xE3 \xE1p d\u1EE5ng y\xEAu c\u1EA7u & t\xF3m t\u1EAFt l\u1EA1i.",
       "status.noKeyShort": "Thi\u1EBFu API key.",
-      "status.geminiErr": "Gemini: {err}"
+      "status.geminiErr": "Gemini: {err}",
+      "meter.title": "M\u1EE9c \xE2m thanh \u0111ang thu \u0111\u01B0\u1EE3c (ch\u1EA9n \u0111o\xE1n c\xE2m/c\xF3 ti\u1EBFng)",
+      "meter.live": "\u0110ang thu \u0111\u01B0\u1EE3c ti\u1EBFng",
+      "meter.silent": "\u26A0 Kh\xF4ng thu \u0111\u01B0\u1EE3c ti\u1EBFng \u2014 ki\u1EC3m tra ngu\u1ED3n / \u0111\u1ECBnh tuy\u1EBFn"
     },
     en: {
       settings: "Settings",
@@ -21940,8 +21981,7 @@ ${lines}`;
       "footer.origTitle": "Show/hide original",
       "summary.title": "Summary",
       "summary.full": "\u{1F4CA} Full report",
-      "summary.fullTitle": "Full meeting report (after stopping)",
-      "summary.fullDisabledTitle": "Available only after you stop translating",
+      "summary.fullTitle": "Rebuild the full meeting report now",
       "summary.copyTitle": "Copy",
       "summary.exportTitle": "Download .md",
       "summary.dlHtmlTitle": "Download HTML report",
@@ -21982,7 +22022,10 @@ ${lines}`;
       "status.micPermHint": "\u{1F3A4} Microphone not granted yet \u2014 press Start to grant.",
       "status.summaryApplied": "Instructions applied & re-summarized.",
       "status.noKeyShort": "Missing API key.",
-      "status.geminiErr": "Gemini: {err}"
+      "status.geminiErr": "Gemini: {err}",
+      "meter.title": "Captured input level (silent / live diagnostic)",
+      "meter.live": "Receiving audio",
+      "meter.silent": "\u26A0 No audio captured \u2014 check source / routing"
     },
     ja: {
       settings: "\u8A2D\u5B9A",
@@ -22027,8 +22070,7 @@ ${lines}`;
       "footer.origTitle": "\u539F\u6587\u306E\u8868\u793A/\u975E\u8868\u793A",
       "summary.title": "\u8981\u7D04",
       "summary.full": "\u{1F4CA} \u5168\u4F53\u30EC\u30DD\u30FC\u30C8",
-      "summary.fullTitle": "\u4F1A\u8B70\u5168\u4F53\u306E\u30EC\u30DD\u30FC\u30C8\uFF08\u505C\u6B62\u5F8C\uFF09",
-      "summary.fullDisabledTitle": "\u7FFB\u8A33\u3092\u505C\u6B62\u3059\u308B\u3068\u8981\u7D04\u3067\u304D\u307E\u3059",
+      "summary.fullTitle": "\u4F1A\u8B70\u5168\u4F53\u306E\u30EC\u30DD\u30FC\u30C8\u3092\u4ECA\u3059\u3050\u518D\u751F\u6210",
       "summary.copyTitle": "\u30B3\u30D4\u30FC",
       "summary.exportTitle": ".md \u3092\u4FDD\u5B58",
       "summary.dlHtmlTitle": "HTML \u30EC\u30DD\u30FC\u30C8\u3092\u4FDD\u5B58",
@@ -22069,7 +22111,10 @@ ${lines}`;
       "status.micPermHint": "\u{1F3A4} \u30DE\u30A4\u30AF\u672A\u8A31\u53EF \u2014\u300C\u958B\u59CB\u300D\u3067\u8A31\u53EF\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "status.summaryApplied": "\u6307\u793A\u3092\u9069\u7528\u3057\u3066\u518D\u8981\u7D04\u3057\u307E\u3057\u305F\u3002",
       "status.noKeyShort": "API \u30AD\u30FC\u304C\u3042\u308A\u307E\u305B\u3093\u3002",
-      "status.geminiErr": "Gemini: {err}"
+      "status.geminiErr": "Gemini: {err}",
+      "meter.title": "\u53D6\u5F97\u4E2D\u306E\u5165\u529B\u30EC\u30D9\u30EB\uFF08\u7121\u97F3/\u53D7\u4FE1\u306E\u8A3A\u65AD\uFF09",
+      "meter.live": "\u97F3\u58F0\u3092\u53D7\u4FE1\u4E2D",
+      "meter.silent": "\u26A0 \u97F3\u58F0\u304C\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093 \u2014 \u30BD\u30FC\u30B9/\u30EB\u30FC\u30C6\u30A3\u30F3\u30B0\u3092\u78BA\u8A8D"
     }
   };
   var _loc = "vi";
@@ -22131,7 +22176,7 @@ ${lines}`;
         const c = e.target.result;
         if (c) {
           const v = c.value;
-          out.push({ id: v.id, startedAt: v.startedAt, endedAt: v.endedAt, langCode: v.langCode, transcribe: v.transcribe, count: v.count, hasSummary: !!(v.summaryMd || v.fullMd) });
+          out.push({ id: v.id, startedAt: v.startedAt, endedAt: v.endedAt, langCode: v.langCode, transcribe: v.transcribe, count: v.count, hasSummary: !!(v.summaryMd || v.fullMd || v.report) });
           c.continue();
         } else res(out.sort((a, b) => b.startedAt - a.startedAt));
       };
@@ -22181,7 +22226,6 @@ ${lines}`;
   var DEFAULTS = {
     apiKey: "",
     langCode: "vi",
-    transcribeMode: false,
     geminiVoice: DEFAULT_VOICE,
     geminiAudioOn: true,
     source: "mic",
@@ -22219,6 +22263,9 @@ ${lines}`;
     status: $("status"),
     list: $("list"),
     count: $("count"),
+    levelMeter: $("level-meter"),
+    lmCover: $("lm-cover"),
+    lmTxt: $("lm-txt"),
     autoscroll: $("autoscroll"),
     layoutPick: $("layout-pick"),
     zoom: $("zoom"),
@@ -22266,7 +22313,7 @@ ${lines}`;
     el.status.className = "status" + (cls ? " " + cls : "");
   }
   var live = createLiveTranslator({
-    getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, transcribeMode: S.transcribeMode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
+    getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
     onCaption: addCaption,
     onAudio: playAudio,
     onClear: clearAudio,
@@ -22276,7 +22323,7 @@ ${lines}`;
     }
   });
   var summarizer = createSummarizer({
-    getState: () => ({ apiKey: S.apiKey, targetLangLabel: LANG_LABELS[S.langCode] || "ti\u1EBFng Vi\u1EC7t", transcribeMode: S.transcribeMode, summaryExtra: S.summaryExtra })
+    getState: () => ({ apiKey: S.apiKey, targetLangLabel: LANG_LABELS[S.langCode] || "ti\u1EBFng Vi\u1EC7t", summaryExtra: S.summaryExtra })
   });
   var captions = [];
   var byId = /* @__PURE__ */ new Map();
@@ -22427,12 +22474,11 @@ ${lines}`;
     for (const e of captions) upsertRow(e);
   }
   function curLayout() {
-    return S.transcribeMode ? "translation" : S.layout || "translation";
+    return S.layout || "translation";
   }
   function setLayoutActive() {
     const eff = curLayout();
     el.layoutPick.querySelectorAll(".lay-opt").forEach((b) => {
-      b.disabled = S.transcribeMode && b.dataset.layout !== "translation";
       b.classList.toggle("active", b.dataset.layout === eff);
     });
   }
@@ -22454,9 +22500,7 @@ ${lines}`;
     summaryMd = "";
     sumPrevCount = 0;
     sumLastTime = 0;
-    fullMd = "";
     fullReport = null;
-    showingReport = false;
     renderSummary();
   }
   var _gemCtx = null;
@@ -22558,6 +22602,10 @@ ${lines}`;
   var rawStream = null;
   var watchdog = null;
   var lastTs = 0;
+  var _meterPeak = 0;
+  var _meterLastSig = 0;
+  var _meterDisp = 0;
+  var _meterRAF = 0;
   var MIC_GATE_RMS = 4e-3;
   var MIC_GATE_HANG_MS = 700;
   var micVoiceUntil = 0;
@@ -22633,9 +22681,15 @@ ${lines}`;
       if (!recActive) return;
       lastTs = Date.now();
       const ch = e.inputBuffer.getChannelData(0);
+      let peak = 0, sum = 0;
+      for (let i = 0; i < ch.length; i++) {
+        const v = ch[i], a = v < 0 ? -v : v;
+        if (a > peak) peak = a;
+        sum += v * v;
+      }
+      _meterPeak = peak;
+      if (peak > 15e-4) _meterLastSig = lastTs;
       if (S.source === "mic") {
-        let sum = 0;
-        for (let i = 0; i < ch.length; i++) sum += ch[i] * ch[i];
         if (Math.sqrt(sum / ch.length) >= MIC_GATE_RMS) micVoiceUntil = lastTs + MIC_GATE_HANG_MS;
         if (lastTs > micVoiceUntil) return;
       }
@@ -22644,6 +22698,7 @@ ${lines}`;
     srcNode.connect(procNode);
     procNode.connect(zeroGain);
     zeroGain.connect(audioCtx.destination);
+    meterStart();
     lastTs = Date.now();
     clearInterval(watchdog);
     watchdog = setInterval(() => {
@@ -22670,6 +22725,7 @@ ${lines}`;
     recActive = false;
     clearInterval(watchdog);
     watchdog = null;
+    meterStop();
     try {
       if (procNode) {
         procNode.onaudioprocess = null;
@@ -22700,15 +22756,40 @@ ${lines}`;
     } catch (_) {
     }
   }
+  function meterStart() {
+    if (!el.levelMeter) return;
+    el.levelMeter.classList.remove("hidden", "silent");
+    _meterDisp = 0;
+    _meterLastSig = Date.now();
+    cancelAnimationFrame(_meterRAF);
+    const tick = () => {
+      if (!recActive) return;
+      const db = _meterPeak > 1e-4 ? 20 * Math.log10(_meterPeak) : -100;
+      const target = Math.max(0, Math.min(1, (db + 60) / 60));
+      _meterDisp = target > _meterDisp ? target : _meterDisp + (target - _meterDisp) * 0.2;
+      if (el.lmCover) el.lmCover.style.left = (_meterDisp * 100).toFixed(1) + "%";
+      const silent = Date.now() - _meterLastSig > 2500;
+      el.levelMeter.classList.toggle("silent", silent);
+      if (el.lmTxt) el.lmTxt.textContent = t(silent ? "meter.silent" : "meter.live");
+      _meterRAF = requestAnimationFrame(tick);
+    };
+    _meterRAF = requestAnimationFrame(tick);
+  }
+  function meterStop() {
+    cancelAnimationFrame(_meterRAF);
+    _meterRAF = 0;
+    _meterPeak = 0;
+    _meterDisp = 0;
+    if (el.lmCover) el.lmCover.style.left = "0%";
+    if (el.levelMeter) el.levelMeter.classList.add("hidden");
+    if (el.levelMeter) el.levelMeter.classList.remove("silent");
+  }
   var running = false;
   var _micPermTabId = null;
   var _autoStartAfterGrant = false;
   function refreshStartBtn() {
     el.start.textContent = t(running ? "btn.stop" : "btn.start");
     el.start.classList.toggle("on", running);
-    el.sumFull.classList.toggle("disabled", running);
-    el.sumFull.setAttribute("aria-disabled", running ? "true" : "false");
-    el.sumFull.title = t(running ? "summary.fullDisabledTitle" : "summary.fullTitle");
   }
   async function start() {
     if (running) return;
@@ -22728,7 +22809,6 @@ ${lines}`;
       }
       refreshStartBtn();
       refreshSpin();
-      showingReport = false;
       st(S.source === "mic" ? "status.listeningMic" : "status.listeningAudio", null, "run");
     } catch (e) {
       console.error(e);
@@ -22764,7 +22844,8 @@ ${lines}`;
       original: e.original || "",
       translated: e.translated || "",
       lines: e.lines && e.lines.length ? e.lines : null,
-      ts: e.ts || ""
+      ts: e.ts || "",
+      tsMs: e.tsMs || null
     }));
   }
   async function _consumeHandoff() {
@@ -22793,15 +22874,16 @@ ${lines}`;
         original: c.original || "",
         lines: c.lines || [{ o: c.original || "", t: c.translated || "" }],
         ts: c.ts || "",
+        tsMs: c.tsMs || null,
         partial: false
       };
       captions.push(e);
       byId.set(e.id, e);
     });
     if (h.summaryMd) summaryMd = h.summaryMd;
-    if (h.fullMd) {
-      fullMd = h.fullMd;
-      showingReport = false;
+    if (h.report) {
+      fullReport = h.report;
+      summaryMd = reportToMd(h.report);
     }
     sumPrevCount = captions.length;
     reRenderAll();
@@ -22811,7 +22893,7 @@ ${lines}`;
   }
   function saveSession() {
     if (!S.saveHistory || !_sessId || !captions.length) return;
-    const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: S.langCode, transcribe: !!S.transcribeMode, count: captions.length, caps: _capPairs(), summaryMd, fullMd };
+    const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: S.langCode, count: captions.length, caps: _capPairs(), summaryMd, report: fullReport };
     hSave(s).catch((e) => console.warn("[history] l\u01B0u l\u1ED7i:", e && e.message));
   }
   function _fmtDate(ts) {
@@ -22826,7 +22908,8 @@ ${lines}`;
       if (tt) out.push(tt);
       if (o || tt) out.push("");
     }
-    if (s.fullMd || s.summaryMd) out.push("---", "", `# ${t("summary.title")}`, "", s.fullMd || s.summaryMd);
+    const _sum = s.report ? reportToMd(s.report) : s.summaryMd || s.fullMd || "";
+    if (_sum) out.push("---", "", `# ${t("summary.title")}`, "", _sum);
     return out.join("\n");
   }
   function sessionToHtmlDoc(s) {
@@ -22838,7 +22921,8 @@ ${lines}`;
       if (!o && !tt) continue;
       body += '<div class="tx">' + (o ? `<div class="o">${esc(o)}</div>` : "") + (tt ? `<div class="t">${esc(tt)}</div>` : "") + "</div>";
     }
-    if (s.fullMd || s.summaryMd) body += `<hr><h1>${esc(t("summary.title"))}</h1>` + md2html(s.fullMd || s.summaryMd);
+    const _sum = s.report ? reportToMd(s.report) : s.summaryMd || s.fullMd || "";
+    if (_sum) body += `<hr><h1>${esc(t("summary.title"))}</h1>` + md2html(_sum);
     body += "</div>";
     return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Transcript</title><style>${SESS_CSS}</style></head><body>${body}</body></html>`;
   }
@@ -22904,10 +22988,16 @@ ${lines}`;
       }
       if (e.childNodes.length) el.histView.appendChild(e);
     }
-    if (s.fullMd || s.summaryMd) {
+    if (s.report) {
+      const fr = document.createElement("iframe");
+      fr.className = "report-frame hist-frame";
+      fr.setAttribute("sandbox", "allow-same-origin");
+      fr.srcdoc = buildFancyDoc(s.report);
+      el.histView.appendChild(fr);
+    } else if (s.summaryMd || s.fullMd) {
       const sm = document.createElement("div");
       sm.className = "hist-sum summary-body";
-      sm.innerHTML = md2html(s.fullMd || s.summaryMd);
+      sm.innerHTML = md2html(s.summaryMd || s.fullMd);
       el.histView.appendChild(sm);
     }
     el.histView.scrollTop = 0;
@@ -23000,37 +23090,71 @@ ${lines}`;
   var sumTimer = null;
   var sumPanelOpen = false;
   var sumLastTime = 0;
-  var fullMd = "";
-  var showingReport = false;
   var fullReport = null;
   var SUM_INTERVAL_MS = 6e4;
   var SUM_POLL_MS = 1e4;
-  var SUM_MAX_CAPS_PER_CALL = 250;
   var SUM_MIN_FIRST = 8;
   var SUM_MIN_FIRST_CHARS = 400;
   var finalized = () => captions.filter((c) => !c.partial);
+  function summaryFacts() {
+    const caps = finalized();
+    const authors = [...new Set(caps.map((c) => (c.author || "").trim()).filter((a) => a && !/^STT$/i.test(a)))];
+    const startMs = _sessStart || caps[0] && caps[0].tsMs || 0;
+    const endMs = caps[caps.length - 1] && caps[caps.length - 1].tsMs || Date.now();
+    let duration = "";
+    if (startMs && endMs > startMs) {
+      const m = Math.max(1, Math.round((endMs - startMs) / 6e4));
+      duration = m >= 60 ? `${Math.floor(m / 60)} gi\u1EDD ${m % 60} ph\xFAt` : `${m} ph\xFAt`;
+    }
+    return { date: startMs ? _fmtDate(startMs).slice(0, 10) : "", duration, participants: authors, lineCount: caps.length };
+  }
+  async function makeReport(sendCaps, prev, allCaps, n) {
+    let res = null;
+    try {
+      res = await summarizer.summarizeReport(sendCaps, summaryFacts(), prev);
+    } catch (e) {
+      res = { ok: false, error: e.message };
+    }
+    if (res && res.ok) {
+      fullReport = res.report;
+      summaryMd = reportToMd(res.report);
+      renderSummary();
+      sumPrevCount = n;
+      return { kind: "report" };
+    }
+    if (res && res.error === "empty") return { kind: "empty" };
+    let mr = null;
+    try {
+      mr = await summarizer.summarizeFull(allCaps);
+    } catch (e) {
+      mr = { ok: false, error: e.message };
+    }
+    if (mr && mr.ok) {
+      fullReport = null;
+      summaryMd = mr.markdown;
+      renderSummary();
+      sumPrevCount = n;
+      return { kind: "markdown" };
+    }
+    return { kind: "error", error: mr && mr.error || res && res.error || "failed" };
+  }
   async function summarizeTick() {
     if (sumBusy) return;
     const caps = finalized();
     const newCount = caps.length - sumPrevCount;
-    const firstChars = caps.reduce((n, c) => n + (c.translated || c.original || "").length, 0);
+    const firstChars = caps.reduce((n2, c) => n2 + (c.translated || c.original || "").length, 0);
     const firstReady = sumLastTime === 0 && caps.length >= SUM_MIN_FIRST && firstChars >= SUM_MIN_FIRST_CHARS;
     const dueByTime = sumLastTime !== 0 && newCount > 0 && Date.now() - sumLastTime >= SUM_INTERVAL_MS - SUM_POLL_MS;
     if (!(firstReady || dueByTime)) return;
     sumBusy = true;
     refreshSpin();
-    let newCaps = caps.slice(sumPrevCount);
-    if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
+    const n = caps.length;
+    sumLastTime = Date.now();
     try {
-      const res = await summarizer.summarize({ prevSummary: summaryMd, captions: newCaps });
-      if (res && res.ok) {
-        summaryMd = res.markdown;
-        showingReport = false;
-        fullReport = null;
-        renderSummary();
-        sumPrevCount = caps.length;
-        sumLastTime = Date.now();
-      } else if (res && res.error !== "empty") st("status.summaryErr", { err: res.error }, "err");
+      const prev = fullReport;
+      const sendCaps = prev ? caps.slice(sumPrevCount) : caps;
+      const r = await makeReport(sendCaps, prev, caps, n);
+      if (r.kind === "error") st("status.summaryErr", { err: r.error }, "err");
     } catch (e) {
       st("status.summaryErr", { err: e.message }, "err");
     } finally {
@@ -23050,18 +23174,10 @@ ${lines}`;
     if (!caps.length) return;
     sumBusy = true;
     refreshSpin();
-    let newCaps = caps;
-    if (newCaps.length > SUM_MAX_CAPS_PER_CALL) newCaps = newCaps.slice(newCaps.length - SUM_MAX_CAPS_PER_CALL);
+    sumLastTime = Date.now();
     try {
-      const res = await summarizer.summarize({ prevSummary: "", captions: newCaps });
-      if (res && res.ok) {
-        summaryMd = res.markdown;
-        showingReport = false;
-        fullReport = null;
-        renderSummary();
-        sumPrevCount = caps.length;
-        sumLastTime = Date.now();
-      } else if (res && res.error !== "empty") st("status.summaryErr", { err: res.error }, "err");
+      const r = await makeReport(caps, null, caps, caps.length);
+      if (r.kind === "error") st("status.summaryErr", { err: r.error }, "err");
     } catch (e) {
       st("status.summaryErr", { err: e.message }, "err");
     } finally {
@@ -23091,7 +23207,18 @@ ${lines}`;
     sumTimer = null;
   }
   function renderSummary() {
-    el.summary.innerHTML = showingReport && fullMd ? reportBodyHtml(fullMd) : summaryMd ? md2html(summaryMd) : `<em class="muted">${t("summary.empty")}</em>`;
+    if (fullReport) {
+      el.summary.classList.add("has-report");
+      el.summary.innerHTML = "";
+      const f = document.createElement("iframe");
+      f.className = "report-frame";
+      f.setAttribute("sandbox", "allow-same-origin");
+      f.srcdoc = buildFancyDoc(fullReport);
+      el.summary.appendChild(f);
+    } else {
+      el.summary.classList.remove("has-report");
+      el.summary.innerHTML = summaryMd ? md2html(summaryMd) : `<em class="muted">${t("summary.empty")}</em>`;
+    }
   }
   var REPORT_CSS = 'body{margin:0;background:#eef1f4;color:#19283a;font:16px/1.65 system-ui,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding:28px 16px}.report{max-width:840px;margin:0 auto;background:#fff;border:1px solid #e0e5eb;border-radius:10px;box-shadow:0 1px 2px rgba(25,40,58,.04),0 18px 44px -30px rgba(25,40,58,.3);padding:clamp(22px,4vw,46px)}.report>*:first-child{margin-top:0}.report h1{font-family:"Cambria","Georgia",serif;font-size:clamp(24px,4vw,33px);font-weight:700;line-height:1.2;letter-spacing:-.01em;margin:0 0 18px;padding-bottom:14px;border-bottom:3px solid #1b5e7e;color:#19283a}.report h2{font-family:"Cambria","Georgia",serif;font-size:clamp(19px,2.6vw,23px);font-weight:700;color:#154b64;margin:30px 0 12px;padding-left:14px;border-left:4px solid #1b5e7e;line-height:1.25}.report h3{font-size:15.5px;font-weight:700;color:#1b5e7e;margin:20px 0 8px}.report h4{font-size:14px;font-weight:700;color:#33414f;margin:16px 0 6px}.report p{margin:0 0 12px}.report ul,.report ol{margin:8px 0 14px;padding-left:24px}.report li{margin:5px 0;padding-left:3px}.report li::marker{color:#1b5e7e}.report strong{color:#16303f;font-weight:600}.report em{color:#5c6b7e}.report code{background:#eef1f5;color:#154b64;padding:1px 6px;border-radius:4px;font-size:.9em;font-family:Consolas,"Cascadia Code",monospace}.report blockquote{margin:12px 0;padding:8px 16px;border-left:3px solid #b5651d;background:#f7efe4;color:#6a5640;border-radius:0 6px 6px 0;font-style:italic}.report hr{border:0;border-top:1px solid #e0e5eb;margin:24px 0}.report .tbl-wrap{overflow-x:auto;border:1px solid #e0e5eb;border-radius:8px;margin:14px 0}.report table{border-collapse:collapse;width:100%;min-width:520px;font-size:14px;font-variant-numeric:tabular-nums}.report th{background:#1b5e7e;color:#fff;text-align:left;font-weight:600;font-size:12.5px;letter-spacing:.03em;padding:11px 14px;white-space:nowrap}.report td{padding:11px 14px;border-top:1px solid #e6eaef;vertical-align:top;color:#33414f;line-height:1.5}.report tbody tr:nth-child(even) td{background:#fafbfc}.report td:first-child{font-weight:600;color:#19283a}@media print{body{background:#fff;padding:0}.report{border:0;border-radius:0;box-shadow:none;max-width:none}.report h2,.report .tbl-wrap{break-inside:avoid}}';
   function reportBodyHtml(md) {
@@ -23100,153 +23227,229 @@ ${lines}`;
   function buildReportDoc(md) {
     return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Meeting report</title><style>${REPORT_CSS}</style></head><body>${reportBodyHtml(md)}</body></html>`;
   }
-  var FANCY_CSS = `:root{--ground:#F4F6F8;--paper:#FFFFFF;--ink:#19283A;--muted:#5C6B7E;--faint:#8794A4;--accent:#1B5E7E;--accent-deep:#154B64;--accent-soft:#E8F0F3;--hair:#E0E5EB;--good:#2E7D5B;--good-soft:#E6F1EB;--plan:#1B5E7E;--plan-soft:#E8F0F3;--todo:#B5651D;--todo-soft:#F6EDE2;--warn:#B5651D;--warn-soft:#F7EFE4;--warn-line:#E9D4B6;--serif:"Cambria","Georgia","Times New Roman",serif;--sans:system-ui,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  var FONT_LINK = '<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">';
+  var REVEAL_JS = '<script>document.documentElement.classList.add("js");(function(){try{if(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches)return;var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target);}});},{threshold:.12,rootMargin:"0px 0px -8% 0px"});document.querySelectorAll(".reveal").forEach(function(el){io.observe(el);});}catch(_){document.querySelectorAll(".reveal").forEach(function(el){el.classList.add("in");});}})();<\/script>';
+  var FANCY_CSS = `:root{
+--bg:#F7F3EB;--bg-2:#F0EADE;--surface:#FCFAF4;--surface-2:#F3EEE3;
+--ink:#36312A;--ink-soft:#5E564A;--ink-faint:#988E7D;
+--line:#E5DDCF;--line-strong:#D7CCB9;
+--cel:#6E9F8E;--cel-deep:#517C6D;--cel-tint:#E3EDE7;
+--hi:#B36A4D;--hi-bg:#F2E2D8;--hi-dot:#C2745A;
+--md:#9A7A2E;--md-bg:#F1E9D2;--md-dot:#C7A24E;
+--lo:#5E7E6E;--lo-bg:#E1EAE4;--lo-dot:#7E9B8C;
+--disp:"Bricolage Grotesque",-apple-system,system-ui,"Segoe UI",sans-serif;
+--body:"Inter",-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;
+--mono:"Space Mono","SFMono-Regular",Consolas,"Cascadia Code",monospace}
 *{box-sizing:border-box}
-body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-.sheet{max-width:900px;margin:0 auto;padding:clamp(20px,4vw,56px) clamp(14px,4vw,40px)}
-.doc{background:var(--paper);border:1px solid var(--hair);border-radius:6px;box-shadow:0 1px 2px rgba(25,40,58,.04),0 18px 44px -30px rgba(25,40,58,.3);overflow:hidden}
-.head{padding:clamp(28px,5vw,52px) clamp(24px,5vw,56px) clamp(24px,4vw,38px);border-top:4px solid var(--accent)}
-.eyebrow{font-size:12.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
-.doc-title{font-family:var(--serif);font-weight:700;font-size:clamp(26px,4.2vw,38px);line-height:1.18;letter-spacing:-.01em;margin:0;text-wrap:balance;color:var(--ink)}
-.meta{display:flex;flex-wrap:wrap;gap:12px 26px;margin-top:22px;padding-top:18px;border-top:1px solid var(--hair);font-size:14px;color:var(--muted)}
-.meta .m-label{color:var(--faint);font-size:11px;letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:2px}
-.meta strong{color:var(--ink);font-weight:600}
-.body{padding:0 clamp(24px,5vw,56px) clamp(20px,4vw,44px)}
-section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
-.sec-head{display:flex;align-items:baseline;gap:14px;margin:0 0 18px}
-.sec-num{font-family:var(--serif);font-size:15px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;min-width:1.4em}
-.sec-title{font-family:var(--serif);font-size:clamp(21px,2.9vw,26px);font-weight:700;letter-spacing:-.005em;margin:0;color:var(--ink);text-wrap:balance}
-.sub{margin-top:30px}
-.sub:first-of-type{margin-top:4px}
-.sub-title{font-size:13px;font-weight:700;letter-spacing:.04em;color:var(--accent-deep);margin:0 0 12px;display:flex;align-items:center;gap:10px}
-.sub-title .ix{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:700}
-.sub-title::after{content:"";flex:1;height:1px;background:var(--hair)}
-.body p{margin:0 0 12px;max-width:72ch;color:#33414f}
-.points{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:13px}
-.points>li{position:relative;padding-left:22px;max-width:72ch;color:#33414f}
-.points>li::before{content:"";position:absolute;left:0;top:.62em;width:7px;height:7px;border-radius:2px;background:var(--accent);transform:rotate(45deg)}
-.points b{color:var(--ink);font-weight:600}
-.subpoints{list-style:none;margin:9px 0 0;padding:0;display:flex;flex-direction:column;gap:7px}
-.subpoints li{position:relative;padding-left:20px;color:var(--muted);font-size:15.5px;line-height:1.55}
-.subpoints li::before{content:"";position:absolute;left:2px;top:.72em;width:9px;height:1.5px;background:var(--faint)}
-.cardrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:4px 0 0}
-.mcard{background:var(--ground);border:1px solid var(--hair);border-radius:6px;padding:16px 18px;border-top:3px solid var(--accent)}
-.mcard h4{margin:0 0 6px;font-size:15px;font-weight:700;color:var(--ink);letter-spacing:.01em}
-.mcard p{margin:0;font-size:14.5px;color:var(--muted);line-height:1.5;max-width:none}
-.tbl-wrap{overflow-x:auto;border:1px solid var(--hair);border-radius:6px;margin:14px 0 0}
-.doc table{border-collapse:collapse;width:100%;min-width:520px;font-size:15px;font-variant-numeric:tabular-nums}
-.doc thead th{background:var(--accent);color:#fff;text-align:left;font-weight:600;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;padding:11px 14px;white-space:nowrap}
-.doc tbody td{padding:13px 14px;border-top:1px solid var(--hair);vertical-align:top;color:#33414f;line-height:1.5}
-.doc tbody tr:nth-child(even) td{background:#FAFBFC}
-.doc tbody td:first-child{font-weight:600;color:var(--ink)}
-.stat{display:flex;align-items:center;gap:20px;flex-wrap:wrap;background:linear-gradient(180deg,#1B5E7E,#154B64);color:#fff;border-radius:8px;padding:20px 24px;margin-top:14px}
-.stat-fig{font-family:var(--serif);font-size:clamp(28px,5vw,40px);font-weight:700;line-height:1;letter-spacing:-.01em}
-.stat-cap{font-size:14px;color:#CFE2EA;max-width:46ch;line-height:1.45;margin:0}
-.decisions{display:flex;flex-direction:column;gap:14px;margin-top:4px}
-.decision{display:grid;grid-template-columns:152px 1fr;gap:8px 20px;align-items:start;padding:16px 18px;background:var(--ground);border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:5px}
-.decision.is-done{border-left-color:var(--good)}
-.decision.is-plan{border-left-color:var(--plan)}
-.decision.is-todo{border-left-color:var(--todo)}
-.decision p{margin:0;color:#33414f;font-size:15.5px;line-height:1.55;max-width:none}
-.tag{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:999px;white-space:nowrap;align-self:start}
-.tag::before{content:"";width:7px;height:7px;border-radius:50%}
-.is-done .tag{color:var(--good);background:var(--good-soft)}
-.is-done .tag::before{background:var(--good)}
-.is-plan .tag{color:var(--plan);background:var(--plan-soft)}
-.is-plan .tag::before{background:var(--plan)}
-.is-todo .tag{color:var(--todo);background:var(--todo-soft)}
-.is-todo .tag::before{background:var(--todo)}
-.problems{display:flex;flex-direction:column;gap:14px;margin-top:4px}
-.prob{background:var(--warn-soft);border:1px solid var(--warn-line);border-left:3px solid var(--warn);border-radius:6px;padding:15px 18px}
-.prob h4{margin:0 0 7px;font-size:15px;font-weight:700;color:#7d4513;letter-spacing:.01em}
-.prob p{margin:0;color:#5b4a36;font-size:15px;line-height:1.55;max-width:none}
-.prob .subpoints li{color:#6a5640}
-.prob .subpoints li::before{background:var(--warn)}
-.foot{padding:18px clamp(24px,5vw,56px) 26px;border-top:1px solid var(--hair);font-size:12.5px;color:var(--faint);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
-@media(max-width:540px){.decision{grid-template-columns:1fr;gap:10px}.stat{gap:8px}}
-@media print{body{background:#fff}.sheet{padding:0;max-width:none}.doc{border:0;border-radius:0;box-shadow:none}section,.tbl-wrap,.stat,.prob,.decision,.mcard{break-inside:avoid}}`;
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img{max-width:100%}
+h1,h2,h3,h4{font-family:var(--disp);font-weight:700;letter-spacing:-.02em;line-height:1.12;margin:0}
+p{margin:0}
+ul,ol{margin:0;padding:0;list-style:none}
+a:focus-visible,button:focus-visible,label:focus-visible,input:focus-visible{outline:2px solid var(--cel-deep);outline-offset:2px}
+.wrap{max-width:1080px;margin:0 auto;padding:0 clamp(16px,4vw,40px)}
+.eyebrow{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--cel-deep);margin:0 0 18px}
+.eyebrow::before{content:"";width:26px;height:2px;background:var(--cel);border-radius:2px;flex:0 0 auto}
+section{padding:clamp(26px,3.4vw,40px) 0}
+section+section,.foot{border-top:1px solid var(--line)}
+/* Hero */
+.hero{padding:clamp(28px,4.5vw,46px) 0 clamp(22px,3vw,34px)}
+.headline{font-family:var(--disp);font-weight:800;font-size:clamp(30px,6vw,56px);letter-spacing:-.025em;line-height:1.05;text-wrap:balance;max-width:20ch}
+.headline .hl{color:var(--cel-deep)}
+.sub{margin-top:20px;font-size:clamp(16px,2.1vw,19px);color:var(--ink-soft);max-width:62ch;line-height:1.6}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px}
+.stat{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px 20px 18px;overflow:hidden}
+.stat::before{content:"";position:absolute;top:0;left:22px;width:30px;height:3px;background:var(--cel);border-radius:0 0 3px 3px}
+.stat-val{font-family:var(--mono);font-weight:700;font-size:clamp(23px,3.2vw,34px);line-height:1;color:var(--ink);letter-spacing:-.02em}
+.stat-label{margin-top:11px;font-family:var(--mono);font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint);line-height:1.3}
+.meta{display:flex;flex-wrap:wrap;gap:10px 26px;margin-top:28px;padding-top:20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12.5px;color:var(--ink-faint)}
+.meta-k{color:var(--ink-soft);font-weight:700}
+/* Problem \u2194 Solution */
+.problem{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.pcard{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:clamp(20px,3vw,30px)}
+.pcard.is-solution{background:var(--cel-tint);border-color:var(--cel)}
+.pc-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.pc-ico{font-size:22px;line-height:1}
+.pc-head h3{font-size:clamp(18px,2.4vw,22px)}
+.pts{display:flex;flex-direction:column;gap:11px}
+.pts li{position:relative;padding-left:21px;color:var(--ink-soft);line-height:1.55}
+.pts li::before{content:"";position:absolute;left:2px;top:.6em;width:7px;height:7px;border-radius:2px;background:var(--cel);transform:rotate(45deg)}
+.pcard strong,.b strong{color:var(--ink);font-weight:600}
+code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);padding:1px 6px;border-radius:5px}
+/* Bento */
+.bento{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+.b{grid-column:1 / -1;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:clamp(20px,3vw,30px);transition:transform .25s ease,box-shadow .25s ease}
+.b:hover{transform:translateY(-4px);box-shadow:0 18px 40px -28px rgba(54,49,42,.5)}
+.b-ico{font-size:26px;line-height:1;margin-bottom:12px}
+.b h3{font-size:clamp(18px,2.3vw,22px);margin-bottom:14px}
+.b .pts{margin-bottom:16px}
+.b-concl{display:inline-block;background:var(--surface-2);color:var(--ink-soft);border-radius:999px;padding:8px 16px;font-size:13.5px;line-height:1.4}
+.b-concl::before{content:"\\2713  ";color:var(--cel-deep);font-weight:700}
+@media(min-width:760px){.b.w5{grid-column:span 5}.b.w7{grid-column:span 7}.b.w12{grid-column:1 / -1}}
+/* Action items */
+.actions-sec .panel{background:var(--bg-2);border:1px solid var(--line);border-radius:18px;padding:clamp(20px,4vw,34px)}
+.actions{display:flex;flex-direction:column;gap:10px;margin-top:2px}
+.ai{display:grid;grid-template-columns:auto 1fr auto auto auto;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 16px;cursor:pointer}
+.ai input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.ai .box{flex:0 0 auto;width:20px;height:20px;border:2px solid var(--line-strong);border-radius:6px;display:grid;place-items:center;transition:.18s}
+.ai .box::after{content:"";width:10px;height:6px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) scale(0);margin-top:-2px;transition:transform .18s}
+.ai input:checked+.box{background:var(--cel);border-color:var(--cel)}
+.ai input:checked+.box::after{transform:rotate(-45deg) scale(1)}
+.ai input:focus-visible+.box{outline:2px solid var(--cel-deep);outline-offset:2px}
+.ai .task{color:var(--ink);line-height:1.45;transition:.18s}
+.ai input:checked~.task{text-decoration:line-through;color:var(--ink-faint)}
+.ai .who,.ai .due{font-family:var(--mono);font-size:12px;color:var(--ink-soft);white-space:nowrap}
+.ai .due{color:var(--ink-faint)}
+.pri{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:5px 11px;border-radius:999px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.pri::before{content:"";width:7px;height:7px;border-radius:50%}
+.pri-hi{color:var(--hi);background:var(--hi-bg)}.pri-hi::before{background:var(--hi-dot)}
+.pri-md{color:var(--md);background:var(--md-bg)}.pri-md::before{background:var(--md-dot)}
+.pri-lo{color:var(--lo);background:var(--lo-bg)}.pri-lo::before{background:var(--lo-dot)}
+@media(max-width:640px){.ai{grid-template-columns:auto 1fr;row-gap:7px}.ai .task,.ai .who,.ai .due,.ai .pri{grid-column:2}.ai .pri{justify-self:start}}
+/* Roadmap timeline */
+.road{display:flex;flex-direction:column}
+.step{position:relative;padding:0 0 26px 30px}
+.step:last-child{padding-bottom:0}
+.step-dot{position:absolute;left:0;top:4px;width:15px;height:15px;border-radius:50%;background:var(--cel);border:3px solid var(--bg);box-shadow:0 0 0 1.5px var(--cel);z-index:1}
+.step::after{content:"";position:absolute;left:7px;top:4px;bottom:-4px;width:2px;background:var(--line-strong)}
+.step:last-child::after{display:none}
+.step-time{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--cel-deep);margin-bottom:6px;letter-spacing:.04em}
+.step-title{font-family:var(--disp);font-size:16.5px;margin-bottom:6px}
+.step-desc{color:var(--ink-soft);font-size:14.5px;line-height:1.5}
+@media(min-width:760px){.road{flex-direction:row}.step{flex:1;padding:32px 24px 0 0}.step-dot{top:6px}.step::after{left:15px;right:0;top:12.5px;bottom:auto;width:auto;height:2px}}
+/* Footer */
+.foot{padding:30px 0 50px;margin-top:8px;font-family:var(--mono);font-size:12px;color:var(--ink-faint);text-align:center}
+/* Reveal (ch\u1EC9 \u1EA9n khi JS ch\u1EA1y \u0111\u01B0\u1EE3c) */
+html.js .reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease}
+html.js .reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){html.js .reveal,html.js .reveal.in{opacity:1;transform:none;transition:none}}
+@media(max-width:720px){.stats{grid-template-columns:repeat(2,1fr)}.problem{grid-template-columns:1fr}}
+@media(max-width:420px){.stats{grid-template-columns:1fr}}
+@media print{body{background:#fff}.b:hover{transform:none;box-shadow:none}section,.b,.pcard,.ai,.step{break-inside:avoid}}`;
   function _fesc(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
   function _finl(s) {
     return _fesc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`(.+?)`/g, "<code>$1</code>");
   }
-  function _fsub(sub) {
-    return sub && sub.length ? '<ul class="subpoints">' + sub.map((x) => `<li>${_finl(x)}</li>`).join("") + "</ul>" : "";
+  function _fhl(s) {
+    return _fesc(s).replace(/\*\*(.+?)\*\*/g, '<span class="hl">$1</span>');
   }
-  function _flbl(p) {
-    return p.label ? `<b>${_fesc(p.label)}${/[:：]\s*$/.test(p.label) ? "" : ":"}</b> ` : "";
+  function _ful(pts) {
+    const a = (pts || []).filter((x) => x && String(x).trim());
+    return a.length ? '<ul class="pts">' + a.map((x) => `<li>${_finl(x)}</li>`).join("") + "</ul>" : "";
   }
-  function _fcells(r) {
-    return Array.isArray(r) ? r : r && r.cells || [];
+  function _bentoSpans(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      if (n % 2 === 1 && i === n - 1) {
+        out.push("w12");
+        continue;
+      }
+      const wide = Math.floor(i / 2) % 2 === 0 === (i % 2 === 0);
+      out.push(wide ? "w7" : "w5");
+    }
+    return out;
   }
-  function _fhasTable(t2) {
-    return t2 && (t2.columns && t2.columns.length || t2.rows && t2.rows.length);
-  }
-  var _FSCLS = { done: "is-done", plan: "is-plan", todo: "is-todo" };
-  function _fblocks(o, warn) {
-    let h = "";
-    if (o.intro) h += `<p>${_finl(o.intro)}</p>`;
-    if (o.points && o.points.length) h += warn ? '<div class="problems">' + o.points.map((p) => `<div class="prob">${p.label ? `<h4>${_fesc(p.label)}</h4>` : ""}${p.text ? `<p>${_finl(p.text)}</p>` : ""}${_fsub(p.sub)}</div>`).join("") + "</div>" : '<ul class="points">' + o.points.map((p) => `<li>${_flbl(p)}${_finl(p.text)}${_fsub(p.sub)}</li>`).join("") + "</ul>";
-    if (o.cards && o.cards.length) h += '<div class="cardrow">' + o.cards.map((c) => `<div class="mcard">${c.title ? `<h4>${_fesc(c.title)}</h4>` : ""}<p>${_finl(c.text)}</p></div>`).join("") + "</div>";
-    if (o.stat && o.stat.value) h += `<div class="stat"><span class="stat-fig">${_fesc(o.stat.value)}</span>${o.stat.caption ? `<p class="stat-cap">${_finl(o.stat.caption)}</p>` : ""}</div>`;
-    if (_fhasTable(o.table)) h += `<div class="tbl-wrap"><table><thead><tr>${(o.table.columns || []).map((c) => `<th>${_finl(c)}</th>`).join("")}</tr></thead><tbody>${(o.table.rows || []).map((r) => `<tr>${_fcells(r).map((c) => `<td>${_finl(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
-    if (o.decisions && o.decisions.length) h += '<div class="decisions">' + o.decisions.map((d) => `<div class="decision ${_FSCLS[d.status] || "is-plan"}"><span class="tag">${_fesc(d.label)}</span><p>${_finl(d.text)}</p></div>`).join("") + "</div>";
-    return h;
-  }
+  var _PRI = Object.assign(/* @__PURE__ */ Object.create(null), { high: ["pri-hi", "Cao"], mid: ["pri-md", "Trung b\xECnh"], low: ["pri-lo", "Th\u1EA5p"] });
   function renderReport(r) {
     r = r || {};
-    const meta = (r.meta || []).filter((m) => m && m.value).map((m) => `<div><span class="m-label">${_fesc(m.label)}</span><strong>${_fesc(m.value)}</strong></div>`).join("");
-    const head = `<header class="head">${r.eyebrow ? `<p class="eyebrow">${_fesc(r.eyebrow)}</p>` : ""}<h1 class="doc-title">${_fesc(r.title || "B\xE1o c\xE1o cu\u1ED9c h\u1ECDp")}</h1>${meta ? `<div class="meta">${meta}</div>` : ""}</header>`;
-    const body = '<div class="body">' + (r.sections || []).map((s, i) => {
-      const num = String(i + 1).padStart(2, "0"), warn = s.tone === "warn";
-      let inner = _fblocks(s, warn);
-      if (s.subs && s.subs.length) inner += s.subs.map((sub, j) => `<div class="sub"><p class="sub-title"><span class="ix">${i + 1}.${j + 1}</span> ${_fesc(sub.title)}</p>${_fblocks(sub, sub.tone === "warn")}</div>`).join("");
-      return `<section><div class="sec-head"><span class="sec-num">${num}</span><h2 class="sec-title">${_fesc(s.heading)}</h2></div>${inner}</section>`;
-    }).join("") + "</div>";
-    const foot = r.footer ? `<footer class="foot"><span>${_fesc(r.footer)}</span></footer>` : "";
-    return `<div class="sheet"><article class="doc">${head}${body}${foot}</article></div>`;
+    const h = r.hero || {}, lab = r.labels || {};
+    const stats = (h.stats || []).filter((s) => s && s.value).slice(0, 4).map((s) => `<div class="stat"><div class="stat-val">${_fesc(s.value)}</div><div class="stat-label">${_fesc(s.label)}</div></div>`).join("");
+    const meta = (h.meta || []).filter((m) => m && m.value).map((m) => `<span class="meta-item"><span class="meta-k">${_fesc(m.label)}:</span> ${_fesc(m.value)}</span>`).join("");
+    const hero = `<header class="hero reveal">${h.eyebrow ? `<p class="eyebrow">${_fesc(h.eyebrow)}</p>` : ""}<h1 class="headline">${_fhl(h.headline || "T\xF3m t\u1EAFt cu\u1ED9c h\u1ECDp")}</h1>` + (h.subhead ? `<p class="sub">${_finl(h.subhead)}</p>` : "") + (stats ? `<div class="stats">${stats}</div>` : "") + (meta ? `<div class="meta">${meta}</div>` : "") + `</header>`;
+    let problem = "";
+    const p = r.problem;
+    if (p && (p.challenge && p.challenge.title || p.solution && p.solution.title)) {
+      const side = (s, cls, ico) => s && s.title ? `<article class="pcard ${cls}"><div class="pc-head"><span class="pc-ico">${ico}</span><h3>${_fesc(s.title)}</h3></div>${_ful(s.points)}</article>` : "";
+      problem = `<section class="reveal"><p class="eyebrow">${_fesc(lab.problem || "V\u1EA5n \u0111\u1EC1 c\u1ED1t l\xF5i")}</p><div class="problem">${side(p.challenge, "", "\u26A0\uFE0F")}${side(p.solution, "is-solution", "\u{1F4A1}")}</div></section>`;
+    }
+    let bento = "";
+    const bs = (r.bento || []).filter((b) => b && b.title);
+    if (bs.length) {
+      const sp = _bentoSpans(bs.length);
+      bento = `<section class="reveal"><p class="eyebrow">${_fesc(lab.bento || "Ch\u1EE7 \u0111\u1EC1 ch\xEDnh")}</p><div class="bento">` + bs.map((b, i) => `<article class="b ${sp[i] || ""}">${b.icon ? `<div class="b-ico">${_fesc(b.icon)}</div>` : ""}<h3>${_fesc(b.title)}</h3>${_ful(b.points)}${b.conclusion ? `<p class="b-concl">${_finl(b.conclusion)}</p>` : ""}</article>`).join("") + `</div></section>`;
+    }
+    let actions = "";
+    const as = (r.actions || []).filter((a) => a && a.task);
+    if (as.length) {
+      actions = `<section class="actions-sec reveal"><div class="panel"><p class="eyebrow">${_fesc(lab.actions || "Vi\u1EC7c c\u1EA7n l\xE0m")}</p><div class="actions">` + as.map((a) => {
+        const pr = _PRI[a.priority] || _PRI.mid;
+        return `<label class="ai"><input type="checkbox"><span class="box"></span><span class="task">${_finl(a.task)}</span><span class="who">${a.owner ? _fesc(a.owner) : "\u2014"}</span><span class="due">${a.due ? _fesc(a.due) : "\u2014"}</span><span class="pri ${pr[0]}">${pr[1]}</span></label>`;
+      }).join("") + `</div></div></section>`;
+    }
+    let road = "";
+    const rs = (r.roadmap || []).filter((s) => s && s.title);
+    if (rs.length) {
+      road = `<section class="reveal"><p class="eyebrow">${_fesc(lab.roadmap || "L\u1ED9 tr\xECnh ti\u1EBFp theo")}</p><ol class="road">` + rs.map((s) => `<li class="step"><span class="step-dot"></span>${s.time ? `<div class="step-time">${_fesc(s.time)}</div>` : ""}<h4 class="step-title">${_fesc(s.title)}</h4>${s.desc ? `<p class="step-desc">${_finl(s.desc)}</p>` : ""}</li>`).join("") + `</ol></section>`;
+    }
+    const foot = `<footer class="foot">${r.footer ? _fesc(r.footer) : "B\u1EA3n t\xF3m t\u1EAFt t\u1EF1 \u0111\u1ED9ng t\u1EEB transcript cu\u1ED9c h\u1ECDp."}</footer>`;
+    return `<div class="wrap">${hero}${problem}${bento}${actions}${road}${foot}</div>`;
   }
   function buildFancyDoc(r) {
-    return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${_fesc(r && r.title || "B\xE1o c\xE1o cu\u1ED9c h\u1ECDp")}</title><style>${FANCY_CSS}</style></head><body>${renderReport(r)}</body></html>`;
+    const title = _fesc(String(r && r.hero && r.hero.headline || "B\xE1o c\xE1o cu\u1ED9c h\u1ECDp").replace(/\*\*/g, ""));
+    return `<!doctype html><html lang="${currentLocale()}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>${FONT_LINK}<style>${FANCY_CSS}</style></head><body>${renderReport(r)}${REVEAL_JS}</body></html>`;
   }
   function reportToMd(r) {
     r = r || {};
-    const L = [];
-    if (r.title) L.push("# " + r.title);
-    for (const m of r.meta || []) if (m && m.value) L.push(`- **${m.label}:** ${m.value}`);
-    const blk = (o) => {
-      if (o.intro) {
-        L.push("");
-        L.push(o.intro);
-      }
-      for (const p of o.points || []) {
-        L.push((p.label ? `- **${p.label}:** ` : "- ") + (p.text || ""));
-        for (const s of p.sub || []) L.push("    - " + s);
-      }
-      for (const c of o.cards || []) L.push(`- **${c.title || ""}:** ${c.text || ""}`);
-      if (o.stat && o.stat.value) {
-        L.push("");
-        L.push(`**${o.stat.value}** \u2014 ${o.stat.caption || ""}`);
-      }
-      if (o.table && o.table.columns && o.table.columns.length) {
-        L.push("");
-        L.push("| " + o.table.columns.join(" | ") + " |");
-        L.push("| " + o.table.columns.map(() => "---").join(" | ") + " |");
-        for (const row of o.table.rows || []) L.push("| " + _fcells(row).join(" | ") + " |");
-      }
-      for (const d of o.decisions || []) L.push(`- **${d.label}:** ${d.text || ""}`);
-    };
-    (r.sections || []).forEach((s, i) => {
+    const h = r.hero || {}, L = [];
+    L.push("# " + String(h.headline || "T\xF3m t\u1EAFt cu\u1ED9c h\u1ECDp").replace(/\*\*/g, ""));
+    if (h.subhead) {
       L.push("");
-      L.push(`## ${i + 1}. ${s.heading}`);
-      blk(s);
-      (s.subs || []).forEach((sub, j) => {
+      L.push(h.subhead);
+    }
+    const meta = (h.meta || []).filter((m) => m && m.value);
+    if (meta.length) {
+      L.push("");
+      for (const m of meta) L.push(`- **${m.label}:** ${m.value}`);
+    }
+    const stats = (h.stats || []).filter((s) => s && s.value);
+    if (stats.length) {
+      L.push("");
+      L.push("## S\u1ED1 li\u1EC7u ch\xEDnh");
+      for (const s of stats) L.push(`- **${s.value}** \u2014 ${s.label || ""}`);
+    }
+    const p = r.problem;
+    if (p && (p.challenge && p.challenge.title || p.solution && p.solution.title)) {
+      L.push("");
+      L.push("## V\u1EA5n \u0111\u1EC1 c\u1ED1t l\xF5i");
+      const side = (s, ico) => {
+        if (!s || !s.title) return;
         L.push("");
-        L.push(`### ${i + 1}.${j + 1}. ${sub.title}`);
-        blk(sub);
-      });
-    });
+        L.push(`### ${ico} ${s.title}`);
+        for (const x of s.points || []) L.push(`- ${x}`);
+      };
+      side(p.challenge, "\u26A0\uFE0F");
+      side(p.solution, "\u{1F4A1}");
+    }
+    const bs = (r.bento || []).filter((b) => b && b.title);
+    if (bs.length) {
+      L.push("");
+      L.push("## Ch\u1EE7 \u0111\u1EC1 ch\xEDnh");
+      for (const b of bs) {
+        L.push("");
+        L.push(`### ${b.icon ? b.icon + " " : ""}${b.title}`);
+        for (const x of b.points || []) L.push(`- ${x}`);
+        if (b.conclusion) L.push(`> **K\u1EBFt lu\u1EADn:** ${b.conclusion}`);
+      }
+    }
+    const as = (r.actions || []).filter((a) => a && a.task);
+    if (as.length) {
+      L.push("");
+      L.push("## Vi\u1EC7c c\u1EA7n l\xE0m");
+      L.push("");
+      L.push("| Vi\u1EC7c | Ph\u1EE5 tr\xE1ch | H\u1EA1n | \u01AFu ti\xEAn |");
+      L.push("| --- | --- | --- | --- |");
+      const PR = { high: "Cao", mid: "Trung b\xECnh", low: "Th\u1EA5p" };
+      for (const a of as) L.push(`| ${a.task} | ${a.owner || "\u2014"} | ${a.due || "\u2014"} | ${PR[a.priority] || "Trung b\xECnh"} |`);
+    }
+    const rs = (r.roadmap || []).filter((s) => s && s.title);
+    if (rs.length) {
+      L.push("");
+      L.push("## L\u1ED9 tr\xECnh ti\u1EBFp theo");
+      for (const s of rs) L.push(`- **${s.time ? s.time + " \u2014 " : ""}${s.title}**${s.desc ? ": " + s.desc : ""}`);
+    }
     return L.join("\n");
   }
   function md2html(md) {
@@ -23341,7 +23544,7 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
   }
   function buildVoiceButton() {
     el.voiceBtn.textContent = S.geminiAudioOn ? "\u{1F50A}" : "\u{1F507}";
-    el.voiceBtn.style.display = S.transcribeMode ? "none" : "";
+    el.voiceBtn.style.display = "";
   }
   function buildVoiceMenu() {
     el.voiceMenu.innerHTML = "";
@@ -23373,7 +23576,7 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
     }
   }
   function buildTargetButton() {
-    el.targetBtn.innerHTML = S.transcribeMode ? "<span>\u{1F4DD}</span>" : `<span class="flag">${flag(S.langCode)}</span>`;
+    el.targetBtn.innerHTML = `<span class="flag">${flag(S.langCode)}</span>`;
   }
   function buildLangMenu() {
     el.langMenu.innerHTML = "";
@@ -23395,36 +23598,18 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
       const b = document.createElement("button");
       b.type = "button";
       b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
-      if (!S.transcribeMode && S.langCode === L.code) b.classList.add("sel");
+      if (S.langCode === L.code) b.classList.add("sel");
       b.addEventListener("click", () => {
-        pickTarget(L.code, false);
+        pickTarget(L.code);
         closeMenus();
       });
       el.targetMenu.appendChild(b);
     }
-    const tb = document.createElement("button");
-    tb.type = "button";
-    tb.innerHTML = `<span>${t("lang.transcribe")}</span>`;
-    if (S.transcribeMode) tb.classList.add("sel");
-    tb.addEventListener("click", () => {
-      pickTarget(null, true);
-      closeMenus();
-    });
-    el.targetMenu.appendChild(tb);
   }
-  function pickTarget(code, transcribe) {
-    if (transcribe) {
-      save({ transcribeMode: true });
-      live.onTranscribeModeChanged();
-    } else {
-      const wasT = S.transcribeMode;
-      save({ langCode: code, transcribeMode: false });
-      wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged();
-    }
-    buildVoiceButton();
+  function pickTarget(code) {
+    save({ langCode: code });
+    live.onTargetLangChanged();
     buildTargetButton();
-    setLayoutActive();
-    reRenderAll();
   }
   function closeMenus() {
     el.langMenu.classList.add("hidden");
@@ -23625,7 +23810,7 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
           await chrome.storage.local.set({ handoff: {
             caps: _capSnapshot(),
             summaryMd,
-            fullMd,
+            report: fullReport,
             sessId: _sessId,
             sessStart: _sessStart,
             wasRunning,
@@ -23728,51 +23913,34 @@ section{padding:clamp(26px,3.5vw,36px) 0;border-top:1px solid var(--hair)}
         download(`bao-cao-${stamp}.html`, buildFancyDoc(fullReport), "text/html");
         return;
       }
-      const md = fullMd || summaryMd;
-      if (md) download(`${fullMd ? "report" : "summary"}-${stamp}.html`, buildReportDoc(md), "text/html");
+      if (summaryMd) download(`summary-${stamp}.html`, buildReportDoc(summaryMd), "text/html");
     });
     el.sumExport.addEventListener("click", () => {
       if (summaryMd) download(`summary-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.md`, summaryMd, "text/markdown");
     });
     el.sumFull.addEventListener("click", async () => {
-      if (running) {
-        st("status.stopFirst");
-        return;
-      }
+      if (sumBusy) return;
       const caps = finalized();
       if (!caps.length) {
         st("status.noContent");
         return;
       }
+      if (!sumPanelOpen) {
+        sumPanelOpen = true;
+        el.summaryWrap.classList.remove("hidden");
+        el.vResizer.classList.remove("hidden");
+        el.summaryToggle.classList.add("active");
+        if (!el.summaryWrap.style.height) el.summaryWrap.style.height = Math.round(window.innerHeight * 0.35) + "px";
+      }
       st("status.makingFull");
       sumBusy = true;
       refreshSpin();
       showFullOverlay(true);
+      sumLastTime = Date.now();
       try {
-        let rep = null;
-        try {
-          const sr = await summarizer.summarizeFullStructured(caps);
-          if (sr && sr.ok) rep = sr.report;
-        } catch (e) {
-        }
-        if (rep) {
-          fullReport = rep;
-          fullMd = summaryMd = reportToMd(rep);
-          showingReport = true;
-          renderSummary();
-          el.summaryWrap.classList.remove("hidden");
-          st("status.fullDone");
-        } else {
-          const r = await summarizer.summarizeFull(caps);
-          if (r && r.ok) {
-            fullReport = null;
-            fullMd = summaryMd = r.markdown;
-            showingReport = true;
-            renderSummary();
-            el.summaryWrap.classList.remove("hidden");
-            st("status.fullDone");
-          } else st("status.fullErr", { err: r && r.error }, "err");
-        }
+        const r = await makeReport(caps, null, caps, caps.length);
+        if (r.kind === "error") st("status.fullErr", { err: r.error }, "err");
+        else st("status.fullDone");
       } catch (e) {
         st("status.fullErr", { err: e.message }, "err");
       } finally {

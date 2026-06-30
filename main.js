@@ -9,7 +9,6 @@ const Store = require('./src/store');
 const { registerAll } = require('./src/ipc-handlers');
 const { LANG_NAMES, LANG_LABELS } = require('./src/langs');
 const { runAudioService, stopSTTServer } = require('./src/audio-stt');
-const { runUiaService, stopHelper: stopUiaHelper } = require('./src/uia-captions');   // chế độ Teams (UIA caption)
 
 // Tắt GPU hardware acceleration
 app.disableHardwareAcceleration();
@@ -69,7 +68,7 @@ async function startService() {
   while (true) {
     state.captureSourceChanged = false;
     state.userActive = false;   // mỗi (re)start → IDLE, chờ user bấm ▶ (không auto-play)
-    try { if (state.captureSource === 'teams') await runUiaService(); else await runAudioService(); }
+    try { await runAudioService(); }
     catch (e) { console.error('[startService] lỗi:', e.message); }
     if (state.captureSourceChanged) await sleep(300);
     else await sleep(2000);
@@ -82,7 +81,6 @@ app.whenReady().then(() => {
   state.apiKey        = Store.get('apiKey',        '');
   state.geminiAudioOn = Store.get('geminiAudioOn', true);
   state.geminiVoice   = Store.get('geminiVoice',   'Achernar');
-  state.transcribeMode = Store.get('transcribeMode', false);   // PHẢI nạp ở main: gemini-live/summary đọc state này (không thì desync UI=chép-lời nhưng main=dịch+TTS)
   state.summaryExtra  = Store.get('summaryExtra',   '');       // prompt tóm tắt riêng cũng dùng ở main
   state.theme         = Store.get('theme',         'auto');
   state.uiLang        = Store.get('uiLang',        'vi');
@@ -91,9 +89,9 @@ app.whenReady().then(() => {
   state.targetLang      = LANG_NAMES[_savedLang]  || 'Vietnamese';
   state.targetLangLabel = LANG_LABELS[_savedLang] || 'tiếng Việt';
   Menu.setApplicationMenu(null);
-  // Nguồn: 'teams' (UIA caption), 'system' (audio app), 'mic'. Giá trị lạ → 'system'.
+  // Nguồn: 'system' (audio loopback toàn hệ thống / theo app), 'mic'. Giá trị lạ → 'system'.
   let cs = Store.get('captureSource', 'system');
-  if (cs !== 'system' && cs !== 'mic' && cs !== 'teams') cs = 'system';
+  if (cs !== 'system' && cs !== 'mic') cs = 'system';
   state.captureSource = cs;
   Store.set('captureSource', cs);
 
@@ -106,11 +104,9 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopSTTServer();
-  try { stopUiaHelper(); } catch {}
   try { require('./src/process-audio').stop(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('before-quit', () => {
-  try { stopUiaHelper(); } catch {}
   try { require('./src/process-audio').stop(); } catch {}
 });

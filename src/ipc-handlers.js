@@ -8,10 +8,8 @@ const Store = require('./store');
 const { LANG_NAMES, LANG_LABELS } = require('./langs');
 const { handlePcm } = require('./audio-stt');
 const geminiLive = require('./gemini-live');          // audio-in (system/mic) — gemini-3.5-live-translate
-const geminiTextLive = require('./gemini-text-live'); // text-in (Teams caption) — gemini-3.1-flash-live
 const geminiText = require('./gemini-text');          // summary
 const processAudio = require('./process-audio');
-const uia = require('./uia-captions');
 
 const send = (ch, data) => state.win?.webContents?.send(ch, data);
 
@@ -23,7 +21,6 @@ function registerAll(app) {
     state.langCode = lang;
     Store.set('lang', lang);
     try { geminiLive.onTargetLangChanged(); } catch {}       // audio mode → nối lại phiên với target mới
-    try { geminiTextLive.onTargetLangChanged(); } catch {}   // teams mode → nối lại phiên với target mới
   });
 
   // ── Window ──
@@ -32,6 +29,10 @@ function registerAll(app) {
   ipcMain.on('window-maximize', () => { const w = state.win; if (!w) return; try { w.isMaximized() ? w.unmaximize() : w.maximize(); } catch {} });
   ipcMain.on('window-close',    () => { try { state.win?.close(); } catch {} });
   ipcMain.on('set-always-on-top', (_, v) => { state.pinned = v; state.win?.setAlwaysOnTop(v, v ? 'screen-saver' : 'normal'); if (v) state.win?.focus(); });
+  // Nới rộng cửa sổ tới tối thiểu px (layout 2 cột gốc|dịch cần đủ chỗ chứa). KHÔNG thu nhỏ.
+  ipcMain.on('ensure-width', (_, px) => {
+    try { const w = state.win; if (!w) return; const b = w.getBounds(); const want = Math.max(b.width, Math.floor(px) || 0); if (want > b.width) w.setBounds({ x: b.x, y: b.y, width: want, height: b.height }); } catch (e) {}
+  });
 
   // Bắt đầu thu chế độ AUDIO: đã CHỌN APP (audioProcessName) → thu CÂY tiến trình gốc của app đó
   // (INCLUDE_TARGET_PROCESS_TREE phủ hết cửa sổ/meeting con; loại TTS của chính app → hết feedback).
@@ -48,48 +49,22 @@ function registerAll(app) {
     }
   }
 
-  // ── ▶/⏹ ──
-  ipcMain.on('toggle-captions', (_, desired) => {
-    // CHẾ ĐỘ AUDIO (system/mic) → gemini-3.5-live-translate (audio-in)
-    if (state.captureSource !== 'teams') {
-      state.audioPaused = !state.audioPaused;
-      state.userActive  = !state.audioPaused;
-      const label = state.captureSource === 'mic' ? 'Microphone' : 'System Audio';
-      if (state.audioPaused) {   // ⏹
-        try { geminiLive.stop(); } catch {}
-        if (processAudio.isActive()) processAudio.stop(); else send('stop-audio-capture', {});
-        send('cc-state', { active: false });
-        send('status', { type: 'ended', key: 'status.recordingPaused' });
-        return;
-      }
-      try { geminiLive.start(); } catch {}   // ▶
-      startAudioCaptureForSource();
-      send('cc-state', { active: true });
-      send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
-      return;
-    }
-    // CHẾ ĐỘ TEAMS (UIA caption text) → gemini-3.1-flash-live (text-in)
-    const wantOn = (typeof desired === 'boolean') ? desired : !state.userActive;
-    if (!wantOn) {   // ⏹
-      state.userActive = false;
-      try { geminiTextLive.stop(); } catch {}
+  // ── ▶/⏹ (chế độ AUDIO system/mic → gemini-3.5-live-translate, audio-in) ──
+  ipcMain.on('toggle-captions', () => {
+    state.audioPaused = !state.audioPaused;
+    state.userActive  = !state.audioPaused;
+    const label = state.captureSource === 'mic' ? 'Microphone' : 'System Audio';
+    if (state.audioPaused) {   // ⏹
+      try { geminiLive.stop(); } catch {}
+      if (processAudio.isActive()) processAudio.stop(); else send('stop-audio-capture', {});
       send('cc-state', { active: false });
-      send('status', { type: 'idle', key: 'status.idle' });
+      send('status', { type: 'ended', key: 'status.recordingPaused' });
       return;
     }
-    state.userActive = true;   // ▶
-    try { geminiTextLive.start(); } catch {}
-    const active = uia.isCaptionsOn();
-    send('cc-state', { active });
-    if (!active) {
-      if (!state.pinned && !state._tempPin) {   // pin tạm để Alt+Shift+C không che app
-        state._tempPin = true;
-        try { state.win?.setAlwaysOnTop(true, 'screen-saver'); } catch {}
-        setTimeout(() => { if (state._tempPin) { state._tempPin = false; try { state.win?.setAlwaysOnTop(!!state.pinned, state.pinned ? 'screen-saver' : 'normal'); } catch {} } }, 8000);
-      }
-      send('status', { type: 'enabling-captions', key: 'status.enablingCaptions' });
-      try { uia.enableCaptions(); } catch {}
-    }
+    try { geminiLive.start(); } catch {}   // ▶
+    startAudioCaptureForSource();
+    send('cc-state', { active: true });
+    send('status', { type: 'running', key: 'status.audioRecording', vars: { label } });
   });
 
   // ── Audio PCM Float32 @16k từ renderer (Web Audio) → handlePcm → Gemini ──
@@ -125,10 +100,10 @@ function registerAll(app) {
     micDeviceId:       Store.get('micDeviceId',       ''),
     geminiAudioOn:     Store.get('geminiAudioOn',     true),
     geminiVoice:       Store.get('geminiVoice',       'Achernar'),
-    transcribeMode:    Store.get('transcribeMode',    false),
     summaryExtra:      Store.get('summaryExtra',      ''),
     audioProcessName:  Store.get('audioProcessName',  ''),
     audioProcessApp:   Store.get('audioProcessApp',   ''),
+    layout:            Store.get('layout',            'translation'),
   }));
 
   ipcMain.on('save-settings', (_, s) => {
@@ -156,9 +131,9 @@ function registerAll(app) {
       }
     }
     if (s.geminiAudioOn !== undefined) { Store.set('geminiAudioOn', !!s.geminiAudioOn); state.geminiAudioOn = !!s.geminiAudioOn; try { geminiLive.setAudioOn(!!s.geminiAudioOn); } catch {} }
-    if (s.transcribeMode !== undefined) { Store.set('transcribeMode', !!s.transcribeMode); state.transcribeMode = !!s.transcribeMode; try { geminiLive.onTranscribeModeChanged(); } catch {} }   // đổi chép-lời ↔ dịch → nối lại phiên audio với echo/nguồn-transcript mới
     if (s.summaryExtra !== undefined) { const v = String(s.summaryExtra || ''); Store.set('summaryExtra', v); state.summaryExtra = v; }   // yêu cầu tóm tắt riêng → áp ngay vòng tóm tắt kế (không cần nối lại phiên)
-    if (s.geminiVoice   !== undefined) { Store.set('geminiVoice', s.geminiVoice); state.geminiVoice = s.geminiVoice; try { geminiLive.onTargetLangChanged(); } catch {} try { geminiTextLive.onTargetLangChanged(); } catch {} }   // đổi giọng → nối lại phiên áp giọng mới
+    if (s.layout !== undefined) { Store.set('layout', s.layout); }   // giao diện hiển thị gốc/dịch (renderer-only)
+    if (s.geminiVoice   !== undefined) { Store.set('geminiVoice', s.geminiVoice); state.geminiVoice = s.geminiVoice; try { geminiLive.onTargetLangChanged(); } catch {} }   // đổi giọng → nối lại phiên áp giọng mới
     send('settings-saved', { ok: true });
   });
 
@@ -176,9 +151,9 @@ function registerAll(app) {
     try { return await geminiText.summarizeFull(captions); }
     catch (e) { return { ok: false, error: e.message }; }
   });
-  // Tổng thể CÓ CẤU TRÚC (JSON) → client render HTML "y hệt". Lỗi → caller fallback summarize-meeting.
-  ipcMain.handle('summarize-meeting-structured', async (_, captions) => {
-    try { return await geminiText.summarizeFullStructured(captions); }
+  // Tổng thể CÓ CẤU TRÚC (JSON landing-page) → client render HTML đẹp. Lỗi → caller fallback summarize-meeting (markdown).
+  ipcMain.handle('summarize-report', async (_, payload) => {
+    try { const p = payload || {}; return await geminiText.summarizeReport(p.captions || [], p.facts || null, p.prevReport || null); }
     catch (e) { return { ok: false, error: e.message }; }
   });
   ipcMain.handle('export-summary', async (_, opts = {}) => {

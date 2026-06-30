@@ -37,7 +37,8 @@ contextBridge.exposeInMainWorld('__caption', {
   // summary (panel Gemini)
   summarizeGemini: (payload) => ipcRenderer.invoke('summarize-gemini', payload),
   summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),   // tổng thể → gemma-4-31b
-  summarizeMeetingStructured: (captions) => ipcRenderer.invoke('summarize-meeting-structured', captions),   // tổng thể JSON → render HTML y hệt
+  summarizeReport: (payload) => ipcRenderer.invoke('summarize-report', payload),   // tổng thể JSON landing-page → render HTML đẹp
   setSummaryPanel: (open)    => ipcRenderer.send('summary-panel', open),
+  ensureWidth:     (px)      => ipcRenderer.send('ensure-width', px),
   exportSummary:   (data)    => ipcRenderer.invoke('export-summary', data),
 });

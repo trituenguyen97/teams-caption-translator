@@ -8,7 +8,7 @@ import { hSave, hList, hGet, hDel, hAll, hImport } from './lib/history.js';
 
 // ── State + lưu trữ ────────────────────────────────────────────────────────────
 const DEFAULTS = {
-  apiKey: '', langCode: 'vi', transcribeMode: false, geminiVoice: DEFAULT_VOICE,
+  apiKey: '', langCode: 'vi', geminiVoice: DEFAULT_VOICE,
   geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi', layout: 'translation', zoom: 100, saveHistory: true,
 };
 const S = { ...DEFAULTS };
@@ -46,14 +46,14 @@ function st(key, vars, cls) { _lastStatus = { key, vars, cls }; el.status.textCo
 
 // ── Engines ──────────────────────────────────────────────────────────────────────
 const live = createLiveTranslator({
-  getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, transcribeMode: S.transcribeMode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
+  getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
   onCaption: addCaption,
   onAudio: playAudio,
   onClear: clearAudio,
   onStatus: ({ error }) => { if (error === 'no-key') st('status.noKeyShort', null, 'err'); else if (error) st('status.geminiErr', { err: error }, 'err'); },
 });
 const summarizer = createSummarizer({
-  getState: () => ({ apiKey: S.apiKey, targetLangLabel: LANG_LABELS[S.langCode] || 'tiếng Việt', transcribeMode: S.transcribeMode, summaryExtra: S.summaryExtra }),
+  getState: () => ({ apiKey: S.apiKey, targetLangLabel: LANG_LABELS[S.langCode] || 'tiếng Việt', summaryExtra: S.summaryExtra }),
 });
 
 // ── Caption list ─────────────────────────────────────────────────────────────────
@@ -134,11 +134,10 @@ function reRenderAll() {   // áp dụng lại khi đổi layout (xử lý cả 
   el.list.classList.remove('dual'); el.list.innerHTML = ''; rowById.clear();
   for (const e of captions) upsertRow(e);
 }
-function curLayout() { return S.transcribeMode ? 'translation' : (S.layout || 'translation'); }   // Chép lời → ép Chỉ dịch
+function curLayout() { return S.layout || 'translation'; }
 function setLayoutActive() {
   const eff = curLayout();
   el.layoutPick.querySelectorAll('.lay-opt').forEach(b => {
-    b.disabled = S.transcribeMode && b.dataset.layout !== 'translation';   // Chép lời → khoá 'Gốc trên/dưới' & '2 cột'
     b.classList.toggle('active', b.dataset.layout === eff);
   });
 }
@@ -392,7 +391,7 @@ async function _consumeHandoff() {   // tab mới: đọc + xoá blob, khôi ph�
 }
 function saveSession() {   // chụp đồng bộ rồi ghi (an toàn dù captions bị xoá ngay sau)
   if (!S.saveHistory || !_sessId || !captions.length) return;
-  const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: S.langCode, transcribe: !!S.transcribeMode, count: captions.length, caps: _capPairs(), summaryMd, report: fullReport };
+  const s = { id: _sessId, startedAt: _sessStart, endedAt: Date.now(), langCode: S.langCode, count: captions.length, caps: _capPairs(), summaryMd, report: fullReport };
   hSave(s).catch(e => console.warn('[history] lưu lỗi:', e && e.message));
 }
 function _fmtDate(ts) { const d = new Date(ts), p = n => (n < 10 ? '0' : '') + n; return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -510,7 +509,7 @@ async function ensureMicPermission() {
 // ── Tóm tắt ────────────────────────────────────────────────────────────────────────
 let summaryMd = '', sumPrevCount = 0, sumBusy = false, sumTimer = null, sumPanelOpen = false, sumLastTime = 0;
 let fullReport = null;   // báo cáo có cấu trúc (JSON landing-page) → nguồn DUY NHẤT dựng HTML + preview iframe; null = chưa có. summaryMd = bản markdown soi chiếu (export MD / fallback hiển thị).
-const SUM_INTERVAL_MS = 60000, SUM_POLL_MS = 10000;   // rolling dựng lại báo cáo ~1 PHÚT/lần (gửi TOÀN BỘ transcript); kiểm tra mỗi 10s
+const SUM_INTERVAL_MS = 60000, SUM_POLL_MS = 10000;   // rolling cập nhật báo cáo ~1 PHÚT/lần (incremental: chỉ câu mới); kiểm tra mỗi 10s
 const SUM_MIN_FIRST = 8, SUM_MIN_FIRST_CHARS = 400;   // tóm tắt LẦN ĐẦU chỉ khi ĐỦ nội dung → chống LLM bịa lúc mới có 1-2 câu
 const finalized = () => captions.filter(c => !c.partial);
 // Dữ kiện CHÍNH XÁC cho hero.meta/stats (ngày, thời lượng, người, số dòng) — model không phải đoán.
@@ -523,6 +522,18 @@ function summaryFacts() {
   if (startMs && endMs > startMs) { const m = Math.max(1, Math.round((endMs - startMs) / 60000)); duration = m >= 60 ? `${Math.floor(m / 60)} giờ ${m % 60} phút` : `${m} phút`; }
   return { date: startMs ? _fmtDate(startMs).slice(0, 10) : '', duration, participants: authors, lineCount: caps.length };
 }
+// Dựng/ cập nhật báo cáo + FALLBACK markdown (chuỗi có gemma) khi flash-lite lỗi/hết quota → panel luôn có nội dung.
+// prev != null → incremental (sendCaps = CHỈ câu mới). Trả {kind:'report'|'markdown'|'empty'|'error', error?}.
+async function makeReport(sendCaps, prev, allCaps, n) {
+  let res = null;
+  try { res = await summarizer.summarizeReport(sendCaps, summaryFacts(), prev); } catch (e) { res = { ok: false, error: e.message }; }
+  if (res && res.ok) { fullReport = res.report; summaryMd = reportToMd(res.report); renderSummary(); sumPrevCount = n; return { kind: 'report' }; }
+  if (res && res.error === 'empty') return { kind: 'empty' };
+  let mr = null;   // flash-lite hỏng/hết quota → markdown qua flash-lite→gemma→gemma (gemma TPM ∞, RPD 1500)
+  try { mr = await summarizer.summarizeFull(allCaps); } catch (e) { mr = { ok: false, error: e.message }; }
+  if (mr && mr.ok) { fullReport = null; summaryMd = mr.markdown; renderSummary(); sumPrevCount = n; return { kind: 'markdown' }; }
+  return { kind: 'error', error: (mr && mr.error) || (res && res.error) || 'failed' };
+}
 async function summarizeTick() {
   if (sumBusy) return;
   const caps = finalized();
@@ -530,13 +541,14 @@ async function summarizeTick() {
   const firstChars = caps.reduce((n, c) => n + ((c.translated || c.original || '').length), 0);
   const firstReady = sumLastTime === 0 && caps.length >= SUM_MIN_FIRST && firstChars >= SUM_MIN_FIRST_CHARS;
   const dueByTime = sumLastTime !== 0 && newCount > 0 && (Date.now() - sumLastTime) >= (SUM_INTERVAL_MS - SUM_POLL_MS);
-  if (!(firstReady || dueByTime)) return;   // rolling: lần đầu khi ĐỦ nội dung, sau đó ~1 phút/lần MIỄN LÀ có câu mới (không có câu mới → bỏ qua, khỏi phí quota)
+  if (!(firstReady || dueByTime)) return;   // rolling: lần đầu khi ĐỦ nội dung, sau đó ~2.5 phút/lần MIỄN LÀ có câu mới (không có câu mới → bỏ qua, khỏi phí quota)
   sumBusy = true; refreshSpin();
   const n = caps.length; sumLastTime = Date.now();   // chốt nhịp NGAY (kể cả khi lỗi/cooldown) → không spam mỗi 10s
   try {
-    const res = await summarizer.summarizeReport(caps, summaryFacts());   // CẢ rolling cũng dựng landing-page (regenerate toàn bộ transcript mỗi chu kỳ)
-    if (res && res.ok) { fullReport = res.report; summaryMd = reportToMd(res.report); renderSummary(); sumPrevCount = n; }
-    else if (res && res.error !== 'empty') st('status.summaryErr', { err: res.error }, 'err');
+    const prev = fullReport;                                   // đã có báo cáo → CẬP NHẬT incremental (chỉ gửi câu mới)
+    const sendCaps = prev ? caps.slice(sumPrevCount) : caps;   // lần đầu/ sau fallback → gửi toàn bộ để dựng đủ
+    const r = await makeReport(sendCaps, prev, caps, n);
+    if (r.kind === 'error') st('status.summaryErr', { err: r.error }, 'err');
   } catch (e) { st('status.summaryErr', { err: e.message }, 'err'); }
   finally { sumBusy = false; refreshSpin(); }
 }
@@ -552,9 +564,8 @@ async function regenerateSummary() {
   sumBusy = true; refreshSpin();
   sumLastTime = Date.now();
   try {
-    const res = await summarizer.summarizeReport(caps, summaryFacts());
-    if (res && res.ok) { fullReport = res.report; summaryMd = reportToMd(res.report); renderSummary(); sumPrevCount = caps.length; }
-    else if (res && res.error !== 'empty') st('status.summaryErr', { err: res.error }, 'err');
+    const r = await makeReport(caps, null, caps, caps.length);   // áp prompt mới → dựng LẠI từ đầu (full)
+    if (r.kind === 'error') st('status.summaryErr', { err: r.error }, 'err');
   } catch (e) { st('status.summaryErr', { err: e.message }, 'err'); }
   finally { sumBusy = false; refreshSpin(); }
 }
@@ -610,14 +621,14 @@ a:focus-visible,button:focus-visible,label:focus-visible,input:focus-visible{out
 .wrap{max-width:1080px;margin:0 auto;padding:0 clamp(16px,4vw,40px)}
 .eyebrow{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--cel-deep);margin:0 0 18px}
 .eyebrow::before{content:"";width:26px;height:2px;background:var(--cel);border-radius:2px;flex:0 0 auto}
-section{padding:clamp(44px,6vw,72px) 0}
+section{padding:clamp(26px,3.4vw,40px) 0}
 section+section,.foot{border-top:1px solid var(--line)}
 /* Hero */
-.hero{padding:clamp(40px,7vw,80px) 0 clamp(36px,5vw,56px)}
+.hero{padding:clamp(28px,4.5vw,46px) 0 clamp(22px,3vw,34px)}
 .headline{font-family:var(--disp);font-weight:800;font-size:clamp(30px,6vw,56px);letter-spacing:-.025em;line-height:1.05;text-wrap:balance;max-width:20ch}
 .headline .hl{color:var(--cel-deep)}
 .sub{margin-top:20px;font-size:clamp(16px,2.1vw,19px);color:var(--ink-soft);max-width:62ch;line-height:1.6}
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:40px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:26px}
 .stat{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px 20px 18px;overflow:hidden}
 .stat::before{content:"";position:absolute;top:0;left:22px;width:30px;height:3px;background:var(--cel);border-radius:0 0 3px 3px}
 .stat-val{font-family:var(--mono);font-weight:700;font-size:clamp(23px,3.2vw,34px);line-height:1;color:var(--ink);letter-spacing:-.02em}
@@ -835,7 +846,7 @@ function exportTranscript() {
 // ── UI build (cờ + dropdown ngôn ngữ + giọng) ───────────────────────────────────────
 function buildVoiceButton() {
   el.voiceBtn.textContent = S.geminiAudioOn ? '🔊' : '🔇';
-  el.voiceBtn.style.display = S.transcribeMode ? 'none' : '';   // chép lời → không có TTS
+  el.voiceBtn.style.display = '';
 }
 function buildVoiceMenu() {
   el.voiceMenu.innerHTML = '';
@@ -855,8 +866,8 @@ function buildVoiceMenu() {
     el.voiceMenu.appendChild(b);
   }
 }
-function buildTargetButton() {   // toolbar: gọn — chỉ cờ (hoặc 📝 khi chép lời)
-  el.targetBtn.innerHTML = S.transcribeMode ? '<span>📝</span>' : `<span class="flag">${flag(S.langCode)}</span>`;
+function buildTargetButton() {   // toolbar: gọn — chỉ cờ ngôn ngữ đích
+  el.targetBtn.innerHTML = `<span class="flag">${flag(S.langCode)}</span>`;
 }
 function buildLangMenu() {
   el.langMenu.innerHTML = '';
@@ -873,22 +884,14 @@ function buildTargetMenu() {
   for (const L of TARGET_LANGS) {
     const b = document.createElement('button'); b.type = 'button';
     b.innerHTML = `<span class="flag">${flag(L.code)}</span><span>${L.name}</span>`;
-    if (!S.transcribeMode && S.langCode === L.code) b.classList.add('sel');
-    b.addEventListener('click', () => { pickTarget(L.code, false); closeMenus(); });
+    if (S.langCode === L.code) b.classList.add('sel');
+    b.addEventListener('click', () => { pickTarget(L.code); closeMenus(); });
     el.targetMenu.appendChild(b);
   }
-  const tb = document.createElement('button'); tb.type = 'button';
-  tb.innerHTML = `<span>${t('lang.transcribe')}</span>`;
-  if (S.transcribeMode) tb.classList.add('sel');
-  tb.addEventListener('click', () => { pickTarget(null, true); closeMenus(); });
-  el.targetMenu.appendChild(tb);
 }
-function pickTarget(code, transcribe) {
-  if (transcribe) { save({ transcribeMode: true }); live.onTranscribeModeChanged(); }
-  else { const wasT = S.transcribeMode; save({ langCode: code, transcribeMode: false }); wasT ? live.onTranscribeModeChanged() : live.onTargetLangChanged(); }
-  buildVoiceButton();   // chép lời → ẩn nút giọng
+function pickTarget(code) {
+  save({ langCode: code }); live.onTargetLangChanged();
   buildTargetButton();
-  setLayoutActive(); reRenderAll();   // chép lời → ép layout Chỉ dịch + khoá radio; khôi phục khi tắt
 }
 function closeMenus() { el.langMenu.classList.add('hidden'); el.targetMenu.classList.add('hidden'); el.voiceMenu.classList.add('hidden'); }
 
@@ -1047,9 +1050,8 @@ function wire() {
     st('status.makingFull'); sumBusy = true; refreshSpin(); showFullOverlay(true);
     sumLastTime = Date.now();
     try {
-      const res = await summarizer.summarizeReport(caps, summaryFacts());
-      if (res && res.ok) { fullReport = res.report; summaryMd = reportToMd(res.report); renderSummary(); sumPrevCount = caps.length; st('status.fullDone'); }
-      else st('status.fullErr', { err: res && res.error }, 'err');
+      const r = await makeReport(caps, null, caps, caps.length);   // Tổng thể: dựng LẠI từ toàn bộ transcript (full)
+      if (r.kind === 'error') st('status.fullErr', { err: r.error }, 'err'); else st('status.fullDone');
     } catch (e) { st('status.fullErr', { err: e.message }, 'err'); }
     finally { sumBusy = false; refreshSpin(); showFullOverlay(false); }
   });
