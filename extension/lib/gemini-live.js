@@ -292,7 +292,7 @@ export function createLiveTranslator(opts) {
       responseModalities: [Modality.AUDIO],
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      translationConfig: { targetLanguageCode: bcp47(st().langCode), echoTargetLanguage: false },   // luôn DỊCH (chép-lời đã gỡ); nói trùng ngôn ngữ đích → echo ở tầng _pump
+      translationConfig: { targetLanguageCode: bcp47(st().langCode), echoTargetLanguage: true },   // echoTargetLanguage: nói TRÙNG ngôn ngữ đích → model ECHO lại (transcript) thay vì im → luôn hiện nội dung như chép lời (khác ngôn ngữ vẫn dịch bình thường)
       contextWindowCompression: { slidingWindow: {} },
       sessionResumption: _handle ? { handle: _handle } : {},
     };

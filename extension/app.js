@@ -443,16 +443,47 @@ async function openHistory() {
 async function viewSession(id) {
   const s = await hGet(id); if (!s) return;
   el.histList.classList.add('hidden'); el.histView.classList.remove('hidden'); el.histBack.classList.remove('hidden');
+  let showOrig = S.layout !== 'translation';                      // transcript: mặc định theo layout đang dùng (translation → chỉ dịch)
+  let sumView = (s.report && S.summaryView !== 'md') ? 'html' : 'md';   // tóm tắt: html nếu có báo cáo cấu trúc + đang chọn html
   el.histView.innerHTML = '';
-  for (const c of (s.caps || [])) {
-    const e = document.createElement('div'); e.className = 'entry';
-    if (c.o && c.o.trim()) { const o = document.createElement('div'); o.className = 'entry-orig'; o.textContent = c.o; e.appendChild(o); }
-    if (c.t && c.t.trim()) { const tt = document.createElement('div'); tt.className = 'entry-text'; tt.textContent = c.t; e.appendChild(tt); }
-    if (e.childNodes.length) el.histView.appendChild(e);
+
+  // Thanh công cụ NGAY TRÊN chi tiết: layout transcript (chỉ dịch / gốc + dịch) + đổi HTML↔MD cho tóm tắt.
+  const bar = document.createElement('div'); bar.className = 'hist-detail-bar';
+  const bTrans = document.createElement('button'); bTrans.className = 'mini'; bTrans.textContent = t('histview.transOnly');
+  const bBoth = document.createElement('button'); bBoth.className = 'mini'; bBoth.textContent = t('histview.bilingual');
+  bar.appendChild(bTrans); bar.appendChild(bBoth);
+  const sp = document.createElement('span'); sp.className = 'spacer'; bar.appendChild(sp);
+  let bView = null;
+  if (s.report) { bView = document.createElement('button'); bView.className = 'mini'; bView.title = t('summary.viewToggleTitle'); bar.appendChild(bView); }
+  el.histView.appendChild(bar);
+
+  const tx = document.createElement('div'); tx.className = 'hist-tx'; el.histView.appendChild(tx);
+  const sm = document.createElement('div'); sm.className = 'hist-sum-wrap'; el.histView.appendChild(sm);
+
+  function renderTx() {
+    bTrans.classList.toggle('active', !showOrig); bBoth.classList.toggle('active', showOrig);
+    tx.innerHTML = '';
+    for (const c of (s.caps || [])) {
+      const e = document.createElement('div'); e.className = 'entry';
+      if (showOrig && c.o && c.o.trim()) { const o = document.createElement('div'); o.className = 'entry-orig'; o.textContent = c.o; e.appendChild(o); }
+      if (c.t && c.t.trim()) { const tt = document.createElement('div'); tt.className = 'entry-text'; tt.textContent = c.t; e.appendChild(tt); }
+      if (e.childNodes.length) tx.appendChild(e);
+    }
   }
-  if (s.report) {   // landing-page "y hệt" qua iframe (không script trong panel → reveal tắt, nội dung vẫn đủ)
-    const fr = document.createElement('iframe'); fr.className = 'report-frame hist-frame'; fr.setAttribute('sandbox', 'allow-same-origin'); fr.srcdoc = buildFancyDoc(s.report); el.histView.appendChild(fr);
-  } else if (s.summaryMd || s.fullMd) { const sm = document.createElement('div'); sm.className = 'hist-sum summary-body'; sm.innerHTML = md2html(s.summaryMd || s.fullMd); el.histView.appendChild(sm); }
+  function renderSum() {
+    if (bView) { bView.textContent = sumView === 'html' ? 'HTML' : 'MD'; bView.classList.toggle('active', sumView === 'html'); }
+    sm.innerHTML = '';
+    if (s.report && sumView === 'html') {   // landing-page "y hệt" qua iframe cô lập
+      const fr = document.createElement('iframe'); fr.className = 'report-frame hist-frame'; fr.setAttribute('sandbox', 'allow-same-origin'); fr.srcdoc = buildFancyDoc(s.report); sm.appendChild(fr);
+    } else {
+      const md = s.report ? reportToMd(s.report) : (s.summaryMd || s.fullMd || '');
+      if (md) { const d = document.createElement('div'); d.className = 'hist-sum summary-body'; d.innerHTML = md2html(md); sm.appendChild(d); }
+    }
+  }
+  bTrans.addEventListener('click', () => { showOrig = false; renderTx(); });
+  bBoth.addEventListener('click', () => { showOrig = true; renderTx(); });
+  if (bView) bView.addEventListener('click', () => { sumView = sumView === 'html' ? 'md' : 'html'; renderSum(); });
+  renderTx(); renderSum();
   el.histView.scrollTop = 0;
 }
 async function exportSess(id, kind) {
