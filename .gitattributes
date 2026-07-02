@@ -1,0 +1,2 @@
+# Khoá ký extension: coi như nhị phân → KHÔNG đổi line-ending (tránh mangle khoá khi checkout trên máy khác)
+extension.pem -text -diff
