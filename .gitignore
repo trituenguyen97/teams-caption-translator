@@ -48,8 +48,12 @@ scripts/_translate-results.json
 # File audio thử nghiệm (nặng) — dùng probe live API, không đưa vào repo
 extension/mp3-exp/
 
-# ⚠️ KHOÁ KÝ extension (PRIVATE KEY) — TUYỆT ĐỐI KHÔNG commit. Sinh ID anflam...; lộ = ai cũng ký được bản cập nhật giả.
-# (đã khôi phục extension.pem từ Recycle Bin 2026-07-02 — nhớ BACKUP nơi an toàn, đừng để mất lần nữa)
-*.pem
+# Bản build .crx (pack lại được từ extension-single + .pem) — không cần commit
 *.crx
+# Bỏ qua mọi .pem lạ...
+*.pem
+# ...NHƯNG CỐ Ý commit extension.pem để đồng bộ khoá ký giữa NHIỀU MÁY (repo PRIVATE).
+# ⚠️ BẮT BUỘC GIỮ REPO PRIVATE: khoá này = ai có repo cũng ký được bản cập nhật giả cho extension.
+#    Nếu repo lỡ public / rò rỉ → PHẢI đổi khoá (re-key, ID đổi) + mọi người chạy lại apply-policy.bat.
+!extension.pem
 
