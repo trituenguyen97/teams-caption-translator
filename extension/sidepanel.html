@@ -31,8 +31,19 @@
       <span data-i18n="settings.source">Nguồn âm thanh</span>
       <select id="source">
         <option value="mic" data-i18n="source.mic">🎤 Micro</option>
-        <option value="screen" data-i18n="source.screen">🔊 Âm thanh (tab / màn hình / cửa sổ)</option>
+        <option value="tab" data-i18n="source.tab">🔊 Tab (chỉ 1 tab — không vọng TTS)</option>
+        <option value="screen" data-i18n="source.screen">🖥️ Toàn màn hình (tiếng cả hệ thống)</option>
       </select>
+      <div class="fld-hint" id="source-hint"></div>
+    </div>
+    <div class="fld" id="mic-device-fld" style="display:none">
+      <span data-i18n="settings.micDevice">Thiết bị mic</span>
+      <select id="mic-device"></select>
+    </div>
+    <div class="fld" id="tts-device-fld">
+      <span data-i18n="settings.ttsDevice">Loa phát TTS</span>
+      <select id="tts-device"></select>
+      <div class="fld-hint" data-i18n="hint.tts"></div>
     </div>
     <div class="fld">
       <span data-i18n="settings.layout">Giao diện dịch</span>

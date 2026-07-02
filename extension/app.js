@@ -9,7 +9,7 @@ import { hSave, hList, hGet, hDel, hAll, hImport } from './lib/history.js';
 // ── State + lưu trữ ────────────────────────────────────────────────────────────
 const DEFAULTS = {
   apiKey: '', langCode: 'vi', geminiVoice: DEFAULT_VOICE,
-  geminiAudioOn: true, source: 'mic', summaryExtra: '', uiLang: 'vi', layout: 'translation', zoom: 100, saveHistory: true,
+  geminiAudioOn: true, source: 'mic', micDeviceId: '', ttsSinkId: '', summaryExtra: '', uiLang: 'vi', layout: 'translation', zoom: 100, saveHistory: true,
   summaryView: 'html',   // hiển thị rolling: 'html' (landing-page iframe) | 'md' (markdown)
 };
 const S = { ...DEFAULTS };
@@ -21,7 +21,7 @@ const $ = id => document.getElementById(id);
 const el = {
   settingsBtn: $('settings-btn'), popoutBtn: $('popout-btn'), pipBtn: $('pip-btn'), settings: $('settings'),
   langBtn: $('lang-btn'), langMenu: $('lang-menu'),
-  apikey: $('apikey'), keyStatus: $('key-status'), source: $('source'),
+  apikey: $('apikey'), keyStatus: $('key-status'), source: $('source'), sourceHint: $('source-hint'), micDevice: $('mic-device'), micDeviceFld: $('mic-device-fld'), ttsDevice: $('tts-device'), ttsDeviceFld: $('tts-device-fld'),
   targetBtn: $('target-btn'), targetMenu: $('target-menu'),
   voiceBtn: $('voice-btn'), voiceMenu: $('voice-menu'), start: $('start'), status: $('status'), list: $('list'), count: $('count'),
   levelMeter: $('level-meter'), lmCover: $('lm-cover'), lmTxt: $('lm-txt'),
@@ -47,7 +47,7 @@ function st(key, vars, cls) { _lastStatus = { key, vars, cls }; el.status.textCo
 
 // ── Engines ──────────────────────────────────────────────────────────────────────
 const live = createLiveTranslator({
-  getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
+  getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, geminiAudioOn: S.geminiAudioOn && S.source !== 'screen', geminiVoice: S.geminiVoice }),   // nguồn Toàn hệ thống → TẮT TTS (thu hệ thống sẽ thu lại tiếng đọc = vọng)
   onCaption: addCaption,
   onAudio: playAudio,
   onClear: clearAudio,
@@ -158,14 +158,14 @@ const _GEM_START_LEAD = 0.2;   // ĐỆM ĐỘNG: cụm MỞ ĐẦU mỗi lượ
 let _gemSpeed = 1.0;   // tốc độ phát hiện tại — đổi theo HYSTERESIS (không tính lại mỗi gói) → hết rung cao độ
 let _gemLastEnd = 0;   // mốc kết thúc cụm cuối (giây, đồng hồ AudioContext) → đo "đã cạn bao lâu" để chọn LEAD động
 function ensureGemCtx() {
-  if (!_gemCtx || _gemCtx.state === 'closed') { _gemCtx = new (window.AudioContext || window.webkitAudioContext)(); _gemPlayhead = 0; _gemNodes = []; }
+  if (!_gemCtx || _gemCtx.state === 'closed') { _gemCtx = new (window.AudioContext || window.webkitAudioContext)(); _gemPlayhead = 0; _gemNodes = []; applyTtsSink(); }
   if (_gemCtx.state === 'suspended') _gemCtx.resume().catch(() => {});
   return _gemCtx;
 }
 function clearAudio() { for (const n of _gemNodes) { try { n.onended = null; n.stop(); } catch (e) {} } _gemNodes = []; _gemPlayhead = 0; _gemSpeed = 1.0; _gemLastEnd = 0; }
 function playAudio({ b64, sampleRate }) {
   try {
-    if (!S.geminiAudioOn || !b64) return;
+    if (!S.geminiAudioOn || S.source === 'screen' || !b64) return;   // screen: không phát TTS (chống vọng)
     const bin = atob(b64); const n = bin.length >> 1; if (!n) return;
     const f32 = new Float32Array(n);
     for (let i = 0; i < n; i++) { let s = (bin.charCodeAt(i * 2 + 1) << 8) | bin.charCodeAt(i * 2); if (s >= 32768) s -= 65536; f32[i] = s / 32768; }
@@ -200,18 +200,55 @@ function playAudio({ b64, sampleRate }) {
 
 // ── Audio capture (mic / màn hình-tab-cửa sổ) → PCM f32 @16k ──────────────────────
 let recActive = false, audioCtx = null, srcNode = null, procNode = null, zeroGain = null, rawStream = null, watchdog = null, lastTs = 0;
+let _captureSurface = '';   // 'monitor'|'window'|'browser' của lần capture hiện tại (chỉ để log chẩn đoán)
 // Level meter (chẩn đoán câm/có tiếng): _meterPeak = đỉnh khung hiện tại; _meterLastSig = lần cuối có tín hiệu thật; _meterDisp = mức hiển thị đã làm mượt.
 let _meterPeak = 0, _meterLastSig = 0, _meterDisp = 0, _meterRAF = 0;
 const MIC_GATE_RMS = 0.004, MIC_GATE_HANG_MS = 700;   // cổng VAD-lite cho mic: bỏ khung im lặng để model khỏi dịch tạp âm / lặp lại
 let micVoiceUntil = 0;
+// Thu qua desktopCapture.chooseDesktopMedia: điểm mạnh so với getDisplayMedia là CHỌN ĐÚNG loại pane hiện trong popup
+// (getDisplayMedia luôn hiện Tab+Window+Screen, KHÔNG ẩn được Window).
+//   sources ['tab','audio']    → popup CHỈ có danh sách tab (không Window, không Entire Screen).
+//   sources ['screen','audio'] → popup CHỈ có màn hình  (không Window, không Tab).
+// Lưu ý kỹ thuật: audio desktopCapture phải kèm video (rồi bỏ track video). desktopCapture thu kiểu LOOPBACK —
+// KHÔNG tắt tiếng nguồn (tab/màn hình vẫn TỰ phát) → TUYỆT ĐỐI KHÔNG phát lại, kẻo nghe 2 lần lệch nhau = VỌNG (echo).
+// KHÔNG có API nào lấy system audio mà không hỏi (privacy) — nên chế độ toàn hệ thống vẫn cần 1 lần bấm chọn màn hình.
+async function captureViaDesktop(sources, { surface }) {
+  if (!chrome.desktopCapture || !chrome.desktopCapture.chooseDesktopMedia) throw new Error('Chrome không hỗ trợ desktopCapture.');
+  const streamId = await new Promise((resolve, reject) => {
+    try {
+      chrome.desktopCapture.chooseDesktopMedia(sources, (id, opts) => {
+        if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+        if (!id) { const e = new Error('Đã huỷ chọn nguồn.'); e.name = 'AbortError'; reject(e); return; }
+        if (!opts || !opts.canRequestAudioTrack) { reject(new Error('Popup chưa bật "Chia sẻ âm thanh" — hãy TICK ô âm thanh trong popup rồi Bắt đầu lại.')); return; }
+        resolve(id);
+      });
+    } catch (e) { reject(e); }
+  });
+  const s = await navigator.mediaDevices.getUserMedia({
+    audio: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: streamId } },
+    video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: streamId } },   // desktopCapture cần video kèm audio
+  });
+  s.getVideoTracks().forEach(t => t.stop());   // chỉ giữ audio (nguồn vẫn tự phát — KHÔNG phát lại để tránh vọng)
+  _captureSurface = surface;
+  return s;
+}
 async function startCapture() {
   let stream;
+  _captureSurface = '';
   if (S.source === 'mic') {
     try {
       // AGC tắt: tránh khuếch đại im lặng thành tạp âm khiến model dịch sai/lặp. Giữ EC+NS để sạch tiếng.
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }, video: false,
-      });
+      const baseAudio = { echoCancellation: true, noiseSuppression: true, autoGainControl: false };
+      const a = { ...baseAudio };
+      if (S.micDeviceId) a.deviceId = { exact: S.micDeviceId };   // dùng ĐÚNG mic đã chọn (không phải mic mặc định)
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: a, video: false });
+      } catch (oe) {
+        if (oe && oe.name === 'OverconstrainedError' && S.micDeviceId) {   // mic đã chọn không còn → quay về mặc định
+          save({ micDeviceId: '' }); if (el.micDevice) el.micDevice.value = ''; st('status.micDeviceGone', null, 'err');
+          stream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio, video: false });
+        } else throw oe;
+      }
     } catch (e) {
       // Side panel / popup KHÔNG hiện được hộp thoại xin quyền mic → ném NotAllowedError như "đã hủy".
       // Mở 1 cửa sổ THẬT để người dùng cấp quyền; cấp xong (lưu theo origin) thì side panel dùng mic được.
@@ -225,31 +262,17 @@ async function startCapture() {
       }
       throw e;
     }
+  } else if (S.source === 'tab') {
+    // TAB: popup CHỈ liệt kê tab Chrome (không Window, không Entire Screen). Tiếng nội bộ tab → KHÔNG chứa TTS/hệ thống → hết vọng.
+    stream = await captureViaDesktop(['tab', 'audio'], { surface: 'browser' });
   } else {
-    // Hiện popup chọn của trình duyệt: Tab trình duyệt / Cửa sổ (app) / Toàn màn hình.
-    // getDisplayMedia bắt buộc có video để hiện picker → ta lấy stream rồi BỎ track video, chỉ giữ audio.
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: {
-        echoCancellation: false, noiseSuppression: false, autoGainControl: false,
-        // Chrome 141+ (Win/macOS): gỡ tiếng do CHÍNH side panel này phát (TTS) khỏi system audio capture
-        // → chống TTS vọng lại ở TẦNG AUDIO (trước khi tới Gemini). No-op nếu nguồn không có system audio
-        // hoặc trình duyệt cũ chưa hỗ trợ (constraint "ideal" nên bị bỏ qua, KHÔNG ném lỗi).
-        restrictOwnAudio: true,
-      },
-      systemAudio: 'include',         // hiện rõ tuỳ chọn "chia sẻ âm thanh hệ thống" trong picker
-      selfBrowserSurface: 'exclude',  // ẩn chính tab/panel của extension khỏi danh sách chọn
-    });
-    stream.getVideoTracks().forEach(t => t.stop());
+    // TOÀN HỆ THỐNG ('screen'): popup CHỈ có màn hình (không Window, không Tab). Zero-click là BẤT KHẢ THI (privacy) → vẫn 1 lần bấm chọn màn hình.
+    stream = await captureViaDesktop(['screen', 'audio'], { surface: 'monitor' });
   }
+  console.log('[capture] source =', S.source, 'surface =', _captureSurface);
   rawStream = stream;
   const tracks = stream.getAudioTracks();
   if (!tracks.length) throw new Error("nguồn không có audio — chọn 'Tab' hoặc tick 'Chia sẻ âm thanh' khi chọn Toàn màn hình (cửa sổ app thường không có audio)");
-  // Xác minh trình duyệt có THẬT SỰ áp dụng restrictOwnAudio không (undefined = chưa hỗ trợ / không có system audio)
-  if (S.source !== 'mic' && tracks[0] && tracks[0].getSettings) {
-    const aset = tracks[0].getSettings();
-    console.log('[capture] restrictOwnAudio =', aset.restrictOwnAudio, '— true = đang gỡ TTS của panel khỏi audio thu; undefined = trình duyệt chưa hỗ trợ');
-  }
   recActive = true;
   audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
   if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (e) {} }
@@ -531,11 +554,63 @@ async function ensureMicPermission() {
   if (s === 'granted' || s === 'unknown') return;     // đã cấp / không kiểm tra được → thôi
   _autoStartAfterGrant = false;
   if (_isPopup) {
-    try { const ms = await navigator.mediaDevices.getUserMedia({ audio: true }); ms.getTracks().forEach(t => t.stop()); st('status.micGranted', null, 'run'); }
+    try { const ms = await navigator.mediaDevices.getUserMedia({ audio: true }); ms.getTracks().forEach(t => t.stop()); st('status.micGranted', null, 'run'); populateMicDevices(); }
     catch (_) { st('status.micPermHint', null, 'err'); }
   } else {
     try { const tab = await chrome.tabs.create({ url: chrome.runtime.getURL('mic-perm.html'), active: true }); _micPermTabId = tab && tab.id; st('status.micPermNeeded', null, 'err'); } catch (_) {}
   }
+}
+
+// ── Chọn THIẾT BỊ mic (khi nguồn = Micro) ─────────────────────────────────────────
+// Nhãn thiết bị chỉ hiện SAU khi đã cấp quyền mic (privacy). Chưa cấp → chỉ có "mic mặc định" + gợi ý.
+async function populateMicDevices() {
+  if (!el.micDevice) return;
+  let devices = [];
+  try { devices = await navigator.mediaDevices.enumerateDevices(); } catch (_) {}
+  const named = devices.filter(d => d.kind === 'audioinput' && d.deviceId && d.label);   // có nhãn = đã cấp quyền
+  el.micDevice.innerHTML = '';
+  const def = document.createElement('option'); def.value = ''; def.textContent = t('micDevice.default'); el.micDevice.appendChild(def);
+  if (named.length) {
+    named.forEach((d) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label; el.micDevice.appendChild(o); });
+  } else {
+    const hint = document.createElement('option'); hint.value = ''; hint.disabled = true; hint.textContent = t('micDevice.hint'); el.micDevice.appendChild(hint);
+  }
+  const cur = S.micDeviceId || '';
+  if (cur && named.some(d => d.deviceId === cur)) el.micDevice.value = cur;
+  else { el.micDevice.value = ''; if (cur) save({ micDeviceId: '' }); }   // thiết bị đã chọn không còn → về mặc định
+}
+function updateSourceUI() {
+  const isMic = S.source === 'mic', isScreen = S.source === 'screen';
+  if (el.micDeviceFld) el.micDeviceFld.style.display = isMic ? '' : 'none';       // chọn thiết bị mic: chỉ mode Micro
+  if (el.ttsDeviceFld) el.ttsDeviceFld.style.display = isScreen ? 'none' : '';    // chọn loa TTS: ẩn ở Toàn hệ thống (TTS đã tắt)
+  buildVoiceButton();   // ẩn/hiện nút loa 🔊 theo nguồn (screen → ẩn)
+  if (isMic) populateMicDevices();
+  // Hint động dưới dropdown nguồn — đặt data-i18n để applyI18n(document) tự dịch lại khi đổi ngôn ngữ.
+  if (el.sourceHint) { const k = 'hint.source.' + S.source; el.sourceHint.setAttribute('data-i18n', k); el.sourceHint.textContent = t(k); }
+}
+
+// ── Chọn LOA phát TTS (setSinkId) ─────────────────────────────────────────────────
+// Định tuyến tiếng TTS ra 1 thiết bị RIÊNG (vd tai nghe) → KHÔNG nằm trong loopback "toàn hệ thống" → HẾT vọng.
+// AudioContext.setSinkId có từ Chrome 110 (manifest yêu cầu 116) → gọi thẳng trên _gemCtx (đang phát cũng đổi được).
+async function populateTtsDevices() {
+  if (!el.ttsDevice) return;
+  let devices = [];
+  try { devices = await navigator.mediaDevices.enumerateDevices(); } catch (_) {}
+  const named = devices.filter(d => d.kind === 'audiooutput' && d.deviceId && d.label);   // có nhãn = đã cấp quyền
+  el.ttsDevice.innerHTML = '';
+  const def = document.createElement('option'); def.value = ''; def.textContent = t('ttsDevice.default'); el.ttsDevice.appendChild(def);
+  if (named.length) {
+    named.forEach((d) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label; el.ttsDevice.appendChild(o); });
+  } else {
+    const hint = document.createElement('option'); hint.value = ''; hint.disabled = true; hint.textContent = t('ttsDevice.hint'); el.ttsDevice.appendChild(hint);
+  }
+  const cur = S.ttsSinkId || '';
+  if (cur && named.some(d => d.deviceId === cur)) el.ttsDevice.value = cur;
+  else { el.ttsDevice.value = ''; if (cur) { save({ ttsSinkId: '' }); applyTtsSink(); } }   // loa đã chọn không còn → về mặc định
+}
+async function applyTtsSink() {   // áp loa đã chọn cho context phát TTS
+  try { if (_gemCtx && typeof _gemCtx.setSinkId === 'function') await _gemCtx.setSinkId(S.ttsSinkId || ''); }
+  catch (e) { console.warn('[tts] setSinkId lỗi:', e && e.message); }
 }
 
 // ── Tóm tắt ────────────────────────────────────────────────────────────────────────
@@ -888,7 +963,7 @@ function exportTranscript() {
 // ── UI build (cờ + dropdown ngôn ngữ + giọng) ───────────────────────────────────────
 function buildVoiceButton() {
   el.voiceBtn.textContent = S.geminiAudioOn ? '🔊' : '🔇';
-  el.voiceBtn.style.display = '';
+  el.voiceBtn.style.display = (S.source === 'screen') ? 'none' : '';   // Toàn hệ thống: ẩn nút loa (TTS đã tắt vì sẽ vọng)
 }
 function buildVoiceMenu() {
   el.voiceMenu.innerHTML = '';
@@ -1037,6 +1112,8 @@ function wire() {
       if (_autoStartAfterGrant && !running && S.source === 'mic') start();   // chỉ tự chạy nếu cấp đến từ nút Bắt đầu
       else if (!running) st('status.micGranted', null, 'run');
       _autoStartAfterGrant = false;
+      populateMicDevices();   // đã cấp quyền → nhãn thiết bị hiện ra, làm mới dropdown
+      populateTtsDevices();   // đã cấp quyền → nhãn loa hiện ra
     }
   });
   el.popoutBtn.addEventListener('click', async () => {           // mở UI trong 1 TAB của cửa sổ hiện tại rồi ĐÓNG side panel
@@ -1062,7 +1139,10 @@ function wire() {
   document.addEventListener('click', (e) => { if (!e.target.closest('.dd')) closeMenus(); });
 
   el.apikey.addEventListener('input', () => { save({ apiKey: el.apikey.value.trim() }); clearTimeout(keyTimer); keyTimer = setTimeout(checkKey, 600); });
-  el.source.addEventListener('change', () => { save({ source: el.source.value }); if (el.source.value === 'mic') ensureMicPermission(); });   // chọn Micro → xin quyền luôn
+  el.source.addEventListener('change', () => { if (running) stop(); save({ source: el.source.value }); updateSourceUI(); if (el.source.value === 'mic') ensureMicPermission(); });   // đổi nguồn khi đang chạy → DỪNG (bấm ▶ thu lại nguồn mới); chọn Micro → xin quyền + hiện dropdown thiết bị
+  el.micDevice.addEventListener('change', () => { if (running) stop(); save({ micDeviceId: el.micDevice.value }); });   // đổi mic khi đang chạy → DỪNG để bấm ▶ áp dụng mic mới
+  el.ttsDevice.addEventListener('change', () => { save({ ttsSinkId: el.ttsDevice.value }); applyTtsSink(); });   // đổi loa TTS → áp NGAY (setSinkId), KHÔNG cần dừng
+  try { navigator.mediaDevices.addEventListener('devicechange', () => { if (S.source === 'mic') populateMicDevices(); populateTtsDevices(); }); } catch (_) {}   // cắm/rút thiết bị → làm mới danh sách
   el.voiceBtn.addEventListener('click', (e) => { e.stopPropagation(); const show = el.voiceMenu.classList.contains('hidden'); closeMenus(); if (show) { buildVoiceMenu(); el.voiceMenu.classList.remove('hidden'); } });
   el.start.addEventListener('click', () => running ? stop() : start());
   el.clear.addEventListener('click', clearList);
@@ -1124,8 +1204,10 @@ function wire() {
   } else {
     el.pipBtn.style.display = 'none';                                                                   // side panel → ẩn nút ghim (📌)
   }
-  if (S.source !== 'mic' && S.source !== 'screen') save({ source: 'screen' });   // migrate giá trị cũ ('tab')
+  if (!['mic', 'tab', 'screen'].includes(S.source)) save({ source: 'screen' });   // giá trị lạ → mặc định Toàn hệ thống ('tab' & 'screen' đều qua desktopCapture)
   el.apikey.value = S.apiKey; el.source.value = S.source;
+  updateSourceUI();   // hiện/ẩn thiết bị mic + loa TTS + nút loa theo nguồn (+ liệt kê mic nếu đã cấp quyền)
+  populateTtsDevices();  // liệt kê loa phát TTS (nhãn hiện sau khi cấp quyền mic)
   setLayoutActive();
   el.zoom.value = S.zoom; applyZoom();
   el.saveHistory.checked = S.saveHistory !== false;

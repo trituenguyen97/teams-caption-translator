@@ -21298,8 +21298,8 @@
         responseModalities: [Modality.AUDIO],
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        translationConfig: { targetLanguageCode: bcp47(st2().langCode), echoTargetLanguage: false },
-        // luôn DỊCH (chép-lời đã gỡ); nói trùng ngôn ngữ đích → echo ở tầng _pump
+        translationConfig: { targetLanguageCode: bcp47(st2().langCode), echoTargetLanguage: true },
+        // echoTargetLanguage: nói TRÙNG ngôn ngữ đích → model ECHO lại (transcript) thay vì im → luôn hiện nội dung như chép lời (khác ngôn ngữ vẫn dịch bình thường)
         contextWindowCompression: { slidingWindow: {} },
         sessionResumption: _handle ? { handle: _handle } : {}
       };
@@ -21877,7 +21877,18 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "popout.title": "M\u1EDF trong tab ri\xEAng",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} Micro",
-      "source.screen": "\u{1F50A} \xC2m thanh (tab / m\xE0n h\xECnh / c\u1EEDa s\u1ED5)",
+      "source.tab": "\u{1F50A} Tab (ch\u1EC9 1 tab \u2014 kh\xF4ng v\u1ECDng TTS)",
+      "source.screen": "\u{1F5A5}\uFE0F To\xE0n m\xE0n h\xECnh (ti\u1EBFng c\u1EA3 h\u1EC7 th\u1ED1ng)",
+      "settings.micDevice": "Thi\u1EBFt b\u1ECB mic",
+      "micDevice.default": "\u{1F399}\uFE0F Mic m\u1EB7c \u0111\u1ECBnh c\u1EE7a h\u1EC7 th\u1ED1ng",
+      "micDevice.hint": "Cho ph\xE9p quy\u1EC1n mic \u0111\u1EC3 ch\u1ECDn thi\u1EBFt b\u1ECB kh\xE1c",
+      "settings.ttsDevice": "Loa ph\xE1t TTS",
+      "ttsDevice.default": "\u{1F508} Loa m\u1EB7c \u0111\u1ECBnh c\u1EE7a h\u1EC7 th\u1ED1ng",
+      "ttsDevice.hint": "Cho ph\xE9p quy\u1EC1n mic \u0111\u1EC3 ch\u1ECDn loa kh\xE1c",
+      "hint.source.mic": "\u{1F3A4} Thu t\u1EEB micro c\u1EE7a b\u1EA1n (c\xF3 ch\u1ED1ng v\u1ECDng AEC). Ch\u1ECDn thi\u1EBFt b\u1ECB mic + loa \u0111\u1ECDc TTS \u1EDF d\u01B0\u1EDBi. D\xF9ng khi b\u1EA1n T\u1EF0 N\xD3I / h\u1ECDp tr\u1EF1c ti\u1EBFp.",
+      "hint.source.tab": "\u{1F50A} Thu ti\u1EBFng \u0110\xDANG 1 tab Chrome (popup ch\u1EC9 hi\u1EC7n tab) \u2014 kh\xF4ng l\u1EABn ti\u1EBFng kh\xE1c, c\xF3 \u0111\u1ECDc TTS. N\xEAn d\xF9ng cho h\u1ECDp trong tr\xECnh duy\u1EC7t: Teams web, Google Meet, YouTube\u2026",
+      "hint.source.screen": "\u{1F5A5}\uFE0F Thu LOA M\u1EB6C \u0110\u1ECANH c\u1EE7a Windows (ch\u1EC9 1 thi\u1EBFt b\u1ECB) \u2014 cho app c\xE0i \u0111\u1EB7t (Teams b\u1EA3n desktop). \u0110\xC3 T\u1EAET \u0111\u1ECDc TTS \u1EDF ch\u1EBF \u0111\u1ED9 n\xE0y (thu h\u1EC7 th\u1ED1ng s\u1EBD thu lu\xF4n ti\u1EBFng \u0111\u1ECDc \u2192 v\u1ECDng). \u0110\u1EB7t c\u1EA3 Default + Communication v\u1EC1 C\xD9NG thi\u1EBFt b\u1ECB (kh\xF4ng th\xEC m\u1EA5t ti\u1EBFng call Teams).",
+      "hint.tts": "Loa ph\xE1t gi\u1ECDng \u0111\u1ECDc b\u1EA3n d\u1ECBch (TTS). Mic: n\xEAn ch\u1ECDn tai nghe \u0111\u1EC3 mic \u0111\u1EE1 thu l\u1EA1i ti\u1EBFng \u0111\u1ECDc.",
       "lang.transcribe": "\u{1F4DD} Ch\xE9p l\u1EDDi",
       "voice.off": "\u{1F507} T\u1EAFt \u0111\u1ECDc",
       "voice.title": "Gi\u1ECDng \u0111\u1ECDc",
@@ -21893,6 +21904,9 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "summary.title": "T\xF3m t\u1EAFt",
       "summary.full": "\u{1F4CA} T\u1ED5ng th\u1EC3",
       "summary.fullTitle": "T\u1EA1o l\u1EA1i b\xE1o c\xE1o t\u1ED5ng th\u1EC3 ngay",
+      "summary.viewToggleTitle": "\u0110\u1ED5i hi\u1EC3n th\u1ECB: HTML \u2194 Markdown",
+      "histview.transOnly": "Ch\u1EC9 d\u1ECBch",
+      "histview.bilingual": "G\u1ED1c + d\u1ECBch",
       "summary.copyTitle": "Copy",
       "summary.exportTitle": "T\u1EA3i .md",
       "summary.dlHtmlTitle": "T\u1EA3i b\xE1o c\xE1o HTML",
@@ -21906,6 +21920,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "status.readyNoKey": "Nh\u1EADp API key (\u2699\uFE0F) r\u1ED3i b\u1EA5m B\u1EAFt \u0111\u1EA7u.",
       "status.needKey": "Nh\u1EADp Gemini API key tr\u01B0\u1EDBc.",
       "status.listeningMic": "\u0110ang nghe micro\u2026",
+      "status.micDeviceGone": "Mic \u0111\xE3 ch\u1ECDn kh\xF4ng c\xF2n \u2014 d\xF9ng mic m\u1EB7c \u0111\u1ECBnh.",
       "status.listeningAudio": "\u0110ang nghe \xE2m thanh \u0111\xE3 ch\u1ECDn\u2026",
       "status.stopped": "\u0110\xE3 d\u1EEBng.",
       "status.resumePick": "\u0110\xE3 chuy\u1EC3n sang tab \u2014 b\u1EA5m \u25B6 ch\u1ECDn l\u1EA1i ngu\u1ED3n \u0111\u1EC3 d\u1ECBch ti\u1EBFp.",
@@ -21966,7 +21981,18 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "popout.title": "Open in a separate tab",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} Microphone",
-      "source.screen": "\u{1F50A} Audio (tab / screen / window)",
+      "source.tab": "\u{1F50A} Tab (single tab \u2014 no TTS echo)",
+      "source.screen": "\u{1F5A5}\uFE0F Entire screen (whole system)",
+      "settings.micDevice": "Mic device",
+      "micDevice.default": "\u{1F399}\uFE0F System default mic",
+      "micDevice.hint": "Allow mic permission to choose a device",
+      "settings.ttsDevice": "TTS output",
+      "ttsDevice.default": "\u{1F508} System default speaker",
+      "ttsDevice.hint": "Allow mic permission to choose a speaker",
+      "hint.source.mic": "\u{1F3A4} Captures your microphone (with echo cancellation). Pick the mic device + TTS speaker below. Use when you speak yourself / in-person meetings.",
+      "hint.source.tab": "\u{1F50A} Captures exactly one Chrome tab (picker shows tabs only) \u2014 no other audio mixed in, with TTS. Best for meetings in the browser: Teams web, Google Meet, YouTube\u2026",
+      "hint.source.screen": "\u{1F5A5}\uFE0F Captures the Windows DEFAULT speaker (one device only) \u2014 for desktop apps (Teams desktop). TTS is DISABLED here (system capture would record the spoken translation \u2192 echo). Make Default + Communication the SAME device (else Teams call audio is missed).",
+      "hint.tts": "Speaker for the spoken translation (TTS). Mic: prefer headphones so the mic does not pick the speech back up.",
       "lang.transcribe": "\u{1F4DD} Transcribe",
       "voice.off": "\u{1F507} Voice off",
       "voice.title": "Voice",
@@ -21982,6 +22008,9 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "summary.title": "Summary",
       "summary.full": "\u{1F4CA} Full report",
       "summary.fullTitle": "Rebuild the full meeting report now",
+      "summary.viewToggleTitle": "Switch view: HTML \u2194 Markdown",
+      "histview.transOnly": "Translation",
+      "histview.bilingual": "Original + translation",
       "summary.copyTitle": "Copy",
       "summary.exportTitle": "Download .md",
       "summary.dlHtmlTitle": "Download HTML report",
@@ -21995,6 +22024,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "status.readyNoKey": "Enter API key (\u2699\uFE0F) then click Start.",
       "status.needKey": "Enter your Gemini API key first.",
       "status.listeningMic": "Listening to microphone\u2026",
+      "status.micDeviceGone": "Chosen mic is gone \u2014 using default mic.",
       "status.listeningAudio": "Listening to selected audio\u2026",
       "status.stopped": "Stopped.",
       "status.resumePick": "Moved to a tab \u2014 click \u25B6 to re-pick the source and continue.",
@@ -22055,7 +22085,18 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "popout.title": "\u5225\u30BF\u30D6\u3067\u958B\u304F",
       "apiKey.ph": "AIza\u2026",
       "source.mic": "\u{1F3A4} \u30DE\u30A4\u30AF",
-      "source.screen": "\u{1F50A} \u97F3\u58F0\uFF08\u30BF\u30D6 / \u753B\u9762 / \u30A6\u30A3\u30F3\u30C9\u30A6\uFF09",
+      "source.tab": "\u{1F50A} \u30BF\u30D6\uFF081\u30BF\u30D6\u306E\u307F\u30FBTTS\u30A8\u30B3\u30FC\u7121\u3057\uFF09",
+      "source.screen": "\u{1F5A5}\uFE0F \u753B\u9762\u5168\u4F53\uFF08\u30B7\u30B9\u30C6\u30E0\u97F3\uFF09",
+      "settings.micDevice": "\u30DE\u30A4\u30AF\u6A5F\u5668",
+      "micDevice.default": "\u{1F399}\uFE0F \u30B7\u30B9\u30C6\u30E0\u65E2\u5B9A\u306E\u30DE\u30A4\u30AF",
+      "micDevice.hint": "\u30DE\u30A4\u30AF\u8A31\u53EF\u3092\u4E0E\u3048\u308B\u3068\u6A5F\u5668\u3092\u9078\u3079\u307E\u3059",
+      "settings.ttsDevice": "TTS\u51FA\u529B",
+      "ttsDevice.default": "\u{1F508} \u30B7\u30B9\u30C6\u30E0\u65E2\u5B9A\u306E\u30B9\u30D4\u30FC\u30AB\u30FC",
+      "ttsDevice.hint": "\u30DE\u30A4\u30AF\u8A31\u53EF\u3092\u4E0E\u3048\u308B\u3068\u30B9\u30D4\u30FC\u30AB\u30FC\u3092\u9078\u3079\u307E\u3059",
+      "hint.source.mic": "\u{1F3A4} \u30DE\u30A4\u30AF\u3092\u9332\u97F3\uFF08\u30A8\u30B3\u30FC\u9664\u53BB\u3042\u308A\uFF09\u3002\u4E0B\u3067\u30DE\u30A4\u30AF\u6A5F\u5668\uFF0BTTS\u30B9\u30D4\u30FC\u30AB\u30FC\u3092\u9078\u629E\u3002\u81EA\u5206\u3067\u8A71\u3059\uFF0F\u5BFE\u9762\u4F1A\u8B70\u306B\u3002",
+      "hint.source.tab": "\u{1F50A} Chrome\u30BF\u30D61\u3064\u3060\u3051\u9332\u97F3\uFF08\u9078\u629E\u306F\u30BF\u30D6\u306E\u307F\uFF09\u2014 \u4ED6\u306E\u97F3\u306F\u6DF7\u3056\u3089\u306A\u3044\u3001TTS\u3042\u308A\u3002\u30D6\u30E9\u30A6\u30B6\u5185\u4F1A\u8B70\u5411\u3051\uFF1ATeams web, Google Meet, YouTube\u2026",
+      "hint.source.screen": "\u{1F5A5}\uFE0F Windows\u65E2\u5B9A\u30B9\u30D4\u30FC\u30AB\u30FC\uFF081\u53F0\u306E\u307F\uFF09\u3092\u9332\u97F3 \u2014 \u30C7\u30B9\u30AF\u30C8\u30C3\u30D7\u30A2\u30D7\u30EA\uFF08Teams\u30A2\u30D7\u30EA\uFF09\u5411\u3051\u3002\u3053\u306E\u30E2\u30FC\u30C9\u306FTTS\u7121\u52B9\uFF08\u30B7\u30B9\u30C6\u30E0\u9332\u97F3\u306F\u8AAD\u307F\u4E0A\u3052\u3082\u9332\u3063\u3066\u30A8\u30B3\u30FC\u3059\u308B\u305F\u3081\uFF09\u3002\u65E2\u5B9A+\u901A\u4FE1\u30C7\u30D0\u30A4\u30B9\u3092\u540C\u4E00\u306B\uFF08\u3067\u306A\u3044\u3068Teams\u901A\u8A71\u97F3\u58F0\u3092\u53D6\u308A\u9003\u3059\uFF09\u3002",
+      "hint.tts": "\u8A33\u6587\u306E\u8AAD\u307F\u4E0A\u3052\uFF08TTS\uFF09\u3092\u51FA\u3059\u30B9\u30D4\u30FC\u30AB\u30FC\u3002\u30DE\u30A4\u30AF\u6642\u306F\u30A4\u30E4\u30DB\u30F3\u63A8\u5968\uFF08\u30DE\u30A4\u30AF\u304C\u8AAD\u307F\u4E0A\u3052\u3092\u62FE\u3044\u76F4\u3055\u306A\u3044\u3088\u3046\u306B\uFF09\u3002",
       "lang.transcribe": "\u{1F4DD} \u6587\u5B57\u8D77\u3053\u3057",
       "voice.off": "\u{1F507} \u8AAD\u307F\u4E0A\u3052\u30AA\u30D5",
       "voice.title": "\u8AAD\u307F\u4E0A\u3052\u97F3\u58F0",
@@ -22071,6 +22112,9 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "summary.title": "\u8981\u7D04",
       "summary.full": "\u{1F4CA} \u5168\u4F53\u30EC\u30DD\u30FC\u30C8",
       "summary.fullTitle": "\u4F1A\u8B70\u5168\u4F53\u306E\u30EC\u30DD\u30FC\u30C8\u3092\u4ECA\u3059\u3050\u518D\u751F\u6210",
+      "summary.viewToggleTitle": "\u8868\u793A\u5207\u66FF: HTML \u2194 Markdown",
+      "histview.transOnly": "\u8A33\u306E\u307F",
+      "histview.bilingual": "\u539F\u6587\uFF0B\u8A33",
       "summary.copyTitle": "\u30B3\u30D4\u30FC",
       "summary.exportTitle": ".md \u3092\u4FDD\u5B58",
       "summary.dlHtmlTitle": "HTML \u30EC\u30DD\u30FC\u30C8\u3092\u4FDD\u5B58",
@@ -22084,6 +22128,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       "status.readyNoKey": "API \u30AD\u30FC\uFF08\u2699\uFE0F\uFF09\u3092\u5165\u529B\u3057\u3066\u304B\u3089\u958B\u59CB\u3092\u62BC\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "status.needKey": "\u5148\u306B Gemini API \u30AD\u30FC\u3092\u5165\u529B\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "status.listeningMic": "\u30DE\u30A4\u30AF\u3092\u805E\u3044\u3066\u3044\u307E\u3059\u2026",
+      "status.micDeviceGone": "\u9078\u629E\u3057\u305F\u30DE\u30A4\u30AF\u304C\u7121\u3044\u305F\u3081\u65E2\u5B9A\u30DE\u30A4\u30AF\u3092\u4F7F\u7528\u3002",
       "status.listeningAudio": "\u9078\u629E\u3057\u305F\u97F3\u58F0\u3092\u805E\u3044\u3066\u3044\u307E\u3059\u2026",
       "status.stopped": "\u505C\u6B62\u3057\u307E\u3057\u305F\u3002",
       "status.resumePick": "\u30BF\u30D6\u306B\u79FB\u52D5\u3057\u307E\u3057\u305F \u2014 \u25B6 \u3092\u62BC\u3057\u3066\u97F3\u6E90\u3092\u9078\u3073\u76F4\u3059\u3068\u7D9A\u884C\u3057\u307E\u3059\u3002",
@@ -22229,11 +22274,15 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
     geminiVoice: DEFAULT_VOICE,
     geminiAudioOn: true,
     source: "mic",
+    micDeviceId: "",
+    ttsSinkId: "",
     summaryExtra: "",
     uiLang: "vi",
     layout: "translation",
     zoom: 100,
-    saveHistory: true
+    saveHistory: true,
+    summaryView: "html"
+    // hiển thị rolling: 'html' (landing-page iframe) | 'md' (markdown)
   };
   var S = { ...DEFAULTS };
   async function loadSettings() {
@@ -22255,6 +22304,11 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
     apikey: $("apikey"),
     keyStatus: $("key-status"),
     source: $("source"),
+    sourceHint: $("source-hint"),
+    micDevice: $("mic-device"),
+    micDeviceFld: $("mic-device-fld"),
+    ttsDevice: $("tts-device"),
+    ttsDeviceFld: $("tts-device-fld"),
     targetBtn: $("target-btn"),
     targetMenu: $("target-menu"),
     voiceBtn: $("voice-btn"),
@@ -22281,6 +22335,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
     sumEditBox: $("sum-edit-box"),
     summaryExtra: $("summary-extra"),
     sumExtraSave: $("sum-extra-save"),
+    sumView: $("sum-view"),
     sumFull: $("sum-full"),
     sumDlHtml: $("sum-dlhtml"),
     sumExport: $("sum-export"),
@@ -22313,7 +22368,8 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
     el.status.className = "status" + (cls ? " " + cls : "");
   }
   var live = createLiveTranslator({
-    getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, geminiAudioOn: S.geminiAudioOn, geminiVoice: S.geminiVoice }),
+    getState: () => ({ apiKey: S.apiKey, langCode: S.langCode, geminiAudioOn: S.geminiAudioOn && S.source !== "screen", geminiVoice: S.geminiVoice }),
+    // nguồn Toàn hệ thống → TẮT TTS (thu hệ thống sẽ thu lại tiếng đọc = vọng)
     onCaption: addCaption,
     onAudio: playAudio,
     onClear: clearAudio,
@@ -22517,6 +22573,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       _gemCtx = new (window.AudioContext || window.webkitAudioContext)();
       _gemPlayhead = 0;
       _gemNodes = [];
+      applyTtsSink();
     }
     if (_gemCtx.state === "suspended") _gemCtx.resume().catch(() => {
     });
@@ -22537,7 +22594,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
   }
   function playAudio({ b64, sampleRate }) {
     try {
-      if (!S.geminiAudioOn || !b64) return;
+      if (!S.geminiAudioOn || S.source === "screen" || !b64) return;
       const bin = atob(b64);
       const n = bin.length >> 1;
       if (!n) return;
@@ -22602,6 +22659,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
   var rawStream = null;
   var watchdog = null;
   var lastTs = 0;
+  var _captureSurface = "";
   var _meterPeak = 0;
   var _meterLastSig = 0;
   var _meterDisp = 0;
@@ -22609,14 +22667,58 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
   var MIC_GATE_RMS = 4e-3;
   var MIC_GATE_HANG_MS = 700;
   var micVoiceUntil = 0;
+  async function captureViaDesktop(sources, { surface }) {
+    if (!chrome.desktopCapture || !chrome.desktopCapture.chooseDesktopMedia) throw new Error("Chrome kh\xF4ng h\u1ED7 tr\u1EE3 desktopCapture.");
+    const streamId = await new Promise((resolve, reject) => {
+      try {
+        chrome.desktopCapture.chooseDesktopMedia(sources, (id, opts) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          if (!id) {
+            const e = new Error("\u0110\xE3 hu\u1EF7 ch\u1ECDn ngu\u1ED3n.");
+            e.name = "AbortError";
+            reject(e);
+            return;
+          }
+          if (!opts || !opts.canRequestAudioTrack) {
+            reject(new Error('Popup ch\u01B0a b\u1EADt "Chia s\u1EBB \xE2m thanh" \u2014 h\xE3y TICK \xF4 \xE2m thanh trong popup r\u1ED3i B\u1EAFt \u0111\u1EA7u l\u1EA1i.'));
+            return;
+          }
+          resolve(id);
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+    const s = await navigator.mediaDevices.getUserMedia({
+      audio: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId } },
+      video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: streamId } }
+      // desktopCapture cần video kèm audio
+    });
+    s.getVideoTracks().forEach((t2) => t2.stop());
+    _captureSurface = surface;
+    return s;
+  }
   async function startCapture() {
     let stream;
+    _captureSurface = "";
     if (S.source === "mic") {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
-          video: false
-        });
+        const baseAudio = { echoCancellation: true, noiseSuppression: true, autoGainControl: false };
+        const a = { ...baseAudio };
+        if (S.micDeviceId) a.deviceId = { exact: S.micDeviceId };
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: a, video: false });
+        } catch (oe) {
+          if (oe && oe.name === "OverconstrainedError" && S.micDeviceId) {
+            save({ micDeviceId: "" });
+            if (el.micDevice) el.micDevice.value = "";
+            st("status.micDeviceGone", null, "err");
+            stream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio, video: false });
+          } else throw oe;
+        }
       } catch (e) {
         if (e && (e.name === "NotAllowedError" || e.name === "NotFoundError" || e.name === "SecurityError")) {
           _autoStartAfterGrant = true;
@@ -22635,32 +22737,15 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
         }
         throw e;
       }
+    } else if (S.source === "tab") {
+      stream = await captureViaDesktop(["tab", "audio"], { surface: "browser" });
     } else {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          // Chrome 141+ (Win/macOS): gỡ tiếng do CHÍNH side panel này phát (TTS) khỏi system audio capture
-          // → chống TTS vọng lại ở TẦNG AUDIO (trước khi tới Gemini). No-op nếu nguồn không có system audio
-          // hoặc trình duyệt cũ chưa hỗ trợ (constraint "ideal" nên bị bỏ qua, KHÔNG ném lỗi).
-          restrictOwnAudio: true
-        },
-        systemAudio: "include",
-        // hiện rõ tuỳ chọn "chia sẻ âm thanh hệ thống" trong picker
-        selfBrowserSurface: "exclude"
-        // ẩn chính tab/panel của extension khỏi danh sách chọn
-      });
-      stream.getVideoTracks().forEach((t2) => t2.stop());
+      stream = await captureViaDesktop(["screen", "audio"], { surface: "monitor" });
     }
+    console.log("[capture] source =", S.source, "surface =", _captureSurface);
     rawStream = stream;
     const tracks = stream.getAudioTracks();
     if (!tracks.length) throw new Error("ngu\u1ED3n kh\xF4ng c\xF3 audio \u2014 ch\u1ECDn 'Tab' ho\u1EB7c tick 'Chia s\u1EBB \xE2m thanh' khi ch\u1ECDn To\xE0n m\xE0n h\xECnh (c\u1EEDa s\u1ED5 app th\u01B0\u1EDDng kh\xF4ng c\xF3 audio)");
-    if (S.source !== "mic" && tracks[0] && tracks[0].getSettings) {
-      const aset = tracks[0].getSettings();
-      console.log("[capture] restrictOwnAudio =", aset.restrictOwnAudio, "\u2014 true = \u0111ang g\u1EE1 TTS c\u1EE7a panel kh\u1ECFi audio thu; undefined = tr\xECnh duy\u1EC7t ch\u01B0a h\u1ED7 tr\u1EE3");
-    }
     recActive = true;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16e3 });
     if (audioCtx.state === "suspended") {
@@ -22970,36 +23055,94 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
     el.histList.classList.add("hidden");
     el.histView.classList.remove("hidden");
     el.histBack.classList.remove("hidden");
+    let showOrig = S.layout !== "translation";
+    let sumView = s.report && S.summaryView !== "md" ? "html" : "md";
     el.histView.innerHTML = "";
-    for (const c of s.caps || []) {
-      const e = document.createElement("div");
-      e.className = "entry";
-      if (c.o && c.o.trim()) {
-        const o = document.createElement("div");
-        o.className = "entry-orig";
-        o.textContent = c.o;
-        e.appendChild(o);
-      }
-      if (c.t && c.t.trim()) {
-        const tt = document.createElement("div");
-        tt.className = "entry-text";
-        tt.textContent = c.t;
-        e.appendChild(tt);
-      }
-      if (e.childNodes.length) el.histView.appendChild(e);
-    }
+    const bar = document.createElement("div");
+    bar.className = "hist-detail-bar";
+    const bTrans = document.createElement("button");
+    bTrans.className = "mini";
+    bTrans.textContent = t("histview.transOnly");
+    const bBoth = document.createElement("button");
+    bBoth.className = "mini";
+    bBoth.textContent = t("histview.bilingual");
+    bar.appendChild(bTrans);
+    bar.appendChild(bBoth);
+    const sp = document.createElement("span");
+    sp.className = "spacer";
+    bar.appendChild(sp);
+    let bView = null;
     if (s.report) {
-      const fr = document.createElement("iframe");
-      fr.className = "report-frame hist-frame";
-      fr.setAttribute("sandbox", "allow-same-origin");
-      fr.srcdoc = buildFancyDoc(s.report);
-      el.histView.appendChild(fr);
-    } else if (s.summaryMd || s.fullMd) {
-      const sm = document.createElement("div");
-      sm.className = "hist-sum summary-body";
-      sm.innerHTML = md2html(s.summaryMd || s.fullMd);
-      el.histView.appendChild(sm);
+      bView = document.createElement("button");
+      bView.className = "mini";
+      bView.title = t("summary.viewToggleTitle");
+      bar.appendChild(bView);
     }
+    el.histView.appendChild(bar);
+    const tx = document.createElement("div");
+    tx.className = "hist-tx";
+    el.histView.appendChild(tx);
+    const sm = document.createElement("div");
+    sm.className = "hist-sum-wrap";
+    el.histView.appendChild(sm);
+    function renderTx() {
+      bTrans.classList.toggle("active", !showOrig);
+      bBoth.classList.toggle("active", showOrig);
+      tx.innerHTML = "";
+      for (const c of s.caps || []) {
+        const e = document.createElement("div");
+        e.className = "entry";
+        if (showOrig && c.o && c.o.trim()) {
+          const o = document.createElement("div");
+          o.className = "entry-orig";
+          o.textContent = c.o;
+          e.appendChild(o);
+        }
+        if (c.t && c.t.trim()) {
+          const tt = document.createElement("div");
+          tt.className = "entry-text";
+          tt.textContent = c.t;
+          e.appendChild(tt);
+        }
+        if (e.childNodes.length) tx.appendChild(e);
+      }
+    }
+    function renderSum() {
+      if (bView) {
+        bView.textContent = sumView === "html" ? "HTML" : "MD";
+        bView.classList.toggle("active", sumView === "html");
+      }
+      sm.innerHTML = "";
+      if (s.report && sumView === "html") {
+        const fr = document.createElement("iframe");
+        fr.className = "report-frame hist-frame";
+        fr.setAttribute("sandbox", "allow-same-origin");
+        fr.srcdoc = buildFancyDoc(s.report);
+        sm.appendChild(fr);
+      } else {
+        const md = s.report ? reportToMd(s.report) : s.summaryMd || s.fullMd || "";
+        if (md) {
+          const d = document.createElement("div");
+          d.className = "hist-sum summary-body";
+          d.innerHTML = md2html(md);
+          sm.appendChild(d);
+        }
+      }
+    }
+    bTrans.addEventListener("click", () => {
+      showOrig = false;
+      renderTx();
+    });
+    bBoth.addEventListener("click", () => {
+      showOrig = true;
+      renderTx();
+    });
+    if (bView) bView.addEventListener("click", () => {
+      sumView = sumView === "html" ? "md" : "html";
+      renderSum();
+    });
+    renderTx();
+    renderSum();
     el.histView.scrollTop = 0;
   }
   async function exportSess(id, kind) {
@@ -23072,6 +23215,7 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
         const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
         ms.getTracks().forEach((t2) => t2.stop());
         st("status.micGranted", null, "run");
+        populateMicDevices();
       } catch (_) {
         st("status.micPermHint", null, "err");
       }
@@ -23082,6 +23226,96 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
         st("status.micPermNeeded", null, "err");
       } catch (_) {
       }
+    }
+  }
+  async function populateMicDevices() {
+    if (!el.micDevice) return;
+    let devices = [];
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch (_) {
+    }
+    const named = devices.filter((d) => d.kind === "audioinput" && d.deviceId && d.label);
+    el.micDevice.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = t("micDevice.default");
+    el.micDevice.appendChild(def);
+    if (named.length) {
+      named.forEach((d) => {
+        const o = document.createElement("option");
+        o.value = d.deviceId;
+        o.textContent = d.label;
+        el.micDevice.appendChild(o);
+      });
+    } else {
+      const hint = document.createElement("option");
+      hint.value = "";
+      hint.disabled = true;
+      hint.textContent = t("micDevice.hint");
+      el.micDevice.appendChild(hint);
+    }
+    const cur = S.micDeviceId || "";
+    if (cur && named.some((d) => d.deviceId === cur)) el.micDevice.value = cur;
+    else {
+      el.micDevice.value = "";
+      if (cur) save({ micDeviceId: "" });
+    }
+  }
+  function updateSourceUI() {
+    const isMic = S.source === "mic", isScreen = S.source === "screen";
+    if (el.micDeviceFld) el.micDeviceFld.style.display = isMic ? "" : "none";
+    if (el.ttsDeviceFld) el.ttsDeviceFld.style.display = isScreen ? "none" : "";
+    buildVoiceButton();
+    if (isMic) populateMicDevices();
+    if (el.sourceHint) {
+      const k = "hint.source." + S.source;
+      el.sourceHint.setAttribute("data-i18n", k);
+      el.sourceHint.textContent = t(k);
+    }
+  }
+  async function populateTtsDevices() {
+    if (!el.ttsDevice) return;
+    let devices = [];
+    try {
+      devices = await navigator.mediaDevices.enumerateDevices();
+    } catch (_) {
+    }
+    const named = devices.filter((d) => d.kind === "audiooutput" && d.deviceId && d.label);
+    el.ttsDevice.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = t("ttsDevice.default");
+    el.ttsDevice.appendChild(def);
+    if (named.length) {
+      named.forEach((d) => {
+        const o = document.createElement("option");
+        o.value = d.deviceId;
+        o.textContent = d.label;
+        el.ttsDevice.appendChild(o);
+      });
+    } else {
+      const hint = document.createElement("option");
+      hint.value = "";
+      hint.disabled = true;
+      hint.textContent = t("ttsDevice.hint");
+      el.ttsDevice.appendChild(hint);
+    }
+    const cur = S.ttsSinkId || "";
+    if (cur && named.some((d) => d.deviceId === cur)) el.ttsDevice.value = cur;
+    else {
+      el.ttsDevice.value = "";
+      if (cur) {
+        save({ ttsSinkId: "" });
+        applyTtsSink();
+      }
+    }
+  }
+  async function applyTtsSink() {
+    try {
+      if (_gemCtx && typeof _gemCtx.setSinkId === "function") await _gemCtx.setSinkId(S.ttsSinkId || "");
+    } catch (e) {
+      console.warn("[tts] setSinkId l\u1ED7i:", e && e.message);
     }
   }
   var summaryMd = "";
@@ -23207,7 +23441,8 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
     sumTimer = null;
   }
   function renderSummary() {
-    if (fullReport) {
+    const showHtml = !!fullReport && S.summaryView !== "md";
+    if (showHtml) {
       el.summary.classList.add("has-report");
       el.summary.innerHTML = "";
       const f = document.createElement("iframe");
@@ -23219,6 +23454,14 @@ ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}${tail}`;
       el.summary.classList.remove("has-report");
       el.summary.innerHTML = summaryMd ? md2html(summaryMd) : `<em class="muted">${t("summary.empty")}</em>`;
     }
+    _updateViewBtn();
+  }
+  function _updateViewBtn() {
+    if (!el.sumView) return;
+    el.sumView.hidden = !fullReport;
+    const showHtml = !!fullReport && S.summaryView !== "md";
+    el.sumView.textContent = showHtml ? "HTML" : "MD";
+    el.sumView.classList.toggle("active", showHtml);
   }
   var REPORT_CSS = 'body{margin:0;background:#eef1f4;color:#19283a;font:16px/1.65 system-ui,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased;padding:28px 16px}.report{max-width:840px;margin:0 auto;background:#fff;border:1px solid #e0e5eb;border-radius:10px;box-shadow:0 1px 2px rgba(25,40,58,.04),0 18px 44px -30px rgba(25,40,58,.3);padding:clamp(22px,4vw,46px)}.report>*:first-child{margin-top:0}.report h1{font-family:"Cambria","Georgia",serif;font-size:clamp(24px,4vw,33px);font-weight:700;line-height:1.2;letter-spacing:-.01em;margin:0 0 18px;padding-bottom:14px;border-bottom:3px solid #1b5e7e;color:#19283a}.report h2{font-family:"Cambria","Georgia",serif;font-size:clamp(19px,2.6vw,23px);font-weight:700;color:#154b64;margin:30px 0 12px;padding-left:14px;border-left:4px solid #1b5e7e;line-height:1.25}.report h3{font-size:15.5px;font-weight:700;color:#1b5e7e;margin:20px 0 8px}.report h4{font-size:14px;font-weight:700;color:#33414f;margin:16px 0 6px}.report p{margin:0 0 12px}.report ul,.report ol{margin:8px 0 14px;padding-left:24px}.report li{margin:5px 0;padding-left:3px}.report li::marker{color:#1b5e7e}.report strong{color:#16303f;font-weight:600}.report em{color:#5c6b7e}.report code{background:#eef1f5;color:#154b64;padding:1px 6px;border-radius:4px;font-size:.9em;font-family:Consolas,"Cascadia Code",monospace}.report blockquote{margin:12px 0;padding:8px 16px;border-left:3px solid #b5651d;background:#f7efe4;color:#6a5640;border-radius:0 6px 6px 0;font-style:italic}.report hr{border:0;border-top:1px solid #e0e5eb;margin:24px 0}.report .tbl-wrap{overflow-x:auto;border:1px solid #e0e5eb;border-radius:8px;margin:14px 0}.report table{border-collapse:collapse;width:100%;min-width:520px;font-size:14px;font-variant-numeric:tabular-nums}.report th{background:#1b5e7e;color:#fff;text-align:left;font-weight:600;font-size:12.5px;letter-spacing:.03em;padding:11px 14px;white-space:nowrap}.report td{padding:11px 14px;border-top:1px solid #e6eaef;vertical-align:top;color:#33414f;line-height:1.5}.report tbody tr:nth-child(even) td{background:#fafbfc}.report td:first-child{font-weight:600;color:#19283a}@media print{body{background:#fff;padding:0}.report{border:0;border-radius:0;box-shadow:none;max-width:none}.report h2,.report .tbl-wrap{break-inside:avoid}}';
   function reportBodyHtml(md) {
@@ -23544,7 +23787,7 @@ html.js .reveal.in{opacity:1;transform:none}
   }
   function buildVoiceButton() {
     el.voiceBtn.textContent = S.geminiAudioOn ? "\u{1F50A}" : "\u{1F507}";
-    el.voiceBtn.style.display = "";
+    el.voiceBtn.style.display = S.source === "screen" ? "none" : "";
   }
   function buildVoiceMenu() {
     el.voiceMenu.innerHTML = "";
@@ -23800,6 +24043,8 @@ html.js .reveal.in{opacity:1;transform:none}
         if (_autoStartAfterGrant && !running && S.source === "mic") start();
         else if (!running) st("status.micGranted", null, "run");
         _autoStartAfterGrant = false;
+        populateMicDevices();
+        populateTtsDevices();
       }
     });
     el.popoutBtn.addEventListener("click", async () => {
@@ -23859,9 +24104,26 @@ html.js .reveal.in{opacity:1;transform:none}
       keyTimer = setTimeout(checkKey, 600);
     });
     el.source.addEventListener("change", () => {
+      if (running) stop();
       save({ source: el.source.value });
+      updateSourceUI();
       if (el.source.value === "mic") ensureMicPermission();
     });
+    el.micDevice.addEventListener("change", () => {
+      if (running) stop();
+      save({ micDeviceId: el.micDevice.value });
+    });
+    el.ttsDevice.addEventListener("change", () => {
+      save({ ttsSinkId: el.ttsDevice.value });
+      applyTtsSink();
+    });
+    try {
+      navigator.mediaDevices.addEventListener("devicechange", () => {
+        if (S.source === "mic") populateMicDevices();
+        populateTtsDevices();
+      });
+    } catch (_) {
+    }
     el.voiceBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       const show = el.voiceMenu.classList.contains("hidden");
@@ -23907,6 +24169,10 @@ html.js .reveal.in{opacity:1;transform:none}
       el.autoscroll.classList.toggle("active", near);
     });
     el.summaryToggle.addEventListener("click", () => sumPanelOpen ? closeSummary() : openSummary());
+    el.sumView.addEventListener("click", () => {
+      save({ summaryView: S.summaryView === "md" ? "html" : "md" });
+      renderSummary();
+    });
     el.sumDlHtml.addEventListener("click", () => {
       const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
       if (fullReport) {
@@ -23978,9 +24244,11 @@ html.js .reveal.in{opacity:1;transform:none}
     } else {
       el.pipBtn.style.display = "none";
     }
-    if (S.source !== "mic" && S.source !== "screen") save({ source: "screen" });
+    if (!["mic", "tab", "screen"].includes(S.source)) save({ source: "screen" });
     el.apikey.value = S.apiKey;
     el.source.value = S.source;
+    updateSourceUI();
+    populateTtsDevices();
     setLayoutActive();
     el.zoom.value = S.zoom;
     applyZoom();

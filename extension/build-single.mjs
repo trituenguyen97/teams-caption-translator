@@ -24,4 +24,17 @@ html = html
   .replace('<script type="module" src="app.js"></script>', '<script src="app.js"></script>');
 writeFileSync(resolve(OUT, 'panel.html'), html);
 
-console.log('extension-single/ built (app.js + panel.html) from extension/.');
+// manifest.json: SINH từ manifest nguồn → version + permissions + host_permissions LUÔN đồng bộ (tránh drift kiểu quên desktopCapture).
+// Chỉ override phần đặc thù bản single (tên/mô tả + panel.html). ID/version/quyền lấy nguyên từ extension/manifest.json.
+const srcManifest = JSON.parse(readFileSync(resolve(SRC, 'manifest.json'), 'utf8'));
+const singleManifest = {
+  ...srcManifest,
+  name: 'Caption Translator (single-file)',
+  description: 'Bản gộn tối giản: dịch hội thoại realtime qua Gemini Live. 3 file: manifest + panel.html + app.js (đã nhúng SDK).',
+  action: { default_title: 'Caption Translator — chuột phải icon → Open side panel' },
+  side_panel: { default_path: 'panel.html' },
+};
+delete singleManifest.background;   // bản single KHÔNG có background.js (mở panel bằng chuột-phải icon) → bỏ để khỏi lỗi "SW không tìm thấy"
+writeFileSync(resolve(OUT, 'manifest.json'), JSON.stringify(singleManifest, null, 2) + '\n');
+
+console.log(`extension-single/ built (manifest v${srcManifest.version} + app.js + panel.html) from extension/.`);
