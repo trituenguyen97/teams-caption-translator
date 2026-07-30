@@ -32,6 +32,13 @@ const send = (ch, data) => state.win?.webContents?.send(ch, data);
 // KHÔNG cần bấm nút play. notifyIfMissing=true (toggle/save) thì báo nếu chưa cài; boot/download thì im.
 function ensureLocalServerStarted(notifyIfMissing = false) {
   if (state.provider !== 'local') return;
+  // BitNet v7a sidecar (JA→VI) — độc lập với binary/model MiLMMT, bật TRƯỚC các check bên dưới.
+  // Idempotent; lỗi (thiếu python/WSL/model) chỉ warn → MiLMMT/Google vẫn gánh như cũ.
+  try {
+    require('./bitnet-llm').ensureStarted()
+      .then(r => { if (!r.ok) console.warn('[bitnet] không bật được:', r.error); })
+      .catch(e => console.warn('[bitnet] start:', e.message));
+  } catch (e) { console.warn('[bitnet] require:', e.message); }
   try {
     const st = localLlm.serverStatus();
     if (st.running) return;

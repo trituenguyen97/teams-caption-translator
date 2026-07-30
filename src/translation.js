@@ -679,6 +679,45 @@ async function translateLocalMiLMMT(text, tgtLang, qeOut) {
   }
 }
 
+// ── BitNet v7a (JA→VI, 152M 1.58-bit i2_s, tự train — Bit-Translate) ──
+// Đường dịch qua sidecar Python (bitnet/bitnet_sidecar.py): tokenize sentencepiece +
+// llama-server BitNet trong WSL. Đo blind-judge 200 câu (2026-07-30): acc/nat VƯỢT Google
+// (78,5%/76,5% vs 69%/60%), use ngang 92%. ~100ms/câu ngắn. CHỈ ja→vi (KD một chiều).
+const BITNET_DEFAULTS = { baseUrl: 'http://127.0.0.1:8790' };
+let _bitnetLastFailTs = 0;
+
+async function translateLocalBitNet(text, tgtLang, qeOut) {
+  if (Date.now() - _bitnetLastFailTs < LOCAL_FAIL_COOLDOWN_MS) return null;
+  // Chỉ nhận JA→VI; cặp khác trả null để caller rơi xuống MiLMMT/Google như cũ.
+  if (tgtLang !== 'Vietnamese' || detectSourceLang(text) !== 'Japanese') return null;
+
+  const body = JSON.stringify({ text, direction: 'ja2vi' });
+  const r = await httpPostLocal(BITNET_DEFAULTS.baseUrl, '/translate',
+    { 'Content-Type': 'application/json' }, body, 25000);
+
+  if (r.status === 0) {
+    _bitnetLastFailTs = Date.now();
+    console.warn('[bitnet] không kết nối được sidecar', BITNET_DEFAULTS.baseUrl, '|', r.error || 'unknown');
+    return null;
+  }
+  if (r.status !== 200) {
+    console.warn('[bitnet] HTTP', r.status, '|', (r.body || '').slice(0, 200));
+    return null;
+  }
+  try {
+    const j = JSON.parse(r.body);
+    let out = (j.translation || '').trim();
+    out = postprocessTranslation(out, text);   // #A: cùng pipeline hậu xử lý với MiLMMT
+    const qe = qeSuspicion(text, out, null);   // #QE: ngờ cao → orchestrator fallback Google
+    if (qeOut) qeOut.qe = qe;
+    if (out) console.log('[bitnet] OK:', text.slice(0, 30), '→', out.slice(0, 30), `| QE=${qe.toFixed(2)} | ${j.ms}ms`);
+    return out || null;
+  } catch (e) {
+    console.warn('[bitnet] parse error:', e.message);
+    return null;
+  }
+}
+
 async function checkLocalServer() {
   const baseUrl = state.localBaseUrl || LOCAL_DEFAULTS.baseUrl;
   const r = await httpGetLocalUrl(baseUrl, '/v1/models', 2500);
@@ -723,9 +762,11 @@ async function _translateUncached(text) {
   if (instant) { console.log('[translate] phrase match:', text, '→', instant); return instant; }
 
   if (state.provider === 'local') {
-    // Local = MiLMMT-46 (model dịch JP→VI chuyên dụng, duy nhất). /completion greedy + QE.
+    // Local: BitNet v7a TRƯỚC cho JA→VI (model tự train, acc/nat đo được vượt Google);
+    // cặp ngôn ngữ khác BitNet trả null → MiLMMT-46 như cũ. Cùng cổng QE + fallback Google.
     const _qeRef = {};   // nhận QE per-request (không dùng biến module → an toàn khi concurrency=2)
-    const lResult = await translateLocalMiLMMT(text, state.targetLang, _qeRef);
+    let lResult = await translateLocalBitNet(text, state.targetLang, _qeRef);
+    if (lResult == null) lResult = await translateLocalMiLMMT(text, state.targetLang, _qeRef);
     const lOk = lResult && lResult !== text && !isLLMRefusal(lResult, text)
       && !hasUntranslatedCJK(lResult);
     // #QE: chỉ tin MiLMMT khi độ ngờ thấp; ngờ cao (vd bịa tên / lệch nghĩa) → để Google xử lý
@@ -822,4 +863,5 @@ module.exports = {
   translateViaEdge, translateViaTeamsToken,
   storeTeamsToken, parseJwtAudience,
   translateLocalMiLMMT, checkLocalServer, LOCAL_DEFAULTS,
+  translateLocalBitNet, BITNET_DEFAULTS,
 };

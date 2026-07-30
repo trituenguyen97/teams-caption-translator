@@ -196,6 +196,7 @@ app.on('window-all-closed', () => {
   try { stopUiaHelper(); } catch {}
   try { require('./src/process-audio').stop(); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
+  try { require('./src/bitnet-llm').stop(); } catch {}
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -203,4 +204,5 @@ app.on('before-quit', () => {
   try { stopUiaHelper(); } catch {}
   try { require('./src/process-audio').stop(); } catch {}
   try { require('./src/local-llm').stopServer(); } catch {}
+  try { require('./src/bitnet-llm').stop(); } catch {}
 });
