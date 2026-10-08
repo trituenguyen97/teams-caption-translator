@@ -1,11 +1,11 @@
 # Teams Caption Translator
 
 > **Real-Time Cross-Border Meeting Intelligence & Autonomous Full-Duplex Translation Overlay**  
-> *A grant-seeking, open-source enterprise productivity platform powered by Google Gemini Live, Windows UI Automation, and Process-Specific Audio Loopback.*
+> *A grant-seeking, open-source enterprise productivity platform powered by Multimodal Live Audio Streaming, Windows UI Automation, and Process-Specific Audio Loopback.*
 
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6.svg?logo=windows)](src/)
 [![Runtime](https://img.shields.io/badge/Runtime-Electron%20%7C%20Node.js%2018%2B-brightgreen.svg?logo=electron)](package.json)
-[![AI Engine](https://img.shields.io/badge/AI%20Engine-Google%20Gemini%20Live-4285F4.svg?logo=google)](https://ai.google.dev/)
+[![AI Engine](https://img.shields.io/badge/AI%20Engine-Real--Time%20Multimodal%20Voice%20Stream-4285F4.svg)](README.md)
 [![Latency](https://img.shields.io/badge/Audio%20Latency-~180ms%20Jitter%20Buffer-orange.svg)](src/)
 [![Security](https://img.shields.io/badge/Security-BYOK%20%7C%20Zero%20Data%20Retention-success.svg)](README.md)
 
@@ -30,12 +30,12 @@ In globalized engineering and business environments, cross-border synchronous co
        └───────────▲────────────────────────────▲───────────────┘
                    │                            │
        ┌───────────┴────────────────────────────┴───────────────┐
-       │              Google Gemini Live AI Engine              │
-       │  • Speech-to-Speech Streaming: gemini-3.5-live-translate│
-       │  • Text Live Streaming: gemini-3.1-flash-live-preview  │
+       │         Real-Time Multimodal Streaming Voice Engine    │
+       │  • Speech-to-Speech Streaming (Auto Language ID)       │
+       │  • Sub-second Live Text Translation & Audio Streaming  │
        │  • Gapless 24kHz TTS with Adaptive Latency Buffer      │
-       │  • Rolling Meeting Intelligence: gemini-3.1-flash-lite │
-       │  • Comprehensive Report Generation: gemma-4-31b-it     │
+       │  • Rolling Meeting Intelligence & Action Item Synth    │
+       │  • Comprehensive Executive Post-Mortem Reporting       │
        └────────────────────────────────────────────────────────┘
 ```
 
@@ -51,12 +51,12 @@ In globalized engineering and business environments, cross-border synchronous co
 | 🔊 **Process Loopback Audio** | Targeted WASAPI loopback filtered strictly by target Process ID (PID). | **Eliminates acoustic feedback loops.** Captures meeting audio (Teams, Chrome, Zoom) while completely ignoring the app's own TTS output. |
 | 🎤 **Microphone Stream** | Hardware audio input streamed in 16kHz mono PCM chunks. | Captures local speaker audio for bilateral bilingual conversations. |
 
-### 2. Multi-Model Gemini Live AI Engine (Zero Local Model Overhead)
+### 2. Multimodal Real-Time Streaming Engine (Zero Local Model Burden)
 
 ```
 Input Audio Stream (16kHz PCM)
         ↓
-gemini-3.5-live-translate-preview (Auto Language ID + Streaming Translation)
+Multimodal Live Voice Engine (Auto Language ID + Streaming Translation)
         ↓
 Adaptive Jitter Buffer (~180ms Target, Dynamic 1.12x Scaling)
         ↓
@@ -65,7 +65,7 @@ Gapless 24kHz PCM Audio Playback (30 Curated Voices)
 
 - **Automatic Language Identification (Auto-LID):** Seamlessly recognizes input language without manual toggling.
 - **Intelligent Sentence Settlement:** Uses punctuation termination (`. ? ! 。！？`) and adaptive silence gating (`SETTLE_MS` ~0.45s / `LONG_IDLE_MS` ~2.5s) to guarantee linguistically coherent translation units.
-- **Session Resumption & Anti-Disconnection:** Implements sliding-window context preservation and automated handshake reconnection (1.5s reconnect on `goAway` events), bypassing the 15-minute connection ceiling.
+- **Session Resumption & Anti-Disconnection:** Implements sliding-window context preservation and automated handshake reconnection (1.5s reconnect on timeout events), maintaining indefinite continuous meeting translation sessions.
 
 ### 3. Gapless 24kHz TTS with Adaptive Latency Control
 - Streams studio-quality 24kHz PCM voice playback via Web Audio API.
@@ -77,13 +77,13 @@ Gapless 24kHz PCM Audio Playback (30 Curated Voices)
 | Capability | Architecture & Details |
 |:---|:---|
 | 📋 **Rolling Real-Time Summary** | Dual-column UI (expands +380px). Automatically triggers every **$\ge 24$ newly translated sentences** (~2 minutes of conversation) with a 12-second backstop timer. Synthesizes prior context (up to 6,000 chars) + 25 latest statements into rich **GitHub Flavored Markdown** tables and action items. |
-| 📊 **Full Meeting Post-Mortem** | End-of-meeting comprehensive intelligence report powered by the **Gemma reasoning fallback chain** (`gemma-4-31b-it` → `gemma-4-26b-it`, up to 8,192 tokens). |
+| 📊 **Full Meeting Post-Mortem** | End-of-meeting comprehensive intelligence report powered by high-capacity reasoning model chains (synthesizing up to 8,192 tokens of structured minutes). |
 | 💾 **Multi-Format Transcript Export** | Exports `.txt` files in three modes: **Original Speech**, **Dual Bilingual (Source + Target with Speaker Timestamps)**, and **Translated Only**. Exports meeting minutes to `.md` or copies directly to clipboard. |
 
 ### 5. Multilingual & Terminology Preservation
 - **Target Translation Languages:** 🇻🇳 Vietnamese, 🇺🇸 English, 🇯🇵 Japanese, 🇰🇷 Korean, 🇨🇳 Chinese (Simplified `zh-Hans`).
 - **Verbatim Transcribe Mode:** Transcribes exact multi-speaker dialogue without translation or TTS for official corporate compliance logs.
-- **IT / BrSE Terminology Guard:** Specialized system prompting preserves proper nouns, technical terms, Japanese Katakana loanwords, and numbers/dates.
+- **IT / BrSE Terminology Guard:** Specialized prompting preserves proper nouns, technical terms, Japanese Katakana loanwords, and numbers/dates.
 
 ---
 
@@ -96,9 +96,9 @@ teams-caption-translator/
 ├── preload.js               # Secure contextBridge interface (window.__caption)
 ├── package.json             # Electron configuration & build targets
 ├── src/
-│   ├── gemini-live.js       # Bidirectional streaming client (gemini-3.5-live-translate)
-│   ├── gemini-text-live.js  # Live streaming text translation (gemini-3.1-flash-live)
-│   ├── gemini-text.js       # Rolling summary & Gemma executive reporting
+│   ├── live-stream-client.js# Bidirectional voice streaming client
+│   ├── text-stream-client.js# Live streaming text translation
+│   ├── meeting-summary.js   # Rolling summary & executive reporting engine
 │   ├── teams-uia.js         # Windows UI Automation client for Microsoft Teams
 │   ├── audio-capture.js     # Process-specific WASAPI audio loopback & mic handler
 │   ├── tts-player.js        # Gapless 24kHz Web Audio player & adaptive jitter buffer
@@ -114,7 +114,7 @@ teams-caption-translator/
 - **Operating System:** Windows 10 / 11 (x64)
 - **Node.js:** v18.0.0 or higher
 - **Microsoft Teams:** New Teams client (`ms-teams`)
-- **API Key:** Google Gemini API Key from [Google AI Studio](https://aistudio.google.com/apikey)
+- **API Key:** AI API Access Key (configured via `AI_API` in settings)
 
 ### Installation & Launch
 
@@ -132,7 +132,7 @@ npm start
 
 ### First-Time Configuration
 1. Click the **⋮ Menu** in the top navigation bar → **Translation Settings**.
-2. Paste your **Gemini API Key** (`AIza...`). The application performs a zero-quota validation test (`models.list()`) to confirm connectivity.
+2. Paste your **AI_API key** into the configuration field. The application performs a non-billable validation ping to confirm connectivity.
 3. Select your input source:
    - **Teams Live Caption:** Open Microsoft Teams, join a meeting, and click **▶ Start**. Subtitles will automatically overlay Teams.
    - **System Audio:** Select your target meeting browser/application from the process dropdown.
@@ -177,9 +177,9 @@ Teams Caption Translator addresses the massive enterprise market for **frictionl
 4. **CRM & Knowledge Base Integrations (15%):** Direct one-click synchronization of generated meeting summaries and action items into Jira, Linear, Notion, and Salesforce.
 
 ### Target Grant & Accelerator Programs
-- **Microsoft for Startups Founders Hub** (Teams ecosystem integration)
-- **Google Cloud for Startups Program** (Gemini Live multimodal showcase)
-- **Enterprise Productivity & Future of Work Grants**
+- **Enterprise Productivity & Future of Work Acceleration Grants**
+- **Sovereign Cloud & Zero-Trust Workplace Technology Programs**
+- **Cross-Border Collaboration & Translation Accessibility Initiatives**
 
 ---
 
