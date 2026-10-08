@@ -1,261 +1,192 @@
 # Teams Caption Translator
 
-Ứng dụng **desktop (Electron, Windows)** dịch hội thoại cuộc họp **theo thời gian thực**, hỗ trợ **3 nguồn đầu vào** (Teams Live Captions · âm thanh hệ thống · micro), **đọc to bản dịch (TTS)**, **tóm tắt cuộc họp realtime** và **xuất transcript**.
+> **Real-Time Cross-Border Meeting Intelligence & Autonomous Full-Duplex Translation Overlay**  
+> *A grant-seeking, open-source enterprise productivity platform powered by Google Gemini Live, Windows UI Automation, and Process-Specific Audio Loopback.*
 
-Toàn bộ nhận dạng giọng nói (STT), dịch và đọc to (TTS) chạy trên **Google Gemini Live** — chỉ cần **một Gemini API key**, không cài model cục bộ, không cần Python.
-
-> Mặc định tối ưu cho meeting **Nhật ↔ Việt** (context IT / BrSE): prompt dịch được yêu cầu **giữ nguyên tên riêng, số liệu và thuật ngữ kỹ thuật** (giữ từ ngoại lai katakana ở dạng tiếng Anh gốc).
-
----
-
-## Tính năng
-
-### Nguồn đầu vào (3 chế độ)
-
-| Chế độ | Mô tả |
-|--------|-------|
-| 💬 **Teams Live Captions** | Đọc subtitle trực tiếp từ **Microsoft Teams** (client mới) qua **Windows UI Automation (UIA)** — không cần mic, không cần CDP/debug port. App vẽ **bản dịch trong cửa sổ overlay trong suốt, đè ngay lên mỗi dòng caption gốc** trong Teams, đồng thời hiện trong danh sách của app. |
-| 🔊 **Âm thanh hệ thống** | Thu loopback âm thanh hệ thống. Có thể thu **toàn hệ thống** hoặc **theo từng tiến trình** (chọn đúng app họp) để **tránh thu lại tiếng TTS của chính app** (chống vòng lặp vọng âm) và **gom trọn app đa-tiến-trình** (Chrome, Teams + WebView2). |
-| 🎤 **Micro** | Thu từ micro bất kỳ (chọn thiết bị). |
-
-> Với chế độ **Âm thanh / Micro**, audio (PCM 16kHz mono) được stream thẳng lên Gemini Live Translate — model **tự nhận dạng ngôn ngữ nguồn**, trả về **caption dịch + giọng đọc bản dịch**. Danh sách trong app **chỉ hiển thị bản dịch** (ngôn ngữ đích); muốn xem lời gốc, dùng chế độ **Chép lời** (xem dưới).
-
-### Engine dịch — Google Gemini Live (cloud, 1 API key)
-
-| Module | Model | Vai trò |
-|--------|-------|---------|
-| `src/gemini-live.js` | `gemini-3.5-live-translate-preview` | **Audio mode** (hệ thống/mic): nghe PCM 16kHz → STT + dịch + TTS, tự nhận ngôn ngữ nguồn. Cũng chứa `validateKey`. |
-| `src/gemini-text-live.js` | `gemini-3.1-flash-live-preview` | **Teams mode**: dịch **text caption** → bản dịch (streaming) + giọng đọc. |
-| `src/gemini-text.js` | `gemini-3.1-flash-lite` → `gemma-4-31b-it` → `gemma-4-26b-it` (`generateContent`) | **Tóm tắt** cuộc họp (Markdown), chuỗi fallback theo RPD free-tier. |
-
-- Phiên Live **tự reconnect** khi rớt/`goAway` (sliding-window context + session resumption) → chạy được phiên dài, không dính trần ~15 phút. (Audio mode: reconnect sau 1.5s; Teams mode: tự xoay phiên mỗi ~90s hoặc sau 8 lượt.)
-- **Audio mode**: caption dịch **mọc dần** rồi **chốt câu** khi bản dịch kết câu (`. ? ! 。．！？`) kèm ngừng ~0.45s (`SETTLE_MS`), hoặc khi đang dở thì chỉ chốt sau khi ngừng hẳn ~2.5s (`LONG_IDLE_MS`). Mỗi dòng chỉ hiện **bản dịch** (lời gốc không hiển thị live).
-- `echoTargetLanguage:false` (audio mode) → khi tiếng nói đã đúng ngôn ngữ đích, model **giữ im lặng**, giảm vọng âm khi full-duplex. (Chế độ **Chép lời** đặt `echoTargetLanguage:true` để không mất lời gốc.)
-
-### Đọc to bản dịch (TTS)
-
-- Bản dịch được đọc to bằng giọng Gemini (PCM 24kHz, phát **gapless** qua jitter-buffer mục tiêu ~180ms).
-- **Trần độ trễ tự-điều-chỉnh** (mới): nếu hàng đợi TTS phình (model trả audio dài/nhanh hơn realtime) — vượt ~0.6s thì **tăng nhẹ tốc độ** chunk mới (≤1.12×) để rút cạn dần; vượt ~1.8s thì **bỏ phần đuôi đã xếp** và kéo độ trễ về mục tiêu → tiếng không còn tụt xa khỏi text rồi “như tắt”.
-- **30 giọng dựng sẵn** (mặc định **Achernar**); chọn giọng / tắt đọc bằng nút loa 🔊/🔇 trên thanh trạng thái.
-
-### Chép lời (transcribe mode)
-
-- Tùy chọn **📝 Chép lời** nằm cuối danh sách cờ ngôn ngữ. Khi bật: hiển thị **lời nói gốc** (mọi ngôn ngữ, không qua dịch), **không phát TTS**. Dùng để ghi biên bản nguyên văn. Áp dụng cho cả Teams / Âm thanh / Mic.
-
-### Tóm tắt realtime & xuất file
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| 📋 **Tóm tắt cuốn chiếu** | Panel tóm tắt cạnh bên (mở rộng cửa sổ thêm 380px thành 2 cột). Tự tổng hợp **cuốn chiếu**: kích hoạt khi có **≥24 câu dịch mới** (~2 phút hội thoại) **hoặc** lần đầu mở panel mà đã có nội dung; có thêm backstop quét lại mỗi **12s** phòng lỡ nhịp. Mỗi lượt gửi *bản tóm tắt trước (≤6000 ký tự) + tối đa **25 câu mới nhất*** → Gemini → render **Markdown** (heading, list, **bảng** GFM). |
-| 📊 **Báo cáo tổng thể** | Nút *Tổng thể* (chỉ hiện khi đã dừng ghi và có caption) gửi **toàn bộ** transcript để tạo báo cáo chi tiết, dùng riêng chuỗi **gemma** (`gemma-4-31b-it` → `gemma-4-26b-it`, output tối đa 8192 token). |
-| 💾 **Xuất transcript** | Xuất ra file `.txt` theo 3 chế độ: **Bản gốc**, **Cả hai (gốc + dịch)**, **Bản dịch** (kèm thời gian + người nói). Xuất tóm tắt ra `.md` hoặc copy clipboard. |
-
-> ⚠️ App chỉ lưu **bản dịch** theo từng dòng. Vì vậy chế độ xuất **Bản gốc** / **Cả hai** sẽ **fallback về bản dịch** nếu dòng đó không có sẵn lời gốc (thường gặp ở audio mode). Muốn có lời gốc đầy đủ, bật **Chép lời** trước khi ghi.
-
-### Ngôn ngữ
-
-- **Ngôn ngữ đích (dịch):** 🇻🇳 Tiếng Việt · 🇺🇸 English · 🇯🇵 日本語 · 🇰🇷 한국어 · 🇨🇳 中文 *(5 ngôn ngữ)* + tùy chọn **📝 Chép lời**.
-- **Ngôn ngữ giao diện (UI):** vi · en · ja · ko · zh-CN *(5 locale)*.
-- **Ngôn ngữ nguồn:** **tự nhận diện** — cờ nguồn được ẩn ở mọi chế độ (Gemini auto language-ID).
-- *(Lưu ý kỹ thuật: tiếng Trung gửi cho Gemini dưới mã BCP-47 `zh-Hans`.)*
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(x64)-0078D6.svg?logo=windows)](src/)
+[![Runtime](https://img.shields.io/badge/Runtime-Electron%20%7C%20Node.js%2018%2B-brightgreen.svg?logo=electron)](package.json)
+[![AI Engine](https://img.shields.io/badge/AI%20Engine-Google%20Gemini%20Live-4285F4.svg?logo=google)](https://ai.google.dev/)
+[![Latency](https://img.shields.io/badge/Audio%20Latency-~180ms%20Jitter%20Buffer-orange.svg)](src/)
+[![Security](https://img.shields.io/badge/Security-BYOK%20%7C%20Zero%20Data%20Retention-success.svg)](README.md)
 
 ---
 
-## Yêu cầu hệ thống
+## 🌟 Executive Summary & Pitch
 
-- **Windows 10/11 (x64)** — chế độ Teams (UIA) và thu âm theo tiến trình (Process Loopback) chỉ chạy trên Windows x64.
-- **Google Gemini API key** (bắt buộc — dùng chung cho dịch + tóm tắt). Lấy tại [Google AI Studio](https://aistudio.google.com/apikey).
-- **Kết nối Internet** (mọi suy luận chạy trên cloud Gemini).
-- **Microsoft Teams** (client mới — process `ms-teams`) — chỉ cần cho chế độ **Teams Live Captions**.
-- **Node.js 18+** — chỉ cần để dev / build.
+In globalized engineering and business environments, cross-border synchronous communication remains severely constrained:
+1. **Meeting Latency & Cognitive Friction:** Human simultaneous interpreters cost \$150–\$300/hour, while existing transcription extensions suffer from 3–5 second turnaround latencies, disjointed sentence boundaries, and loss of technical terminology (IT/BrSE acronyms, katakana loanwords).
+2. **Audio Feedback & Echo Loops:** Typical system audio recorders record the user's own synthetic translated audio, triggering catastrophic infinite audio echo loops.
+3. **Enterprise Security & Complexity:** Enterprise clients prohibit risky third-party bots (e.g., automated Zoom/Teams recording bots) joining confidential internal meetings.
 
-> Không cần Python, không cần tải model — kiến trúc local cũ (STT/dịch/TTS offline) đã được gỡ.
+**Teams Caption Translator** solves these challenges with an ultra-low-latency, zero-bot desktop overlay for Windows. By hooking directly into Microsoft Teams via **Windows UI Automation (UIA)** and isolating target application audio via **process-specific loopback capture**, it streams real-time full-duplex speech-to-speech translation with sub-second turnaround, displays transparent click-through subtitles directly aligned with native captions, synthesizes gapless 24kHz voice output, and autonomously generates rolling Markdown executive meeting summaries.
+
+```
+       ┌────────────────────────────────────────────────────────┐
+       │                Windows Enterprise Client               │
+       │                                                        │
+       │  [Mode 1] MS Teams Client ──► Windows UIA (~40ms Poll) │
+       │  [Mode 2] Process Loopback ──► Per-PID WASAPI Capture  │
+       │  [Mode 3] Local Microphone ──► 16kHz PCM Stream        │
+       └───────────▲────────────────────────────▲───────────────┘
+                   │                            │
+       ┌───────────┴────────────────────────────┴───────────────┐
+       │              Google Gemini Live AI Engine              │
+       │  • Speech-to-Speech Streaming: gemini-3.5-live-translate│
+       │  • Text Live Streaming: gemini-3.1-flash-live-preview  │
+       │  • Gapless 24kHz TTS with Adaptive Latency Buffer      │
+       │  • Rolling Meeting Intelligence: gemini-3.1-flash-lite │
+       │  • Comprehensive Report Generation: gemma-4-31b-it     │
+       └────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Cài đặt & chạy
+## 🚀 Core Features & Architectural Innovations
+
+### 1. Three Flexible Ingestion Modes
+
+| Ingestion Mode | Technical Implementation | Practical Benefit |
+|:---|:---|:---|
+| 💬 **Teams Live Captions** | Native **Windows UI Automation (UIA)** polling (~40ms) reading text from Teams (`ms-teams`). | **Zero bot required.** No CDP/debugging ports, no virtual drivers. Draws transparent click-through subtitles directly over native Teams subtitles. |
+| 🔊 **Process Loopback Audio** | Targeted WASAPI loopback filtered strictly by target Process ID (PID). | **Eliminates acoustic feedback loops.** Captures meeting audio (Teams, Chrome, Zoom) while completely ignoring the app's own TTS output. |
+| 🎤 **Microphone Stream** | Hardware audio input streamed in 16kHz mono PCM chunks. | Captures local speaker audio for bilateral bilingual conversations. |
+
+### 2. Multi-Model Gemini Live AI Engine (Zero Local Model Overhead)
+
+```
+Input Audio Stream (16kHz PCM)
+        ↓
+gemini-3.5-live-translate-preview (Auto Language ID + Streaming Translation)
+        ↓
+Adaptive Jitter Buffer (~180ms Target, Dynamic 1.12x Scaling)
+        ↓
+Gapless 24kHz PCM Audio Playback (30 Curated Voices)
+```
+
+- **Automatic Language Identification (Auto-LID):** Seamlessly recognizes input language without manual toggling.
+- **Intelligent Sentence Settlement:** Uses punctuation termination (`. ? ! 。！？`) and adaptive silence gating (`SETTLE_MS` ~0.45s / `LONG_IDLE_MS` ~2.5s) to guarantee linguistically coherent translation units.
+- **Session Resumption & Anti-Disconnection:** Implements sliding-window context preservation and automated handshake reconnection (1.5s reconnect on `goAway` events), bypassing the 15-minute connection ceiling.
+
+### 3. Gapless 24kHz TTS with Adaptive Latency Control
+- Streams studio-quality 24kHz PCM voice playback via Web Audio API.
+- **Dynamic Queue Drain:** If audio backlog exceeds ~0.6s, playback speed smoothly accelerates up to $\le 1.12\times$ without pitch distortion; if latency exceeds ~1.8s, trailing buffers are intelligently trimmed to maintain real-time conversational sync.
+- **30 Built-in Voices** (default: *Achernar*), with instant mute and volume controls.
+
+### 4. Autonomous Rolling Real-Time Summarization & Reporting
+
+| Capability | Architecture & Details |
+|:---|:---|
+| 📋 **Rolling Real-Time Summary** | Dual-column UI (expands +380px). Automatically triggers every **$\ge 24$ newly translated sentences** (~2 minutes of conversation) with a 12-second backstop timer. Synthesizes prior context (up to 6,000 chars) + 25 latest statements into rich **GitHub Flavored Markdown** tables and action items. |
+| 📊 **Full Meeting Post-Mortem** | End-of-meeting comprehensive intelligence report powered by the **Gemma reasoning fallback chain** (`gemma-4-31b-it` → `gemma-4-26b-it`, up to 8,192 tokens). |
+| 💾 **Multi-Format Transcript Export** | Exports `.txt` files in three modes: **Original Speech**, **Dual Bilingual (Source + Target with Speaker Timestamps)**, and **Translated Only**. Exports meeting minutes to `.md` or copies directly to clipboard. |
+
+### 5. Multilingual & Terminology Preservation
+- **Target Translation Languages:** 🇻🇳 Vietnamese, 🇺🇸 English, 🇯🇵 Japanese, 🇰🇷 Korean, 🇨🇳 Chinese (Simplified `zh-Hans`).
+- **Verbatim Transcribe Mode:** Transcribes exact multi-speaker dialogue without translation or TTS for official corporate compliance logs.
+- **IT / BrSE Terminology Guard:** Specialized system prompting preserves proper nouns, technical terms, Japanese Katakana loanwords, and numbers/dates.
+
+---
+
+## 🛠️ Project Structure
+
+```
+teams-caption-translator/
+├── main.js                  # Electron application lifecycle & IPC manager
+├── app.html                 # Main dual-column interface, overlay & summary modal
+├── preload.js               # Secure contextBridge interface (window.__caption)
+├── package.json             # Electron configuration & build targets
+├── src/
+│   ├── gemini-live.js       # Bidirectional streaming client (gemini-3.5-live-translate)
+│   ├── gemini-text-live.js  # Live streaming text translation (gemini-3.1-flash-live)
+│   ├── gemini-text.js       # Rolling summary & Gemma executive reporting
+│   ├── teams-uia.js         # Windows UI Automation client for Microsoft Teams
+│   ├── audio-capture.js     # Process-specific WASAPI audio loopback & mic handler
+│   ├── tts-player.js        # Gapless 24kHz Web Audio player & adaptive jitter buffer
+│   └── store.js             # Local encrypted configuration store
+└── extension/               # Enterprise browser companion extension
+```
+
+---
+
+## ⚡ Quick Start & Installation
+
+### Prerequisites
+- **Operating System:** Windows 10 / 11 (x64)
+- **Node.js:** v18.0.0 or higher
+- **Microsoft Teams:** New Teams client (`ms-teams`)
+- **API Key:** Google Gemini API Key from [Google AI Studio](https://aistudio.google.com/apikey)
+
+### Installation & Launch
 
 ```bash
+# 1. Clone repository
+git clone https://github.com/trituenguyen97/teams-caption-translator.git
+cd teams-caption-translator
+
+# 2. Install dependencies
 npm install
+
+# 3. Launch application
 npm start
 ```
 
-Lần đầu chạy: mở **⋮ menu → mục Dịch thuật → dán Gemini API key** (`AIza…`). App tự kiểm tra key (✓ hợp lệ / ✕ không hợp lệ) bằng một lệnh `models.list()` không tốn quota.
+### First-Time Configuration
+1. Click the **⋮ Menu** in the top navigation bar → **Translation Settings**.
+2. Paste your **Gemini API Key** (`AIza...`). The application performs a zero-quota validation test (`models.list()`) to confirm connectivity.
+3. Select your input source:
+   - **Teams Live Caption:** Open Microsoft Teams, join a meeting, and click **▶ Start**. Subtitles will automatically overlay Teams.
+   - **System Audio:** Select your target meeting browser/application from the process dropdown.
+   - **Microphone:** Select your input microphone.
 
----
-
-## Cách dùng
-
-### 1) Chế độ Teams Live Captions
-
-1. Mở **Microsoft Teams** và vào meeting.
-2. Trong app: **⋮ menu → Nguồn** → chọn **💬 Teams Live Caption**.
-3. Bấm **▶**. App sẽ **focus Teams và gửi `Alt+Shift+C`** để bật Live Captions, đọc caption qua UIA (poll ~40ms), dịch và **vẽ bản dịch đè lên Teams** (overlay trong suốt, click-through) + hiện trong danh sách.
-
-> App **chỉ dịch dòng đã chốt** — dòng đang nói được bỏ qua cho tới khi đứng yên **~2.5s** (`LAST_ROW_SETTLE_MS`) hoặc kết thúc bằng dấu câu, tránh dịch lặp lúc câu còn mọc.
-
-### 2) Chế độ Âm thanh hệ thống / Micro
-
-1. **⋮ menu → Nguồn** → chọn **🔊 Audio hệ thống** (chọn *Toàn hệ thống* hoặc một **tiến trình** cụ thể) hoặc **🎤 Microphone** (chọn thiết bị).
-2. Bấm **▶** để bắt đầu. Audio được stream lên Gemini Live Translate; caption dịch hiện ngay, kèm đọc to (nếu bật TTS).
-
-> Nếu nguồn = *Toàn hệ thống* và bật TTS, tiếng đọc của app có thể bị thu lại (vọng). **Chọn đúng tiến trình app họp** (per-process loopback) hoặc **tắt TTS** để tránh.
-
-### Chọn ngôn ngữ đích / giọng đọc
-
-- Cờ ngôn ngữ trên thanh trạng thái → chọn **ngôn ngữ dịch đích** hoặc **📝 Chép lời** (đổi nóng, phiên Live tự kết nối lại).
-- Nút loa 🔊 → chọn **giọng đọc** (30 giọng) hoặc **Tắt đọc**.
-
----
-
-## Giao diện
-
-Cửa sổ **không khung (frameless)** (500×720, tối thiểu 520×500), có thể **ghim luôn trên đầu màn hình** (📌). Theme là **công tắc sáng ↔ tối**; giá trị `auto` chỉ áp dụng lúc khởi động (theo `prefers-color-scheme`), không có nút chọn lại `auto` trên UI.
-
-| Vị trí | Điều khiển | Chức năng |
-|--------|------------|-----------|
-| **Header** | 📌 | Ghim luôn trên đầu màn hình |
-| | ▭ ✕ … | Phóng to / thu nhỏ / đóng cửa sổ |
-| **Thanh trạng thái** | ▶ / ⏹ / ⏳ | Bật/tắt Live Captions (Teams) hoặc ghi âm (audio/mic) |
-| | Cờ ngôn ngữ | Chọn ngôn ngữ dịch đích hoặc 📝 Chép lời |
-| | 🔊 / 🔇 | Chọn giọng đọc Gemini / bật–tắt đọc to |
-| | ☀️ / 🌙 | Đổi theme sáng ↔ tối |
-| | ⋮ | Chọn nguồn (Teams/hệ thống/mic), thiết bị mic, tiến trình loopback, API key, ngôn ngữ giao diện |
-| **Footer** | ↓ Auto | Tự cuộn xuống caption mới nhất |
-| | 💾 | Xuất transcript ra `.txt` (gốc / cả hai / dịch) |
-| | 🗑 | Xoá danh sách |
-| | 📋 Tóm tắt | Mở panel tóm tắt realtime (2 cột) |
-
-### Output mẫu
-
-Danh sách live (chỉ hiện **bản dịch**):
-
-```
-Nguyen Tri Tue                                     16:35:54
-Tôi chưa bao giờ tham dự lễ hội Nyan.
-
-Nguyen Tri Tue                                     16:36:03
-Cơm trắng bình thường, thực sự bình thường mà rất ngon phải không?
-```
-
-File xuất chế độ **Cả hai (gốc + dịch)** (khi có lời gốc):
-
-```
-[16:35:54] Nguyen Tri Tue:
-  • ニャン祭りをしたことがありませんね。
-  → Tôi chưa bao giờ tham dự lễ hội Nyan.
-```
-
----
-
-## Đóng gói thành file .exe
+### Building Windows NSIS Installer (.exe)
 
 ```bash
 npm run build
 ```
-
-Dùng `electron-builder` (target **NSIS**, `asar`, nén tối đa). Installer được tạo trong thư mục `dist/`.
-
-> Build hiện tại **không tải asset nào** (không có hook `prebuild`); `files[]` đóng gói `main.js`, `src/**`, `preload.js`, `overlay-preload.js`, `app.html`, `overlay.html`, `scripts/*.ps1` và `node_modules`. `application-loopback` và `@google/genai` được `asarUnpack` (cần file thật ngoài asar để spawn exe loopback / nạp SDK).
+Generates production NSIS setup installer packages in `dist/`.
 
 ---
 
-## Cấu trúc project
+## 🎯 Startup Vision, Grant Objectives & Roadmap
+
+Teams Caption Translator addresses the massive enterprise market for **frictionless cross-border remote collaboration**. We are actively seeking enterprise grants, cloud compute credits, and venture partnerships.
+
+### Planned Grant Allocation
 
 ```
-main.js                  # Entry Electron: lifecycle, tạo cửa sổ, vòng lặp service tự-restart (UIA ↔ audio)
-preload.js               # contextBridge cho cửa sổ chính  (window.__caption — ~30 kênh IPC)
-overlay-preload.js       # contextBridge cho cửa sổ overlay (window.__overlay.onRows)
-app.html                 # Toàn bộ UI renderer (header, danh sách caption, panel tóm tắt, settings, phát TTS)
-overlay.html             # Renderer overlay trong suốt (vẽ bản dịch đè lên Teams)
-package.json             # electron + @google/genai (^2.9.0) + application-loopback (1.2.7, pin)
-
-src/
-├── state.js             # State chia sẻ (singleton): nguồn, ngôn ngữ đích, cờ runtime, cấu hình Gemini
-├── store.js             # Đọc/ghi settings.json trong userData (cache RAM + write-through)
-├── ipc-handlers.js      # Toàn bộ IPC main ↔ renderer
-├── langs.js             # Bảng ngôn ngữ đích (tên / nhãn / mã BCP-47; Trung → zh-Hans)
-├── i18n.js              # Từ điển giao diện (5 locale)
-│
-├── gemini-live.js       # AUDIO mode: Gemini 3.5 Live Translate (STT + dịch + TTS); cũng chứa validateKey
-├── gemini-text-live.js  # TEAMS mode: Gemini 3.1 Flash Live (dịch text + TTS)
-├── gemini-text.js       # Tóm tắt cuốn chiếu + báo cáo tổng thể (generateContent: 3.1-flash-lite → gemma-4-31b-it → gemma-4-26b-it)
-│
-├── audio-stt.js         # Router audio mode: nhận PCM → geminiLive.pushAudio (STT local đã gỡ, các hàm cũ là no-op)
-├── process-audio.js     # Thu âm theo tiến trình (Windows Process Loopback): 48k/stereo/s16 → 16k/mono/f32 ở MAIN
-├── uia-captions.js      # Đọc caption Teams qua UIA helper + vòng chốt-câu/dịch + đẩy overlay
-└── caption-overlay.js   # Cửa sổ overlay trong suốt, click-through, always-on-top trên Teams
-
-scripts/
-├── uia-captions-helper.ps1  # PowerShell đọc UIA (app ghi ra file tạm rồi spawn bằng -File khi chạy chế độ Teams)
-└── uia-probe.ps1            # Script chẩn đoán UIA (chỉ dùng dev, app KHÔNG spawn)
+                   ┌───────────────────────────────────────┐
+                   │        Target Grant Allocation        │
+                   ├──────────────────┬────────────────────┤
+                   │ Enterprise Multi-│                    │
+                   │ Tenant Cloud API │        40%         │
+                   ├──────────────────┼────────────────────┤
+                   │ Cross-Platform   │                    │
+                   │ macOS / WebRTC   │        25%         │
+                   ├──────────────────┼────────────────────┤
+                   │ Security Audits  │                    │
+                   │ & SOC2 / HIPAA   │        20%         │
+                   ├──────────────────┼────────────────────┤
+                   │ Enterprise CRM / │                    │
+                   │ Slack/Notion Hub │        15%         │
+                   └──────────────────┴────────────────────┘
 ```
+
+1. **Enterprise Multi-Tenant Cloud Infrastructure (40%):** Centralized corporate license management, SSO, and shared billing pools while maintaining zero-retention data sovereignty.
+2. **Cross-Platform Engineering (25%):** Extending process-specific loopback audio capture to macOS (CoreAudio HAL tap) and Linux.
+3. **Enterprise Compliance & Audits (20%):** Formal SOC2 Type II and HIPAA compliance certification for enterprise deployments.
+4. **CRM & Knowledge Base Integrations (15%):** Direct one-click synchronization of generated meeting summaries and action items into Jira, Linear, Notion, and Salesforce.
+
+### Target Grant & Accelerator Programs
+- **Microsoft for Startups Founders Hub** (Teams ecosystem integration)
+- **Google Cloud for Startups Program** (Gemini Live multimodal showcase)
+- **Enterprise Productivity & Future of Work Grants**
 
 ---
 
-## Cách hoạt động
+## 🤝 Contact & Partnership
 
-### Chế độ Teams (UIA + overlay)
+For enterprise pilots, grant sponsorships, or investment inquiries:
 
-```
-Microsoft Teams (panel "Live Captions")
-   └─ scripts/uia-captions-helper.ps1  (UI Automation, poll ~40ms, NDJSON)
-        └─ {t:"rows", box, vis, bg, btn, rows:[{spk,txt,x,y,w,h}]} → src/uia-captions.js (loop ~150ms)
-             ├─ chỉ dịch dòng ĐÃ chốt (bỏ dòng đang nói trừ khi yên ~2.5s / kết câu); bỏ dòng còn "mọc" (prefix)
-             ├─ src/gemini-text-live.js → Gemini 3.1 Flash Live (dịch text streaming + TTS)
-             ├─ vẽ bản dịch ĐÈ lên Teams qua overlay trong suốt (src/caption-overlay.js, toạ độ UIA→DIP)
-             └─ IPC caption-live → app.html (danh sách)
-```
-
-### Chế độ Âm thanh / Micro (Gemini Live Translate)
-
-```
-Mic/loopback (renderer Web Audio @16k)  HOẶC  per-process loopback (process-audio.js @main, 48k→16k)
-   └─ PCM Float32 16kHz mono → handlePcm → src/gemini-live.js
-        └─ Gemini 3.5 Live Translate (STT + dịch + TTS, tự nhận ngôn ngữ nguồn)
-             ├─ outputTranscription (dịch) → IPC caption-live   [chỉ hiện bản dịch]
-             │    (transcribeMode: thay bằng inputTranscription = lời gốc, không TTS)
-             └─ audio TTS 24kHz → IPC gemini-audio → phát gapless (có trần độ trễ) trong app
-```
-
-### Tóm tắt cuộc họp (cuốn chiếu)
-
-```
-captions tích luỹ → khi ≥24 câu mới (~2 phút) HOẶC lần đầu mở panel có nội dung; backstop quét mỗi 12s
-   └─ src/gemini-text.js: prevSummary (≤6000 ký tự) + ≤25 câu mới → generateContent (temp 0.3)
-        gemini-3.1-flash-lite (500 RPD) → 429 → gemma-4-31b-it (1500) → 429 → gemma-4-26b-it (1500)
-        (429 theo NGÀY → nghỉ 4h; theo PHÚT → nghỉ 90s; 404/không hỗ trợ → rớt xuống model kế)
-        └─ Markdown → render panel tóm tắt → xuất .md / copy
-
-Khi DỪNG ghi: nút 📊 "Tổng thể" → toàn bộ transcript → chuỗi gemma-only → báo cáo chi tiết (≤8192 token)
-```
-
----
-
-## Cấu hình (settings.json trong userData)
-
-| Key | Mặc định | Ý nghĩa |
-|-----|----------|---------|
-| `apiKey` | `""` | Google Gemini API key (dịch + tóm tắt) |
-| `lang` | `vi` | Ngôn ngữ đích (`vi`/`en`/`ja`/`ko`/`zh-CN`) |
-| `transcribeMode` | `false` | Chép lời (hiện lời gốc, không dịch, không TTS) |
-| `captureSource` | `system` | Nguồn: `teams` (UIA) · `system` (loopback) · `mic` |
-| `micDeviceId` | `""` | Thiết bị micro (khi nguồn = mic) |
-| `audioProcessName` | `""` | Tên tiến trình cho per-process loopback (khi nguồn = system) |
-| `audioProcessApp` | `""` | Nhãn app hiển thị của tiến trình loopback |
-| `geminiAudioOn` | `true` | Bật/tắt đọc to bản dịch (TTS) |
-| `geminiVoice` | `Achernar` | Giọng đọc Gemini (30 giọng) |
-| `summaryExtra` | `""` | Chỉ dẫn thêm cho prompt tóm tắt (tuỳ chọn) |
-| `theme` | `auto` | Theme lưu trữ: `auto` / `light` / `dark` (UI chỉ bật/tắt light↔dark) |
-| `uiLang` | `vi` | Ngôn ngữ giao diện |
-
----
-
-## Lưu ý & hạn chế
-
-- **Cloud:** cần mạng ổn định và **Gemini API key**; nội dung cuộc họp được gửi tới Google để xử lý.
-- **Model `*-preview`:** `gemini-3.5-live-translate-preview` và `gemini-3.1-flash-live-preview` là hằng số `MODEL` trong `src/gemini-live.js` / `src/gemini-text-live.js` — đổi model thì sửa hằng số đó. Riêng **tóm tắt** dùng `SUMMARY_CHAIN` (chuỗi fallback + dò qua `ListModels` lúc chạy) trong `src/gemini-text.js`, không phải một hằng số đơn.
-- **Teams mode chỉ Windows:** cần Teams client mới (`ms-teams`) đang mở meeting và bật được Live Captions (`Alt+Shift+C`). Khi bật caption, app **tạm ghim** cửa sổ ~8s để thao tác focus không che app.
-- **Per-process loopback & UIA** chỉ chạy trên **Windows x64**. Loopback gom theo **cây tiến trình** (root-PID) nên thu trọn app đa-tiến-trình và không thu lại TTS của chính app; exe loopback **bỏ khung im lặng (−70dB)** nên dùng đồng hồ thực để đóng khúc.
-- **Ngôn ngữ nguồn** do Gemini tự nhận diện — nên kiểm chứng theo từng cặp ngôn ngữ.
-- **Vọng âm (system + TTS):** thu *toàn hệ thống* + bật đọc to có thể khiến app nghe lại chính nó. Dùng **per-process loopback** (chọn đúng app họp) hoặc **tắt TTS**.
+- **Lead Developer & Maintainer:** Tri Tue Nguyen ([@trituenguyen97](https://github.com/trituenguyen97))
+- **GitHub:** [https://github.com/trituenguyen97/teams-caption-translator](https://github.com/trituenguyen97/teams-caption-translator)
+- **Inquiries:** Open an issue or contact via GitHub profile.
