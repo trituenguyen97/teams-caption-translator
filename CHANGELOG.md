@@ -5,6 +5,8 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+## 1.1.1 — 2026-11-25
+
 - Sửa lỗi nói cùng ngôn ngữ đích (vd chen câu tiếng Việt trong cuộc họp tiếng Nhật) bị mất hoặc không hiển thị: câu đó giờ hiện ngay ở cột dịch thành hàng riêng
 
 ## 1.1.0 — 2026-11-25
@@ -14,5 +16,4 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 - Tóm tắt tổng bằng Gemini 4 Hydrogen: trang HTML trực quan (biểu đồ, sơ đồ) + biên bản Markdown, hiển thị lượt còn lại x/20
 - Tóm tắt liên tục chỉ còn dạng Markdown
 - Sửa lệch hàng câu gốc ↔ câu dịch khi nói dài: chốt hàng bằng Gemini Decision 1, gần realtime (~0.7s)
-
 
