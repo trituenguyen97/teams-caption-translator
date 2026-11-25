@@ -368,13 +368,14 @@ Mục không có nội dung → ghi "Không có".
 
 ━━ 2) "html" — BÁO CÁO TRỰC QUAN (một trang, bạn TỰ THIẾT KẾ) ━━
 Mục tiêu: người đọc nắm cuộc họp trong 30 giây. TRỰC QUAN hơn CHỮ: ưu tiên thẻ số liệu, biểu đồ, sơ đồ, timeline, bảng, badge — chữ ngắn gọn (gạch đầu dòng ≤ 15 từ); chi tiết dài để ở markdown.
-Nội dung nên có (bỏ phần nào không có dữ liệu thật):
+THÍCH ỨNG THEO NỘI DUNG — mọi phần bên dưới là TUỲ CHỌN, CHỈ đưa vào khi transcript có dữ liệu THẬT cho nó. Thà ít phần mà đúng còn hơn đủ phần mà gượng. Họp trao đổi thuần (không số liệu/quy trình) → trang gọn: mở đầu + chủ đề + quyết định/việc cần làm là đủ, KHÔNG vẽ biểu đồ/sơ đồ cho có. TUYỆT ĐỐI không tạo biểu đồ từ số bịa, không chia % khi chỉ có 1-2 chủ đề, không vẽ sơ đồ luồng khi cuộc họp không bàn một quy trình/chuỗi bước cụ thể.
+Các phần có thể dùng:
 - Phần mở đầu: tiêu đề + 1 câu kết quả chính + dải thẻ số liệu (số chủ đề, quyết định, việc cần làm, thời lượng, người tham gia…) + thông tin ngày/thời lượng/thành phần.
-- 1-3 BIỂU ĐỒ có ý nghĩa vẽ bằng SVG nội tuyến (vd donut tỉ trọng thảo luận theo chủ đề; cột ngang việc cần làm theo người phụ trách/ưu tiên), có nhãn + giá trị + chú thích.
-- SƠ ĐỒ tượng trưng bằng SVG hoặc HTML/CSS: luồng quy trình/luồng quyết định chính (hộp + mũi tên, nút quyết định dạng thoi), hoặc sơ đồ quan hệ vấn đề → nguyên nhân → giải pháp.
+- 0-3 BIỂU ĐỒ SVG nội tuyến — CHỈ khi có ≥3 điểm dữ liệu có ý nghĩa (vd số liệu thật được nêu trong họp; ≥3 chủ đề rõ rệt → donut tỉ trọng; ≥3 việc có người phụ trách → cột theo người). Có nhãn + giá trị + chú thích (ghi "ước lượng" nếu là ước lượng).
+- 0-1 SƠ ĐỒ (SVG hoặc HTML/CSS) — CHỈ khi cuộc họp THỰC SỰ bàn một quy trình/chuỗi bước/luồng quyết định (hộp + mũi tên, nút quyết định dạng thoi) hoặc chuỗi vấn đề → nguyên nhân → giải pháp rõ ràng.
 - Chủ đề chính dạng lưới thẻ (icon emoji + tiêu đề + 2-3 ý + kết luận).
 - Quyết định đã chốt (thẻ nổi bật). Việc cần làm (bảng: việc · phụ trách · hạn · badge ưu tiên màu). Rủi ro/vấn đề mở (thẻ theo mức độ cao/trung bình/thấp).
-- Timeline các bước tiếp theo.
+- Timeline các bước tiếp theo (chỉ khi có ≥2 mốc/bước cụ thể).
 Yêu cầu kỹ thuật BẮT BUỘC:
 - Tài liệu HTML5 HOÀN CHỈNH, TỰ CHỨA: <!doctype html><html lang="…"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>…</title><style>…</style></head><body>…</body></html>.
 - TUYỆT ĐỐI KHÔNG dùng <script>, thuộc tính sự kiện (onclick…), iframe, form, hay tài nguyên ngoài (ảnh/CDN/font từ mạng) — trang hiển thị trong khung KHÔNG chạy JavaScript và phải xem được offline. Font: system-ui/Segoe UI/sans-serif.
