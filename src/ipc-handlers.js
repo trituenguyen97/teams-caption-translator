@@ -175,7 +175,7 @@ function registerAll(app) {
   ipcMain.handle('hydrogen-quota', () => geminiText.hydrogenQuota());
   // Artifact (tương tác JS + trình chiếu) từ biên bản Markdown — tạo theo yêu cầu, 1 lượt Hydrogen.
   ipcMain.handle('summarize-artifact', async (_, payload) => {
-    try { const p = payload || {}; return await geminiText.summarizeArtifact(p.markdown || '', p.facts || null); }
+    try { const p = payload || {}; return await geminiText.summarizeArtifact(p.markdown || '', p.facts || null, p.kind === 'slides' ? 'slides' : 'artifact'); }
     catch (e) { return { ok: false, error: e.message, quota: geminiText.hydrogenQuota() }; }
   });
   ipcMain.handle('export-summary', async (_, opts = {}) => {

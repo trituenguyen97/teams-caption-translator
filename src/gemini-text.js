@@ -399,7 +399,7 @@ ${_toLines(captions)}`;
 }
 // Gỡ phần chạy được khỏi HTML do model sinh (phòng thủ thêm — iframe đã sandbox không script; file xuất ra mở bằng trình duyệt).
 function _sanitizeHtml(h) {
-  return String(h || '')
+  return String(h || '').normalize('NFC')
     .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
     .replace(/<script\b[^>]*>/gi, '')
     .replace(/<(iframe|object|embed|form)\b[\s\S]*?(<\/\1\s*>|$)/gi, '')
@@ -470,10 +470,58 @@ ${_factsBlock(facts)}${_extraBlock()}
 BIÊN BẢN CUỘC HỌP (Markdown):
 ${markdown}`;
 }
+// ── SLIDE: bộ trình chiếu kiểu "Claude Design" — design system cố định (terracotta + nền kem giấy + chữ mực),
+//    bộ mẫu bố cục slide, chuyển động tinh tế, lời thoại người trình bày (phím N), in PDF mỗi slide 1 trang.
+// Font có chân cho tiêu đề theo NGÔN NGỮ ĐÍCH — font Nhật (Yu Mincho) không ghép được dấu chồng tiếng Việt (ầ, ỗ…).
+function _serifStack() {
+  const c = state.langCode;
+  if (c === 'ja') return '"Yu Mincho","Hiragino Mincho ProN","Noto Serif JP",serif';
+  if (c === 'ko') return '"Batang","Noto Serif KR",serif';
+  if (c === 'zh') return '"SimSun","Songti SC","Noto Serif SC",serif';
+  return '"Cambria","Noto Serif","Times New Roman",serif';   // vi/en: Cambria/Times dựng sẵn đủ dấu tiếng Việt
+}
+function _buildSlidesPrompt(markdown, facts) {
+  const L = _outLang();
+  return `Bạn là nhà thiết kế trình chiếu chuyên nghiệp. Từ BIÊN BẢN CUỘC HỌP (Markdown) ở cuối, tạo MỘT bộ slide HTML tự chứa để trình bày lại cuộc họp cho người không dự (sếp/khách/đồng nghiệp). Trả JSON {"html": "..."}.
+
+NGÔN NGỮ: ${L}. Chỉ dùng thông tin CÓ trong biên bản — không bịa số liệu/người/deadline.
+
+DESIGN SYSTEM (cố định — áp nhất quán cho MỌI slide):
+- Màu: nền kem giấy #F7F3EC; bề mặt phụ #EFE8DC; chữ mực #1F1B16; chữ phụ #6B625A; đường kẻ #DDD3C4; DUY NHẤT 1 màu nhấn terracotta #C2410C (sắc nhạt #F3DCCF cho nền nhấn). Không màu nào khác, không gradient, không bóng đổ đậm, không emoji.
+- Chữ: tiêu đề font-family ${_serifStack()} (đậm 600); nội dung system-ui,"Segoe UI",Roboto,sans-serif; số liệu dùng font-variant-numeric:tabular-nums. Thang cỡ chữ theo khung slide (dùng clamp/vw): tiêu đề bìa rất lớn, tiêu đề slide lớn, nội dung đọc được từ xa.
+- Lưới: slide tỉ lệ 16:9, căn giữa, co giãn vừa khung (kể cả khung hẹp ~420px — slide thu nhỏ theo tỉ lệ, không vỡ bố cục). Lề rộng, nhiều khoảng trắng; mỗi slide 1 ý chính, tối đa ~5 dòng chữ.
+- Phần tử nhấn: thanh terracotta ngắn (40×4px) phía trên tiêu đề; số thứ tự mục lớn mờ; bo góc 4px.
+
+BỘ MẪU SLIDE (chọn & sắp theo nội dung thật, bỏ mẫu không có dữ liệu):
+1. Bìa: tên cuộc họp, ngày · thời lượng · thành phần, 1 câu kết quả chính.
+2. Tóm tắt: 1 câu lớn + 3-4 chỉ số (số to màu nhấn + nhãn nhỏ).
+3. Phân cách mục (số lớn + tên mục) trước mỗi phần lớn.
+4. Chủ đề thảo luận: tiêu đề + 2-3 ý + dòng "Kết luận".
+5. Quyết định: MỖI quyết định quan trọng 1 slide (câu quyết định thật lớn + lý do + người phụ trách).
+6. Việc cần làm: bảng gọn (việc · phụ trách · hạn · ưu tiên; "Cao" tô màu nhấn).
+7. Rủi ro / vấn đề mở: bố cục 2 cột (vấn đề ↔ hướng xử lý).
+8. Bước tiếp theo: timeline ngang theo mốc.
+9. Kết: 1 câu chốt + điều cần nhớ.
+
+TƯƠNG TÁC & CHUYỂN ĐỘNG:
+- Chuyển slide: ← → / PageUp PageDown / Space / click nửa trái-phải; Home/End; số trang "3 / 12" + thanh tiến độ mảnh màu nhấn ở đáy.
+- Hiệu ứng: slide trượt nhẹ + mờ dần (300-450ms, ease-out); các khối trong slide hiện lần lượt (stagger 80-120ms); số liệu đếm tăng dần. Tôn trọng @media (prefers-reduced-motion: reduce) → bỏ chuyển động.
+- Phím F: toàn màn hình (requestFullscreen, bọc try/catch); phím N: bật/tắt khung LỜI THOẠI người trình bày ở đáy (mỗi slide có 2-4 câu lời thoại tự nhiên, bằng ${L}); phím A: tự chạy (mỗi slide ~7s).
+- Lưới thu nhỏ: phím G hiện lưới tất cả slide, click để nhảy tới.
+- @media print: mỗi slide đúng 1 trang ngang (size: landscape), hiện hết slide, ẩn điều khiển — để in PDF bằng Ctrl+P.
+
+KỸ THUẬT BẮT BUỘC:
+- MỘT file HTML5 hoàn chỉnh, JavaScript thuần (ES2020) nội tuyến, hàm khởi tạo bọc try/catch; nội dung slide dựng sẵn bằng HTML tĩnh (hiện được cả khi JS lỗi), JS chỉ điều khiển chuyển slide/hiệu ứng.
+- TUYỆT ĐỐI KHÔNG: tài nguyên ngoài (CDN/font/ảnh từ mạng), fetch/XMLHttpRequest/WebSocket, localStorage/sessionStorage/cookie/indexedDB, alert/confirm/prompt, window.open, eval, iframe/form.
+${_factsBlock(facts)}${_extraBlock()}
+---
+BIÊN BẢN CUỘC HỌP (Markdown):
+${markdown}`;
+}
 // Gỡ phần nguy hiểm nhưng GIỮ <script> nội tuyến; chặn script/tài nguyên ngoài bằng CSP chèn đầu <head>.
 const ARTIFACT_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
 function _sanitizeArtifact(h) {
-  h = String(h || '')
+  h = String(h || '').normalize('NFC')   // model hay trả dấu tiếng Việt dạng TÁCH (NFD) → nhiều font vẽ dấu lệch (tuâǹ)
     .replace(/<script\b[^>]*\bsrc\s*=[^>]*>[\s\S]*?<\/script\s*>/gi, '')   // script NGOÀI
     .replace(/<(iframe|object|embed|form|base)\b[\s\S]*?(<\/\1\s*>|>)/gi, '')
     .replace(/<meta\b[^>]*http-equiv[^>]*>/gi, '')                           // không cho model tự đặt CSP/refresh
@@ -485,13 +533,13 @@ function _sanitizeArtifact(h) {
   return h;
 }
 // Trả { ok, html, quota } | { ok:false, error, quota }. markdown = biên bản đã có (report.markdown).
-async function summarizeArtifact(markdown, facts) {
+async function summarizeArtifact(markdown, facts, kind) {
   markdown = String(markdown || '').trim();
   if (!state.apiKey || !String(state.apiKey).trim()) return { ok: false, error: 'no-key', quota: hydrogenQuota() };
   if (markdown.length < 50) return { ok: false, error: 'empty', quota: hydrogenQuota() };
   if (hydrogenQuota().remaining <= 0) return { ok: false, error: 'quota-exhausted', quota: hydrogenQuota() };
   const ai = await _ai();
-  const prompt = _buildArtifactPrompt(markdown, facts);
+  const prompt = kind === 'slides' ? _buildSlidesPrompt(markdown, facts) : _buildArtifactPrompt(markdown, facts);   // 'artifact' | 'slides'
   let lastErr = 'failed';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {

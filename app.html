@@ -1482,6 +1482,7 @@
           <button type="button" data-v="html" title="Trang báo cáo HTML">HTML</button>
           <button type="button" data-v="md" title="Biên bản Markdown">MD</button>
           <button type="button" data-v="artifact" title="Artifact: tương tác (lọc/sắp xếp/tìm kiếm) + trình chiếu">✦ Artifact</button>
+          <button type="button" data-v="slides" title="Slide: bộ trình chiếu kiểu Claude Design (←/→, F toàn màn hình, N lời thoại, Ctrl+P in PDF)">▶ Slide</button>
         </div>
         <button id="sp-prompt-btn" class="sp-mini" data-i18n-title="summary.editPromptTitle" title="Sửa prompt tóm tắt">✏️</button>
         <button id="sp-close-btn" class="sp-mini" data-i18n-title="summary.closePanelTitle" title="Đóng panel">✕</button>
@@ -1665,7 +1666,7 @@
       if (!s.srcLang) api.saveSettings({ srcLang: _srcLang });
       _currentSource = s.captureSource || 'system';
       _layout = s.layout || 'translation';
-      _spView = (s.summaryView === 'md' || s.summaryView === 'artifact') ? s.summaryView : 'html';
+      _spView = ['md', 'artifact', 'slides'].includes(s.summaryView) ? s.summaryView : 'html';
       _systemWithMic = !!s.systemWithMic; if (sWithMic) sWithMic.checked = _systemWithMic;
       _saveHistory = s.saveHistory !== false; if (sSaveHistory) sSaveHistory.checked = _saveHistory;
       if (sTranslateModel) sTranslateModel.value = (s.translateModel === 'live-3.8') ? 'live-3.8' : 'live-translate';
@@ -3001,7 +3002,7 @@
     // Hiển thị nội dung tóm tắt HIỆN CÓ theo _spView (không gọi lại API) — dùng cho cả render mới lẫn nút đổi HTML↔MD.
     function spShow() {
       const rep = _spReport && _spReport.html ? _spReport : null;   // báo cáo Tổng thể Hydrogen (có HTML)
-      if (rep && _spView === 'artifact') { _showArtifact(rep); _updateSpViewBtn(); return; }
+      if (rep && (_spView === 'artifact' || _spView === 'slides')) { _showArtifact(rep, _spView); _updateSpViewBtn(); return; }
       if (rep && _spView === 'html') {   // trang HTML do Hydrogen sinh → iframe cô lập, KHÔNG script
         spBody.style.padding = '0'; spBody.style.overflow = 'hidden'; spBody.innerHTML = '';
         const f = document.createElement('iframe');
@@ -3024,38 +3025,43 @@
       + 'parent.postMessage({__artifact:t.length<40?"error":"ok",msg:last.slice(0,200)},"*")},1500)})})();</scr' + 'ipt>';
     let _artFrame = null, _artBusy = false;
     function _withProbe(html) { return /<\/body>/i.test(html) ? html.replace(/<\/body>/i, ART_PROBE + '</body>') : html + ART_PROBE; }
-    function _showArtifact(rep) {
+    const _ART_INFO = {
+      artifact: { key: 'artifact', title: '✦ Artifact', desc: 'Trang tương tác: tab, tìm kiếm, lọc &amp; sắp xếp việc cần làm, tick đã xong, biểu đồ có tooltip — kèm chế độ <b>Trình chiếu</b> có chuyển động.', btn: 'Tạo Artifact (1 lượt Hydrogen)' },
+      slides:   { key: 'slides',   title: '▶ Slide',    desc: 'Bộ trình chiếu kiểu <b>Claude Design</b>: nền kem, nhấn terracotta, mỗi quyết định 1 slide, chuyển động mượt. Phím ←/→ chuyển slide · F toàn màn hình · N lời thoại · G lưới · Ctrl+P in PDF.', btn: 'Tạo Slide (1 lượt Hydrogen)' },
+    };
+    function _showArtifact(rep, kind) {
+      kind = kind === 'slides' ? 'slides' : 'artifact'; const info = _ART_INFO[kind];
       spBody.style.padding = '0'; spBody.style.overflow = 'hidden'; spBody.style.position = 'relative'; spBody.innerHTML = '';
       _artFrame = null;
-      if (rep.artifact) {
+      if (rep[info.key]) {
         const f = document.createElement('iframe');
         f.setAttribute('sandbox', 'allow-scripts');              // KHÔNG allow-same-origin / allow-popups / allow-forms
         f.setAttribute('allow', 'fullscreen');
         f.setAttribute('allowfullscreen', '');
         f.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#fff';
-        f.srcdoc = _withProbe(rep.artifact);
+        f.srcdoc = _withProbe(rep[info.key]);
         spBody.appendChild(f); _artFrame = f;
         return;
       }
       const card = document.createElement('div'); card.className = 'art-card';
-      card.innerHTML = '<b>✦ Artifact</b><span>Trang tương tác: tab, tìm kiếm, lọc &amp; sắp xếp việc cần làm, tick đã xong, biểu đồ có tooltip — kèm chế độ <b>Trình chiếu</b> có chuyển động.</span>'
-        + '<span id="art-quota" style="font-size:12px"></span><button type="button" id="art-make">Tạo Artifact (1 lượt Hydrogen)</button><span id="art-msg" style="font-size:12px"></span>';
+      card.innerHTML = '<b>' + info.title + '</b><span>' + info.desc + '</span>'
+        + '<span id="art-quota" style="font-size:12px"></span><button type="button" id="art-make">' + info.btn + '</button><span id="art-msg" style="font-size:12px"></span>';
       spBody.style.overflow = 'auto'; spBody.appendChild(card);
       const btn = card.querySelector('#art-make'), qEl = card.querySelector('#art-quota'), msg = card.querySelector('#art-msg');
       api.hydrogenQuota().then(q => { _setGptQuota(q); qEl.textContent = `Còn ${q.remaining}/${q.limit} lượt Hydrogen hôm nay`; if (q.remaining <= 0) { btn.disabled = true; msg.textContent = 'Hết lượt hôm nay — thử lại sau giờ reset quota.'; } }).catch(() => {});
-      btn.addEventListener('click', () => _makeArtifact(rep, btn, msg));
+      btn.addEventListener('click', () => _makeArtifact(rep, btn, msg, kind));
     }
-    async function _makeArtifact(rep, btn, msg) {
+    async function _makeArtifact(rep, btn, msg, kind) {
       if (_artBusy) return; _artBusy = true;
       if (btn) { btn.disabled = true; btn.innerHTML = '<span class="m3-spinner-sm"></span> Đang tạo… (~1 phút)'; }
       let r = null;
-      try { r = await api.summarizeArtifact({ markdown: rep.markdown || _spMarkdown, facts: summaryFacts() }); } catch (e) { r = { ok: false, error: e.message }; }
+      try { r = await api.summarizeArtifact({ markdown: rep.markdown || _spMarkdown, facts: summaryFacts(), kind }); } catch (e) { r = { ok: false, error: e.message }; }
       _artBusy = false;
       if (r && r.quota) _setGptQuota(r.quota);
       if (r && r.ok && r.html) {
-        rep.artifact = r.html;
-        try { saveSession(); } catch (e) {}   // lưu artifact vào lịch sử phiên
-        if (_spReport === rep && _spView === 'artifact') spShow();
+        rep[kind] = r.html;
+        try { saveSession(); } catch (e) {}   // lưu artifact/slide vào lịch sử phiên
+        if (_spReport === rep && _spView === kind) spShow();
         return;
       }
       const err = r && r.error === 'quota-exhausted' ? 'Hết lượt Hydrogen hôm nay.' : r && r.error === 'no-key' ? t('summary.needKey') : '❌ ' + shortErr(r && r.error);
@@ -3068,7 +3074,7 @@
       const bar = document.createElement('div'); bar.className = 'art-err';
       bar.innerHTML = '<span>Artifact hiển thị lỗi' + (e.data.msg ? ': ' + esc(e.data.msg) : '') + '</span>';
       const redo = document.createElement('button'); redo.textContent = 'Tạo lại (1 lượt)';
-      redo.onclick = () => { if (_spReport) { _spReport.artifact = null; spShow(); } };
+      redo.onclick = () => { if (_spReport && (_spView === 'artifact' || _spView === 'slides')) { _spReport[_spView] = null; spShow(); } };
       const toHtml = document.createElement('button'); toHtml.textContent = 'Xem HTML';
       toHtml.onclick = () => { _spView = 'html'; spShow(); };
       bar.append(redo, toHtml); spBody.appendChild(bar);
@@ -3135,7 +3141,7 @@
       if (_spMarkdown) api.exportSummary({ markdown: _spMarkdown, defaultName: 'summary-' + new Date().toISOString().slice(0, 10) + '.md', dialogTitle: t('dialog.saveSummaryTitle') });
     });
     if (spExportHtmlBtn) spExportHtmlBtn.addEventListener('click', () => {
-      if (_spReport && _spReport.artifact && _spView === 'artifact') { const d = new Date().toISOString().slice(0, 10); api.exportSummary({ markdown: _spReport.artifact, defaultName: `artifact-${d}.html`, dialogTitle: t('dialog.saveSummaryTitle') }); return; }
+      if (_spReport && (_spView === 'artifact' || _spView === 'slides') && _spReport[_spView]) { const d = new Date().toISOString().slice(0, 10); api.exportSummary({ markdown: _spReport[_spView], defaultName: `${_spView === 'slides' ? 'slide' : 'artifact'}-${d}.html`, dialogTitle: t('dialog.saveSummaryTitle') }); return; }
       if (_spReport && _spReport.html) exportReportHtml(_spReport); else exportSummaryHtml(_spMarkdown);
     });
     if (spCopyBtn) spCopyBtn.addEventListener('click', () => { if (_spMarkdown) api.copyToClipboard(_spMarkdown); });

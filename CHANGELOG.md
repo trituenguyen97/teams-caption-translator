@@ -5,6 +5,9 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+- Báo cáo tổng có thêm chế độ ▶ Slide: bộ trình chiếu kiểu Claude Design (nền kem, nhấn terracotta, mỗi quyết định 1 slide, chuyển động mượt) — phím ←/→ chuyển slide, F toàn màn hình, N lời thoại người trình bày, G lưới slide, A tự chạy, Ctrl+P in PDF
+- Sửa lỗi dấu tiếng Việt bị lệch trong tiêu đề báo cáo/slide
+
 ## 1.1.5 — 2026-11-25
 
 - Báo cáo tổng có thêm chế độ ✦ Artifact (bấm để tạo, 1 lượt Hydrogen): trang tương tác với tab, tìm kiếm, lọc & sắp xếp việc cần làm, tick đã xong, biểu đồ có tooltip, và chế độ Trình chiếu có chuyển động
