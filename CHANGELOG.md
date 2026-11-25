@@ -5,6 +5,9 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+- Cài đặt: ô tick nằm đầu dòng, thẳng hàng với chữ (bấm cả dòng để tick)
+- Cài đặt: menu không còn bị thanh dưới che mất phần cuối (mục Phiên bản)
+
 ## 1.1.1 — 2026-11-25
 
 - Sửa lỗi nói cùng ngôn ngữ đích (vd chen câu tiếng Việt trong cuộc họp tiếng Nhật) bị mất hoặc không hiển thị: câu đó giờ hiện ngay ở cột dịch thành hàng riêng

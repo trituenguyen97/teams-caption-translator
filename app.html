@@ -1126,6 +1126,9 @@
     /* separator giữa các nhóm trong menu */
     .app-menu .menu-sep { height: 1px; background: var(--m3-line); margin: 4px 6px; }
     .app-menu .menu-row { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 8px; }
+    /* Dòng checkbox: ô tick ĐẦU dòng, cùng hàng với chữ, bấm cả dòng để tick */
+    .app-menu .menu-row.menu-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+    .app-menu .menu-row.menu-check input[type="checkbox"] { margin: 0; flex: 0 0 auto; width: 15px; height: 15px; accent-color: #3794ff; cursor: pointer; }
     /* Cập nhật phiên bản */
     #menu-btn.has-update { position: relative; }
     #menu-btn.has-update::after { content:""; position:absolute; top:4px; right:4px; width:8px; height:8px; border-radius:50%; background:#e5484d; box-shadow:0 0 0 2px var(--m3-surface, #1e1e1e); }
@@ -1377,10 +1380,10 @@
           <div id="s-app-list" class="app-list" style="display:none"></div>
         </div>
       </div>
-      <div class="menu-row" id="s-withmic-row" style="display:none">
-        <span data-i18n="settings.systemWithMic">Kèm micro của bạn</span>
+      <label class="menu-row menu-check" id="s-withmic-row" style="display:none">
         <input type="checkbox" id="s-withmic" data-i18n-title="settings.systemWithMicNote" />
-      </div>
+        <span data-i18n="settings.systemWithMic">Kèm micro của bạn</span>
+      </label>
       <div class="menu-row" id="s-mic-row" style="display:none">
         <span data-i18n="settings.chooseMic">Chọn Microphone</span>
         <select id="s-mic-device"></select>
@@ -1394,10 +1397,10 @@
           <button class="lay-opt" data-layout="dual" title="2 luồng (gốc | dịch)" type="button"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="6" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="2" y="9" width="5" height="1.6" rx=".8" opacity=".5"/><rect x="9" y="4.5" width="5" height="1.6" rx=".8"/><rect x="9" y="7.5" width="5" height="1.6" rx=".8"/></svg></button>
         </div>
       </div>
-      <div class="menu-row" id="s-savehistory-row">
-        <span data-i18n="settings.saveHistory">Tự lưu lịch sử phiên</span>
+      <label class="menu-row menu-check" id="s-savehistory-row">
         <input type="checkbox" id="s-savehistory" />
-      </div>
+        <span data-i18n="settings.saveHistory">Tự lưu lịch sử phiên</span>
+      </label>
       <div class="menu-sep"></div>
 
       <!-- Nhóm: Dịch thuật — chỉ cần Gemini API key (live-translate tự STT + dịch + TTS) -->
@@ -2388,7 +2391,17 @@
       e.stopPropagation();
       setFlagActive(uilangRow, _uiLang);
       appMenu.classList.toggle('open');
+      _fitAppMenu();
     });
+    // Giới hạn chiều cao menu theo vị trí THẬT (top của menu → đáy cửa sổ, chừa footer) → phần cuối (Phiên bản) luôn cuộn tới được
+    function _fitAppMenu() {
+      if (!appMenu.classList.contains('open')) return;
+      const top = appMenu.getBoundingClientRect().top;
+      const foot = document.querySelector('footer, #footer, .footer');
+      const bottomLimit = foot && foot.getBoundingClientRect().top > top ? foot.getBoundingClientRect().top : window.innerHeight;
+      appMenu.style.maxHeight = Math.max(160, bottomLimit - top - 8) + 'px';
+    }
+    window.addEventListener('resize', _fitAppMenu);
     appMenu.addEventListener('click', (e) => e.stopPropagation());   // click trong menu không tự đóng
     document.addEventListener('click', () => appMenu.classList.remove('open'));
     themeBtn.addEventListener('click', () => {
