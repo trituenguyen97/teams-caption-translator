@@ -103,6 +103,7 @@ function registerAll(app) {
     micDeviceId:       Store.get('micDeviceId',       ''),
     geminiAudioOn:     Store.get('geminiAudioOn',     true),
     geminiVoice:       Store.get('geminiVoice',       'Achernar'),
+    translateModel:    Store.get('translateModel',    'live-translate'),
     summaryExtra:      Store.get('summaryExtra',      ''),
     audioProcessName:  Store.get('audioProcessName',  ''),
     audioProcessApp:   Store.get('audioProcessApp',   ''),
@@ -143,6 +144,7 @@ function registerAll(app) {
     if (s.systemWithMic !== undefined) { Store.set('systemWithMic', !!s.systemWithMic); }   // Audio hệ thống kèm mic (renderer-only, áp 'Toàn hệ thống')
     if (s.saveHistory !== undefined) { Store.set('saveHistory', !!s.saveHistory); }   // tự lưu lịch sử phiên (renderer-only, IndexedDB)
     if (s.geminiVoice   !== undefined) { Store.set('geminiVoice', s.geminiVoice); state.geminiVoice = s.geminiVoice; try { geminiLive.onTargetLangChanged(); } catch {} }   // đổi giọng → nối lại phiên áp giọng mới
+    if (s.translateModel !== undefined) { const v = (s.translateModel === 'live-3.8') ? 'live-3.8' : 'live-translate'; Store.set('translateModel', v); state.translateModel = v; try { geminiLive.onTargetLangChanged(); } catch {} }   // đổi model dịch → phiên mới
     send('settings-saved', { ok: true });
   });
 

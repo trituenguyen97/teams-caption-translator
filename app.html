@@ -1393,6 +1393,13 @@
         <input type="password" id="s-apikey" placeholder="AIza…" autocomplete="off" spellcheck="false">
         <span id="s-apikey-status" style="font-size:11px;min-height:14px"></span>
       </div>
+      <div class="menu-row">
+        <span data-i18n="settings.translateModel">Model dịch</span>
+        <select id="s-translate-model">
+          <option value="live-translate">Gemini 3.5 Live Translate</option>
+          <option value="live-3.8">Gemini 3.8 Live</option>
+        </select>
+      </div>
 
       <div class="menu-sep"></div>
 
@@ -1616,6 +1623,7 @@
       _spView = (s.summaryView === 'md') ? 'md' : 'html';
       _systemWithMic = !!s.systemWithMic; if (sWithMic) sWithMic.checked = _systemWithMic;
       _saveHistory = s.saveHistory !== false; if (sSaveHistory) sSaveHistory.checked = _saveHistory;
+      if (sTranslateModel) sTranslateModel.value = (s.translateModel === 'live-3.8') ? 'live-3.8' : 'live-translate';
       _audioProcessName = s.audioProcessName || '';
       _audioProcessApp = s.audioProcessApp || '';
       try { renderEmpty(); } catch (e) {}
@@ -1891,6 +1899,7 @@
     const sWithMicRow   = document.getElementById('s-withmic-row');
     const sWithMic      = document.getElementById('s-withmic');
     const sSaveHistory  = document.getElementById('s-savehistory');
+    const sTranslateModel = document.getElementById('s-translate-model');
     const sProcess      = document.getElementById('s-app-list');
     const sAppSel       = document.getElementById('s-app-sel');
     const providerRadio = document.getElementById('provider-radio');
@@ -2003,6 +2012,10 @@
       if (sMicRow) sMicRow.style.display = (_currentSource === 'mic' || (_currentSource === 'system' && _systemWithMic)) ? '' : 'none';
       if (_systemWithMic && _currentSource === 'system') loadMicDevices(sMicDevice.value || '');   // hiện picker → nạp danh sách mic
       if (_recordingActive && _lastCaptureSource === 'system') { stopAudioCapture(); startAudioCapture('system'); }
+    });
+
+    sTranslateModel?.addEventListener('change', () => {   // Model dịch → main mở phiên mới với model đã chọn
+      api.saveSettings({ translateModel: sTranslateModel.value });
     });
 
     sSaveHistory?.addEventListener('change', () => {   // Tự lưu lịch sử phiên

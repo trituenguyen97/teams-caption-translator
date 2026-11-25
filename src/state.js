@@ -22,6 +22,7 @@ module.exports = {
   apiKey: '',
   geminiAudioOn: true,   // bật/tắt đọc to (TTS dịch)
   geminiVoice: 'Achernar',
+  translateModel: 'live-translate',   // 'live-translate' (gemini-3.5-live-translate-preview) | 'live-3.8' (gemini-3.8-live)
 
   // Yêu cầu tóm tắt RIÊNG do người dùng tự gõ trên app — chèn thêm vào prompt tóm tắt (giữ nguyên prompt gốc).
   summaryExtra: '',

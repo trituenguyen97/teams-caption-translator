@@ -81,6 +81,7 @@ app.whenReady().then(() => {
   state.apiKey        = Store.get('apiKey',        '');
   state.geminiAudioOn = Store.get('geminiAudioOn', true);
   state.geminiVoice   = Store.get('geminiVoice',   'Achernar');
+  state.translateModel = Store.get('translateModel', 'live-translate');
   state.summaryExtra  = Store.get('summaryExtra',   '');       // prompt tóm tắt riêng cũng dùng ở main
   state.theme         = Store.get('theme',         'auto');
   state.uiLang        = Store.get('uiLang',        'vi');
