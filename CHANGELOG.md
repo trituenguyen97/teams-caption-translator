@@ -5,6 +5,10 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+- Sửa lỗi chọn thu tiếng theo ứng dụng (vd Google Chrome) báo "không thu được tiếng" trong khi Toàn hệ thống vẫn chạy
+- Sửa giao diện "2 luồng": gốc và dịch hiện 2 cột trái/phải thay vì dồn chung một cột
+- Sửa lỗi thỉnh thoảng tự mất Auto cuộn khi có câu dài/nhiều câu mới
+
 ## 1.1.2 — 2026-11-25
 
 - Cài đặt: ô tick nằm đầu dòng, thẳng hàng với chữ (bấm cả dòng để tick)

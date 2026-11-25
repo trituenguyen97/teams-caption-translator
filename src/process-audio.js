@@ -42,12 +42,15 @@ function isSupported() {
 
 // Đoạn PowerShell dò TIẾN TRÌNH GỐC: đi NGƯỢC cây cha (ParentProcessId) tới khi cha là tiến trình hệ thống
 // (explorer/services/...) → gốc = app cha. KHÔNG dùng "PID nhỏ nhất" vì PID bị tái dùng (con có thể PID < cha).
+// PID bị Windows TÁI DÙNG: cha thật đã thoát, số PID của nó được cấp lại cho tiến trình KHÁC (có khi là chính con của app,
+// vd GPU process của Chrome) → đi ngược cây bị vòng lặp và dừng sai chỗ (thu nhầm GPU process → "không thu được tiếng").
+// Chặn: cha hợp lệ PHẢI được tạo TRƯỚC con (CreationDate) + không thăm lại PID đã đi qua.
 const PS_ROOT_FN =
-  "$all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name; "
-  + "$parent=@{}; $nameById=@{}; "
-  + "foreach($p in $all){ $parent[[int]$p.ProcessId]=[int]$p.ParentProcessId; $nameById[[int]$p.ProcessId]=$p.Name }; "
+  "$all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CreationDate; "
+  + "$parent=@{}; $nameById=@{}; $born=@{}; "
+  + "foreach($p in $all){ $parent[[int]$p.ProcessId]=[int]$p.ParentProcessId; $nameById[[int]$p.ProcessId]=$p.Name; $born[[int]$p.ProcessId]=$p.CreationDate }; "
   + "$stop='explorer.exe','services.exe','svchost.exe','wininit.exe','userinit.exe','winlogon.exe','runtimebroker.exe'; "
-  + "function Get-Root($id){ $cur=[int]$id; for($i=0;$i -lt 12;$i++){ $par=$parent[$cur]; if(-not $par -or $par -eq 0){break}; $pn=$nameById[$par]; if(-not $pn -or ($stop -contains $pn.ToLower())){break}; $cur=$par }; return $cur }; ";
+  + "function Get-Root($id){ $cur=[int]$id; $seen=@{}; for($i=0;$i -lt 12;$i++){ $seen[$cur]=1; $par=$parent[$cur]; if(-not $par -or $par -eq 0 -or $seen[$par]){break}; $pn=$nameById[$par]; if(-not $pn -or ($stop -contains $pn.ToLower())){break}; if($born[$par] -and $born[$cur] -and $born[$par] -gt $born[$cur]){break}; $cur=$par }; return $cur }; ";
 
 // Liệt kê APP: gom MỌI tiến trình theo TIẾN TRÌNH GỐC → app đa-tiến-trình (Chrome nhiều tab; Teams + WebView2)
 // gộp về 1 entry, pid = GỐC để thu INCLUDE_TARGET_PROCESS_TREE phủ HẾT cửa sổ/tab/meeting con (không sót tiếng).

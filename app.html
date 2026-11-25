@@ -660,7 +660,7 @@
     .list.lay-columns .entry-original { display: block; grid-column: 1; margin-bottom: 0; }   /* TRÁI = gốc */
     .list.lay-columns .entry-translated { grid-column: 2; }                                   /* PHẢI = dịch */
     /* dual: 2 luồng độc lập (gốc | dịch) — dựng bởi renderDual() */
-    .list.lay-dual { display: flex; gap: 14px; align-items: flex-start; }
+    .list.lay-dual { display: flex; flex-direction: row; gap: 14px; align-items: flex-start; }
     .list.lay-dual .dual-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .list.lay-dual .dual-line { white-space: pre-wrap; padding: 4px 0; border-bottom: 1px solid var(--m3-line); line-height: 1.5; }
     .list.lay-dual .dual-col.dual-o .dual-line { color: var(--m3-on-3); font-size: 12px; }
@@ -1802,9 +1802,20 @@
       _scrollPending = true;
       requestAnimationFrame(() => {
         _scrollPending = false;
-        if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+        if (autoScroll) _scrollToEnd();
       });
     }
+    // Cuộn TỨC THÌ (không smooth): .list có scroll-behavior:smooth → cuộn trượt phát sự kiện scroll khi CHƯA tới đáy,
+    // trước đây bị hiểu nhầm là người dùng cuộn lên → tự tắt Auto ("lâu lâu mất auto scroll").
+    function _scrollToEnd() { listEl.scrollTo({ top: listEl.scrollHeight, behavior: 'instant' }); }
+    // Chỉ coi là "người dùng cuộn" khi có THAO TÁC thật trong ~600ms gần nhất (lăn chuột/vuốt/phím/kéo thanh cuộn).
+    let _userScrollAt = 0;
+    const _markUserScroll = () => { _userScrollAt = Date.now(); };
+    listEl.addEventListener('wheel', _markUserScroll, { passive: true });
+    listEl.addEventListener('touchmove', _markUserScroll, { passive: true });
+    listEl.addEventListener('pointerdown', _markUserScroll, { passive: true });   // kéo thanh cuộn
+    listEl.addEventListener('keydown', e => { if (/^(ArrowUp|ArrowDown|PageUp|PageDown|Home|End| )$/.test(e.key)) _markUserScroll(); });
+    function _isUserScroll() { return Date.now() - _userScrollAt < 600; }
 
     // ── A1: hiện DẦN text nguồn của PARTIAL (mọc đơn điệu) → "chảy" mượt thay vì nhảy cục mỗi chunk ~560ms.
     //   Chỉ smooth partial (preview nguồn streaming); câu CHỐT hiện đủ ngay. 0 CPU inference (thuần render, rAF).
@@ -2708,17 +2719,15 @@
     scrollBtn.addEventListener('click', function () {
       autoScroll = !autoScroll;
       this.classList.toggle('active', autoScroll);
-      if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+      if (autoScroll) _scrollToEnd();
     });
 
     // Tự bật/tắt Auto theo vị trí cuộn: cuộn TỚI ĐÁY → tự bật Auto (không cần bấm tay);
     // cuộn LÊN đọc lịch sử → tự tắt Auto (để caption mới không kéo về đáy). Ngưỡng 40px.
     listEl.addEventListener('scroll', () => {
       const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
-      if (nearBottom !== autoScroll) {
-        autoScroll = nearBottom;
-        scrollBtn.classList.toggle('active', autoScroll);
-      }
+      if (nearBottom && !autoScroll) { autoScroll = true; scrollBtn.classList.add('active'); }                    // tới đáy → bật lại
+      else if (!nearBottom && autoScroll && _isUserScroll()) { autoScroll = false; scrollBtn.classList.remove('active'); }   // CHỈ tắt khi người dùng thật sự cuộn lên
     }, { passive: true });
 
     // Xuất — bấm nút mở popup chọn kiểu: bản gốc / cả hai / bản dịch (.txt)
@@ -3128,21 +3137,7 @@
     });
     // ── end Summary modal ──
 
-    // Tắt auto-scroll khi user cuộn lên — throttle bằng rAF (scroll fire hàng chục lần/cử chỉ;
-    // mỗi lần đọc scrollHeight/scrollTop/clientHeight là 1 layout read).
-    let _schPending = false;
-    listEl.addEventListener('scroll', () => {
-      if (_schPending) return;
-      _schPending = true;
-      requestAnimationFrame(() => {
-        _schPending = false;
-        const atBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 60;
-        if (!atBottom && autoScroll) {
-          autoScroll = false;
-          scrollBtn.classList.remove('active');
-        }
-      });
-    });
+    // (Listener tắt auto-scroll thứ 2 đã gộp vào listener phía trên — chỉ tắt khi có thao tác cuộn THẬT của người dùng.)
 
     function esc(s) {
       return String(s ?? '')
