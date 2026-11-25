@@ -5,6 +5,8 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+## 1.1.2 — 2026-11-25
+
 - Cài đặt: ô tick nằm đầu dòng, thẳng hàng với chữ (bấm cả dòng để tick)
 - Cài đặt: menu không còn bị thanh dưới che mất phần cuối (mục Phiên bản)
 
