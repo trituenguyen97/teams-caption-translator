@@ -321,4 +321,112 @@ async function summarizeReport(captions, facts, prevReport) {
   return { ok: false, error: lastErr };
 }
 
-module.exports = { summarize, summarizeFull, summarizeReport };
+// ══ TỔNG THỂ CAO CẤP: gemini-4-hydrogen (5 RPM · 20 RPD) ═══════════════════════════════════════
+// 1 lượt → { markdown: biên bản chuyên nghiệp, html: trang báo cáo trực quan DO MODEL TỰ THIẾT KẾ (CSS + SVG nội tuyến) }.
+// Không còn template cố định ở client. Panel hiển thị html trong iframe sandbox (không script) + nút đổi HTML↔MD.
+// Đếm lượt CỤC BỘ (API không trả quota còn lại): chỉ tăng khi request tới được model; 429-per-day → đánh dấu hết.
+// Ngày quota reset theo nửa đêm giờ Pacific (chuẩn Gemini API).
+const Store = require('./store');
+const HYDROGEN = { id: 'gemini-4-hydrogen', rpd: 20 };
+function _ptDay() { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date()); } catch { return new Date().toISOString().slice(0, 10); } }
+function hydrogenQuota() {
+  const q = Store.get('hydrogenQuota', null);
+  const used = (q && q.day === _ptDay()) ? Math.min(HYDROGEN.rpd, q.used | 0) : 0;
+  return { used, limit: HYDROGEN.rpd, remaining: HYDROGEN.rpd - used };
+}
+function _setHydrogenUsed(used) { Store.set('hydrogenQuota', { day: _ptDay(), used: Math.min(HYDROGEN.rpd, used) }); }
+
+// Schema 2 chuỗi: markdown TRƯỚC (đặt cuối thì model hay bỏ trống), html SAU. Không template cố định — model tự thiết kế trang.
+const OVERALL_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    markdown: { type: 'STRING', description: 'Biên bản cuộc họp dạng văn bản Markdown nhiều dòng, bắt đầu bằng "# ". KHÔNG phải JSON.' },
+    html: { type: 'STRING', description: 'Một tài liệu HTML5 hoàn chỉnh, tự chứa (<!doctype html>…</html>), CSS nội tuyến trong <style>, biểu đồ/sơ đồ bằng SVG nội tuyến. KHÔNG có <script>.' },
+  },
+  required: ['markdown', 'html'],
+  propertyOrdering: ['markdown', 'html'],
+};
+function _buildOverallPrompt(captions, facts) {
+  const L = _outLang();
+  return `Bạn là chuyên gia phân tích cuộc họp kiêm nhà thiết kế thông tin (information designer). Đọc TRANSCRIPT ở cuối (cuộc họp ĐÃ KẾT THÚC) và trả JSON gồm 2 chuỗi: "markdown" và "html".
+
+NGÔN NGỮ: toàn bộ nội dung viết bằng ${L}.
+
+THUẬT NGỮ: GIỮ NGUYÊN tiếng Anh/nguyên gốc thuật ngữ IT & tên riêng (bug, deploy, PR, API, sprint, release...). KATAKANA tiếng Nhật → khôi phục TIẾNG ANH gốc (デプロイ→deploy...), không dịch.
+TRUNG THỰC: chỉ dùng thông tin CÓ trong transcript. KHÔNG bịa người/deadline/số liệu/quyết định. Không rõ → "Chưa xác định". Số liệu trên biểu đồ phải đếm/ước lượng được từ transcript (vd số việc theo người/ưu tiên, tỉ trọng thảo luận theo chủ đề) — ghi rõ khi là ước lượng.
+
+━━ 1) "markdown" — BIÊN BẢN CUỘC HỌP CHUYÊN NGHIỆP ━━
+# <Tiêu đề cuộc họp>
+Dòng thông tin: ngày · thời lượng · thành phần (nếu biết)
+## 1. Tóm tắt điều hành (3-5 câu)
+## 2. Nội dung thảo luận (### theo từng chủ đề, gạch đầu dòng, **in đậm** ý chính)
+## 3. Quyết định đã thống nhất (bảng | # | Quyết định | Lý do | Phụ trách |)
+## 4. Việc cần làm (bảng | # | Việc | Phụ trách | Hạn | Ưu tiên |)
+## 5. Rủi ro & vấn đề còn mở
+## 6. Bước tiếp theo
+Mục không có nội dung → ghi "Không có".
+
+━━ 2) "html" — BÁO CÁO TRỰC QUAN (một trang, bạn TỰ THIẾT KẾ) ━━
+Mục tiêu: người đọc nắm cuộc họp trong 30 giây. TRỰC QUAN hơn CHỮ: ưu tiên thẻ số liệu, biểu đồ, sơ đồ, timeline, bảng, badge — chữ ngắn gọn (gạch đầu dòng ≤ 15 từ); chi tiết dài để ở markdown.
+Nội dung nên có (bỏ phần nào không có dữ liệu thật):
+- Phần mở đầu: tiêu đề + 1 câu kết quả chính + dải thẻ số liệu (số chủ đề, quyết định, việc cần làm, thời lượng, người tham gia…) + thông tin ngày/thời lượng/thành phần.
+- 1-3 BIỂU ĐỒ có ý nghĩa vẽ bằng SVG nội tuyến (vd donut tỉ trọng thảo luận theo chủ đề; cột ngang việc cần làm theo người phụ trách/ưu tiên), có nhãn + giá trị + chú thích.
+- SƠ ĐỒ tượng trưng bằng SVG hoặc HTML/CSS: luồng quy trình/luồng quyết định chính (hộp + mũi tên, nút quyết định dạng thoi), hoặc sơ đồ quan hệ vấn đề → nguyên nhân → giải pháp.
+- Chủ đề chính dạng lưới thẻ (icon emoji + tiêu đề + 2-3 ý + kết luận).
+- Quyết định đã chốt (thẻ nổi bật). Việc cần làm (bảng: việc · phụ trách · hạn · badge ưu tiên màu). Rủi ro/vấn đề mở (thẻ theo mức độ cao/trung bình/thấp).
+- Timeline các bước tiếp theo.
+Yêu cầu kỹ thuật BẮT BUỘC:
+- Tài liệu HTML5 HOÀN CHỈNH, TỰ CHỨA: <!doctype html><html lang="…"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>…</title><style>…</style></head><body>…</body></html>.
+- TUYỆT ĐỐI KHÔNG dùng <script>, thuộc tính sự kiện (onclick…), iframe, form, hay tài nguyên ngoài (ảnh/CDN/font từ mạng) — trang hiển thị trong khung KHÔNG chạy JavaScript và phải xem được offline. Font: system-ui/Segoe UI/sans-serif.
+- Biểu đồ/sơ đồ: SVG nội tuyến có viewBox (co giãn theo bề rộng), hoặc HTML/CSS thuần (flex/grid, thanh bar bằng width %).
+- Responsive: đẹp ở khung hẹp ~420px (panel cạnh) lẫn màn rộng; dùng grid auto-fit, max-width ~1100px, căn giữa.
+- KHÔNG được tràn ngang: *{box-sizing:border-box}, phần tử flex/grid con đặt min-width:0, chữ dài cho xuống dòng (overflow-wrap:anywhere), bảng rộng bọc trong khung overflow-x:auto, SVG width:100% height:auto.
+- Thẩm mỹ chuyên nghiệp, hiện đại: bảng màu hài hoà 1 màu chủ đạo + 2-3 màu nhấn, nền sáng, độ tương phản đọc tốt, bo góc, khoảng trắng thoáng, phân cấp tiêu đề rõ, @media print gọn gàng.
+${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}
+---
+TRANSCRIPT:
+${_toLines(captions)}`;
+}
+// Gỡ phần chạy được khỏi HTML do model sinh (phòng thủ thêm — iframe đã sandbox không script; file xuất ra mở bằng trình duyệt).
+function _sanitizeHtml(h) {
+  return String(h || '')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script\b[^>]*>/gi, '')
+    .replace(/<(iframe|object|embed|form)\b[\s\S]*?(<\/\1\s*>|$)/gi, '')
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/(href|src|xlink:href)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"')
+    .trim();
+}
+// Trả { ok, report, model, quota } | { ok:false, error, quota }. error 'quota-exhausted' → caller fallback flash-lite/gemma.
+async function summarizeOverall(captions, facts) {
+  captions = captions || [];
+  if (!state.apiKey || !String(state.apiKey).trim()) return { ok: false, error: 'no-key', quota: hydrogenQuota() };
+  if (!captions.length) return { ok: false, error: 'empty', quota: hydrogenQuota() };
+  if (hydrogenQuota().remaining <= 0) return { ok: false, error: 'quota-exhausted', quota: hydrogenQuota() };
+  const ai = await _ai();
+  const prompt = _buildOverallPrompt(captions, facts);
+  let lastErr = 'failed';
+  for (let attempt = 0; attempt < 3; attempt++) {   // 503 (quá tải) → thử lại sau 3s/8s; KHÔNG tính lượt khi lỗi
+    try {
+      const config = { temperature: 0.3, maxOutputTokens: 32768, responseMimeType: 'application/json', responseSchema: OVERALL_SCHEMA };
+      const res = await ai.models.generateContent({ model: HYDROGEN.id, contents: prompt, config });
+      _setHydrogenUsed(hydrogenQuota().used + 1);   // request đã tới model & trả về → đã tiêu 1 lượt RPD
+      const text = (res && (typeof res.text === 'string' ? res.text : (res.text && res.text()))) || '';
+      const obj = _parseJson(text) || {};
+      const html = _sanitizeHtml(obj.html);
+      let markdown = typeof obj.markdown === 'string' ? obj.markdown.trim() : '';
+      const hi = markdown.indexOf('#'); if (hi > 0 && hi < 200) markdown = markdown.slice(hi);   // bỏ câu dẫn trước tiêu đề
+      if (!/<html[\s>]/i.test(html) && markdown.length < 100) return { ok: false, error: 'empty-or-invalid-output', quota: hydrogenQuota() };
+      return { ok: true, report: { html: /<html[\s>]/i.test(html) ? html : '', markdown, model: HYDROGEN.id }, model: HYDROGEN.id, quota: hydrogenQuota() };
+    } catch (e) {
+      const msg = (e && e.message) || String(e); lastErr = msg;
+      console.warn(`[gemini-text] hydrogen (lần ${attempt + 1}): ${msg}`);
+      if (_isQuota(msg)) { if (/per\s*day|perday|daily|RequestsPerDay/i.test(msg)) _setHydrogenUsed(HYDROGEN.rpd); return { ok: false, error: 'quota-exhausted', quota: hydrogenQuota() }; }
+      if (!/\b503\b|UNAVAILABLE|overloaded|high demand|\b500\b|INTERNAL/i.test(msg)) break;
+      await new Promise(r => setTimeout(r, attempt ? 8000 : 3000));
+    }
+  }
+  return { ok: false, error: lastErr, quota: hydrogenQuota() };
+}
+
+module.exports = { summarize, summarizeFull, summarizeReport, summarizeOverall, hydrogenQuota };

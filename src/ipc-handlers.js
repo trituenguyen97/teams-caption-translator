@@ -167,6 +167,12 @@ function registerAll(app) {
     try { const p = payload || {}; return await geminiText.summarizeReport(p.captions || [], p.facts || null, p.prevReport || null); }
     catch (e) { return { ok: false, error: e.message }; }
   });
+  // Tổng thể CAO CẤP (gemini-4-hydrogen, 20 lượt/ngày): JSON dashboard + markdown biên bản. Chỉ gọi khi đã dừng dịch.
+  ipcMain.handle('summarize-overall', async (_, payload) => {
+    try { const p = payload || {}; return await geminiText.summarizeOverall(p.captions || [], p.facts || null); }
+    catch (e) { return { ok: false, error: e.message, quota: geminiText.hydrogenQuota() }; }
+  });
+  ipcMain.handle('hydrogen-quota', () => geminiText.hydrogenQuota());
   ipcMain.handle('export-summary', async (_, opts = {}) => {
     try {
       const { filePath, canceled } = await dialog.showSaveDialog(state.win, {
