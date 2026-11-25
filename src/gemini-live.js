@@ -184,10 +184,41 @@ function _mergeEmptyRows(rows, turnEnd) {
   const out = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i], emptyT = r.o && !(r.t && r.t.trim()), lastOne = i === rows.length - 1;
+    if (emptyT && _isTargetLang(r.o)) { out.push({ o: '', t: r.o }); continue; }   // nói trùng ngôn ngữ đích → tự là "bản dịch"
     if (emptyT && out.length && (!lastOne || turnEnd)) out[out.length - 1].o = (out[out.length - 1].o + ' ' + r.o).trim();
     else out.push({ o: r.o, t: r.t });
   }
   return out;
+}
+// ── Câu GỐC đã ở NGÔN NGỮ ĐÍCH? (model không dịch → app phải tự hiện nó ở cột dịch, KHÔNG gộp vào hàng khác) ──
+// Theo bộ chữ: vi = Latin + dấu tiếng Việt; en = Latin không dấu Việt; ja = có kana; ko = hangul; zh = chữ Hán, không kana.
+const _RX = { kana: /[\u3040-\u30ff\u31f0-\u31ff]/g, han: /[\u4e00-\u9fff\u3400-\u4dbf]/g, hangul: /[\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]/g,
+  latin: /[A-Za-z\u00c0-\u024f\u1e00-\u1eff]/g, viMark: /[ăâđêôơưĂÂĐÊÔƠƯ\u0300-\u0323\u1ea0-\u1ef9]/g };
+function _cnt(t, rx) { const m = t.match(rx); return m ? m.length : 0; }
+function _isTargetLang(text, code) {
+  const t = (text || '').normalize('NFC');
+  code = code || state.langCode;
+  const kana = _cnt(t, _RX.kana), han = _cnt(t, _RX.han), hangul = _cnt(t, _RX.hangul), latin = _cnt(t, _RX.latin), vi = _cnt(t, _RX.viMark);
+  const letters = kana + han + hangul + latin;
+  if (letters < 2) return false;   // câu chỉ có số/ký hiệu → không kết luận
+  switch (code) {
+    case 'vi': return latin / letters >= 0.8 && vi >= 1 && (vi >= 2 || latin <= 12);
+    case 'en': return latin / letters >= 0.9 && vi === 0;
+    case 'ja': return kana >= 1 && (kana + han) / letters >= 0.5;
+    case 'ko': return hangul / letters >= 0.5;
+    case 'zh': return kana === 0 && han / letters >= 0.5;
+    default: return false;
+  }
+}
+// Câu gốc trùng ngôn ngữ đích nằm ĐẦU phần chưa chốt (mọi câu trước đã chốt) → CHỐT NGAY thành hàng riêng (gốc → cột dịch).
+function _commitTargetHead() {
+  const rest = _inAcc.slice(_cInPos), sents = _splitPos(rest), done = _doneCount(rest);
+  let k = 0; while (k < done && _isTargetLang(sents[k].text)) k++;
+  if (!k) return false;
+  for (let i = 0; i < k; i++) _emitRow(_lineBase + i, '', sents[i].text, false);
+  _lineBase += k; _cInPos += sents[k - 1].end; _inT = _inT.slice(k);
+  _maxId = Math.max(_maxId, _lineBase - 1); _decLastAsk = '';
+  return true;
 }
 function _tHasContent(t) { const segs = _splitVI(t || ''); return segs.length ? segs.some(s => !_VI_FILLER.test(s.trim())) : false; }
 function _emitRow(id, o, t, partial) {
@@ -207,6 +238,7 @@ function _schedulePump() { if (_pumpTimer) return; _pumpTimer = setTimeout(() =>
 function _pump(final) {
   clearTimeout(_pumpTimer); _pumpTimer = null;
   const turnEnd = final && _turnEnded;
+  _commitTargetHead();   // câu nói trùng ngôn ngữ đích ở đầu hàng đợi → hiện ngay, không chờ 2.5s / không bị gộp
   const inRest = _inAcc.slice(_cInPos), outRest = _outAcc.slice(_cOutPos);   // chỉ phần CHƯA CHỐT
   const inSent = _splitPos(inRest);
   const outSent = _splitPos(outRest);
@@ -220,9 +252,27 @@ function _pump(final) {
   let rows;
   if (nIn > 0 && nOut > 0) {
     _noTransTurn = false;   // CÓ bản dịch → không phải lượt trùng ngôn ngữ
-    rows = _fillerPostproc(_alignTimeRows(inSent.slice(0, nIn), outSent.slice(0, nOut), _inT, _outT, outRest.length / Math.max(1, inRest.length)));
+    // Câu gốc trùng ngôn ngữ đích KHÔNG có bản dịch → loại khỏi T1C (khỏi bị ghép nhầm với bản dịch câu bên cạnh),
+    // căn phần còn lại rồi chèn lại thành hàng riêng ngay sau hàng chứa câu gốc đứng trước nó.
+    const srcAll = inSent.slice(0, nIn), keepIdx = [], tgtAt = [];
+    srcAll.forEach((x, i) => (_isTargetLang(x.text) ? tgtAt : keepIdx).push(i));
+    const srcK = keepIdx.map(i => srcAll[i]), inTK = keepIdx.map(i => _inT[i]);
+    rows = srcK.length ? _fillerPostproc(_alignTimeRows(srcK, outSent.slice(0, nOut), inTK, _outT, outRest.length / Math.max(1, inRest.length))) : [];
     rows = rows.filter(r => !(_isFillerSrc(r.o) && !_tHasContent(r.t)));   // ẩn BACK-CHANNEL: gốc filler mà dịch rỗng (はい→Vâng)
     rows = _mergeEmptyRows(rows, turnEnd);
+    if (tgtAt.length) {
+      const nz = x => (x || '').replace(/\s+/g, '');
+      const out2 = rows.slice(), placed = [];
+      for (const i of tgtAt) {
+        let at = 0;   // vị trí chèn: sau hàng có chứa câu gốc (không trùng ngôn ngữ) gần nhất đứng trước
+        for (let q = i - 1; q >= 0 && !at; q--) {
+          if (tgtAt.includes(q)) { const pi = placed.findIndex(e => e.i === q); if (pi >= 0) at = out2.indexOf(placed[pi].row) + 1; continue; }
+          const k = out2.findIndex(r => nz(r.o).includes(nz(srcAll[q].text))); if (k >= 0) at = k + 1;
+        }
+        const row = { o: '', t: srcAll[i].text }; out2.splice(at, 0, row); placed.push({ i, row });
+      }
+      rows = out2;
+    }
   } else if (nIn > 0 && (final || _noTransTurn)) {   // có GỐC nhưng KHÔNG có dịch (nói trùng ngôn ngữ đích) → echo lời gốc
     _noTransTurn = true;
     rows = inSent.slice(0, nIn).map(s => ({ o: '', t: s.text }));
@@ -232,7 +282,8 @@ function _pump(final) {
   if (!turnEnd) {   // dòng LIVE: câu chưa đủ dấu chấm
     const oPrev = inSent.slice(nIn).map(s => s.text).join('\n').trim();
     const tPrev = outSent.slice(nOut).map(s => s.text).join('\n').trim();
-    if (oPrev || tPrev) { _emitRow(nextId, oPrev, tPrev, true); nextId++; }
+    if (!tPrev && oPrev && _isTargetLang(oPrev)) { _emitRow(nextId, '', oPrev, true); nextId++; }   // đang nói trùng ngôn ngữ đích → hiện luôn ở cột dịch
+    else if (oPrev || tPrev) { _emitRow(nextId, oPrev, tPrev, true); nextId++; }
   }
   _trimRowsFrom(nextId);
   if (turnEnd) { _lineBase += rows.length; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _resetCommit(); _clearTurn(); }
@@ -292,6 +343,10 @@ function _commitFromDecision(src, out, answers, key) {
   const rows = []; let pendO = [];
   for (let s = 0; s < upto; s++) {
     const ts = out.filter((_, j) => asg[j] === s).map(x => x.text);
+    if (!ts.length && _isTargetLang(src[s].text)) {   // nói trùng ngôn ngữ đích → model không dịch → hàng riêng
+      if (pendO.length) { if (rows.length) rows[rows.length - 1].o += ' ' + pendO.join(' '); else rows.push({ o: pendO.join(' '), t: '' }); pendO = []; }
+      rows.push({ o: '', t: src[s].text }); continue;
+    }
     pendO.push(src[s].text);
     if (!ts.length) continue;                     // câu gốc chưa/không có bản dịch riêng → gộp vào hàng kế
     rows.push({ o: pendO.join(' '), t: ts.join(' ') }); pendO = [];

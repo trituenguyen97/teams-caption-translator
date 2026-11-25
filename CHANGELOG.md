@@ -5,6 +5,8 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+- Sửa lỗi nói cùng ngôn ngữ đích (vd chen câu tiếng Việt trong cuộc họp tiếng Nhật) bị mất hoặc không hiển thị: câu đó giờ hiện ngay ở cột dịch thành hàng riêng
+
 ## 1.1.0 — 2026-11-25
 
 - Tự cập nhật: mở app sẽ kiểm tra phiên bản mới, Cài đặt hiện thông báo + ghi chú thay đổi + nút Cập nhật & khởi động lại
