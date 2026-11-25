@@ -3,9 +3,53 @@
   "version": "1.0.0",
   "description": "Dịch caption cuộc họp realtime qua Gemini 3.5 Live Translate (audio → STT + dịch + TTS)",
   "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "release": "node scripts/release.mjs"
+  },
   "dependencies": {
     "@google/genai": "^2.9.0",
     "application-loopback": "1.2.7",
     "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.28.1"
+  },
+  "build": {
+    "appId": "com.teamscaptiontranslator",
+    "productName": "Caption Translator",
+    "asar": true,
+    "compression": "maximum",
+    "win": {
+      "target": "nsis",
+      "artifactName": "CaptionTranslator-Setup-${version}.${ext}"
+    },
+    "files": [
+      "main.js",
+      "src/**",
+      "preload.js",
+      "app.html",
+      "node_modules/**/*",
+      "!node_modules/**/*.{ts,map,md,markdown}",
+      "!node_modules/**/*.d.ts",
+      "!node_modules/**/{test,tests,__tests__,example,examples,.github,docs,doc}/**"
+    ],
+    "asarUnpack": [
+      "node_modules/application-loopback/**",
+      "node_modules/@google/genai/**"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://update.gin.info.vn/"
+      }
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
   }
 }
