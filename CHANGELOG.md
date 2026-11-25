@@ -5,6 +5,8 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+## 1.2.0 — 2026-11-25
+
 - Báo cáo tổng có thêm chế độ ▶ Slide: bộ trình chiếu kiểu Claude Design (nền kem, nhấn terracotta, mỗi quyết định 1 slide, chuyển động mượt) — phím ←/→ chuyển slide, F toàn màn hình, N lời thoại người trình bày, G lưới slide, A tự chạy, Ctrl+P in PDF
 - Sửa lỗi dấu tiếng Việt bị lệch trong tiêu đề báo cáo/slide
 
