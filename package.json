@@ -1,6 +1,6 @@
 {
   "name": "teams-caption-translator",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Dịch caption cuộc họp realtime qua Gemini 3.5 Live Translate (audio → STT + dịch + TTS)",
   "main": "main.js",
   "scripts": {
