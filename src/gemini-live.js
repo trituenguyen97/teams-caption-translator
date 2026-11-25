@@ -54,7 +54,20 @@ let _handle = null;
 let _reconnectTimer = null, _emitTimer = null, _flushTimer = null, _pumpTimer = null;
 let _lineBase = 1, _inAcc = '', _outAcc = '', _turnEnded = false;   // _lineBase=id hàng đầu của LƯỢT hiện tại
 const _rowTs = {};   // id hàng → mốc thời gian (đặt 1 lần)
-let _inT = [], _outT = [];   // mốc thời gian (ms) câu GỐC/DỊCH thứ k/j hoàn thành → neo căn T1C
+let _inT = [], _outT = [];   // mốc thời gian (ms) câu GỐC/DỊCH thứ k/j (TÍNH TỪ điểm chốt) hoàn thành → neo căn T1C
+// ── CHỐT HÀNG bằng Gemini Decision 1 (Decisions API: 200 RPM · 50K TPM · 10K RPD) ──
+// Live API trả 2 luồng chữ RỜI (gốc / dịch), không cho biết câu nào ứng câu nào → T1C chỉ ĐOÁN theo thời gian + độ dài,
+// lượt dài/câu dài là lệch lan. Giờ: cứ ≥DEC_MIN_OUT câu dịch đã xong → hỏi Decision "câu dịch (x) thuộc câu gốc số mấy?"
+// (1 request hỏi mọi câu, ~0.5-1s) → nhóm theo câu gốc → CHỐT CỨNG các hàng (không vẽ lại, lỗi không lan). Phần chưa chốt
+// vẫn hiển thị tạm bằng T1C. Decision lỗi/429 → cooldown, tự quay về T1C như cũ.
+let _cInPos = 0, _cOutPos = 0;   // vị trí ký tự đã CHỐT trong _inAcc/_outAcc của lượt hiện tại
+let _decBusy = false, _decCooldownUntil = 0, _decLastAt = 0, _decTurn = 0;
+const DEC_URL = 'https://generativelanguage.googleapis.com/v1beta/decisions';
+const DEC_MODEL = 'gemini-decision-1';
+const DEC_MIN_OUT = 3;        // ≥3 câu dịch xong (chưa chốt) mới hỏi → ~2-3 request/phút khi nói liên tục
+const DEC_MAX_SRC = 14;       // cửa sổ câu gốc gửi đi (criteria tối đa 255; giữ nhỏ cho nhanh/rẻ)
+const DEC_MIN_GAP_MS = 1200;  // giãn cách tối thiểu giữa 2 request
+const DEC_MIN_CONF = 0.5;     // dưới ngưỡng → coi như thuộc cùng câu gốc với câu dịch trước
 const _emit = {};    // id → khoá nội dung đã gửi (chỉ vẽ lại hàng ĐỔI)
 let _maxId = 0;
 let _audioBuf = [], _audioSamples = 0, _audioIdleTimer = null, _audioBreakTimer = null;
@@ -184,10 +197,11 @@ function _schedulePump() { if (_pumpTimer) return; _pumpTimer = setTimeout(() =>
 function _pump(final) {
   clearTimeout(_pumpTimer); _pumpTimer = null;
   const turnEnd = final && _turnEnded;
-  const inSent = _splitPos(_inAcc);
-  const outSent = _splitPos(_outAcc);
-  const jaDone = _doneCount(_inAcc);
-  const viDone = _doneCount(_outAcc);
+  const inRest = _inAcc.slice(_cInPos), outRest = _outAcc.slice(_cOutPos);   // chỉ phần CHƯA CHỐT
+  const inSent = _splitPos(inRest);
+  const outSent = _splitPos(outRest);
+  const jaDone = _doneCount(inRest);
+  const viDone = _doneCount(outRest);
   const nIn = turnEnd ? inSent.length : jaDone;
   const nOut = turnEnd ? outSent.length : viDone;
   const _now = Date.now();
@@ -196,7 +210,7 @@ function _pump(final) {
   let rows;
   if (nIn > 0 && nOut > 0) {
     _noTransTurn = false;   // CÓ bản dịch → không phải lượt trùng ngôn ngữ
-    rows = _fillerPostproc(_alignTimeRows(inSent.slice(0, nIn), outSent.slice(0, nOut), _inT, _outT, _outAcc.length / Math.max(1, _inAcc.length)));
+    rows = _fillerPostproc(_alignTimeRows(inSent.slice(0, nIn), outSent.slice(0, nOut), _inT, _outT, outRest.length / Math.max(1, inRest.length)));
     rows = rows.filter(r => !(_isFillerSrc(r.o) && !_tHasContent(r.t)));   // ẩn BACK-CHANNEL: gốc filler mà dịch rỗng (はい→Vâng)
     rows = _mergeEmptyRows(rows, turnEnd);
   } else if (nIn > 0 && (final || _noTransTurn)) {   // có GỐC nhưng KHÔNG có dịch (nói trùng ngôn ngữ đích) → echo lời gốc
@@ -211,11 +225,76 @@ function _pump(final) {
     if (oPrev || tPrev) { _emitRow(nextId, oPrev, tPrev, true); nextId++; }
   }
   _trimRowsFrom(nextId);
-  if (turnEnd) { _lineBase += rows.length; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _clearTurn(); }
+  if (turnEnd) { _lineBase += rows.length; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _resetCommit(); _clearTurn(); }
+  else if (nIn >= 2 && nOut >= DEC_MIN_OUT) _maybeDecide(inSent.slice(0, nIn), outSent.slice(0, nOut));
+}
+function _resetCommit() { _cInPos = 0; _cOutPos = 0; _decTurn++; }   // _decTurn++ → kết quả Decision đang bay của lượt cũ bị bỏ
+
+// Gọi Decision cho các câu ĐÃ XONG chưa chốt. src/out = [{text,end}] (end tương đối từ _cInPos/_cOutPos).
+async function _maybeDecide(src, out) {
+  const now = Date.now();
+  if (_decBusy || now < _decCooldownUntil || now - _decLastAt < DEC_MIN_GAP_MS || !isConfigured()) return;
+  src = src.slice(0, DEC_MAX_SRC);
+  if (src.length < 2) return;
+  _decBusy = true; _decLastAt = now;
+  const turn = _decTurn, inBase = _cInPos, outBase = _cOutPos;
+  const inSnap = _inAcc.slice(inBase, inBase + src[src.length - 1].end);
+  const outSnap = _outAcc.slice(outBase, outBase + out[out.length - 1].end);
+  try {
+    const key = j => 't' + (j + 1);
+    const input = 'Câu GỐC:\n' + src.map((x, i) => `[${i + 1}] ${x.text}`).join('\n')
+      + '\n\nCâu DỊCH (bản dịch nối tiếp của các câu gốc, theo đúng thứ tự):\n' + out.map((x, j) => `(${key(j)}) ${x.text}`).join('\n');
+    const criteria = {}; src.forEach((_, i) => { criteria[String(i + 1)] = `câu gốc [${i + 1}]`; });
+    const questions = {}; out.forEach((_, j) => { questions[key(j)] = { type: 'choice', instructions: `Câu DỊCH (${key(j)}) là bản dịch (toàn bộ hoặc một phần) của câu GỐC số mấy?`, criteria }; });
+    const res = await fetch(DEC_URL, { method: 'POST', headers: { 'x-goog-api-key': String(state.apiKey).trim(), 'content-type': 'application/json' }, body: JSON.stringify({ model: DEC_MODEL, input, questions }) });
+    if (res.status === 429) { _decCooldownUntil = Date.now() + 10 * 60e3; console.warn('[align] Decision 429 → T1C 10 phút'); return; }
+    if (!res.ok) { _decCooldownUntil = Date.now() + 60e3; console.warn('[align] Decision HTTP ' + res.status + ' → T1C 1 phút'); return; }
+    const j = await res.json();
+    // Bỏ nếu: đã sang lượt mới / đã chốt chỗ khác / văn bản phần đã gửi bị model sửa lại.
+    if (turn !== _decTurn || inBase !== _cInPos || outBase !== _cOutPos) return;
+    if (_inAcc.slice(inBase, inBase + inSnap.length) !== inSnap || _outAcc.slice(outBase, outBase + outSnap.length) !== outSnap) return;
+    _commitFromDecision(src, out, (j && j.answers) || {}, key);
+  } catch (e) {
+    _decCooldownUntil = Date.now() + 30e3; console.warn('[align] Decision lỗi:', e && e.message);
+  } finally { _decBusy = false; }
+}
+
+// Gán câu dịch → câu gốc (đơn điệu tăng), nhóm theo câu gốc, CHỐT mọi nhóm TRƯỚC câu gốc cuối cùng được gán
+// (nhóm cuối có thể còn nhận thêm bản dịch → để T1C hiển thị tạm, lần Decision sau chốt).
+function _commitFromDecision(src, out, answers, key) {
+  const asg = [];
+  for (let j = 0; j < out.length; j++) {
+    const a = answers[key(j)];
+    let c = a && a.choice ? parseInt(a.choice, 10) - 1 : NaN;
+    const prev = j ? asg[j - 1] : 0;
+    if (!(c >= 0 && c < src.length) || !(a.confidence >= DEC_MIN_CONF)) c = prev;   // không chắc → theo câu dịch trước
+    asg.push(Math.max(c, prev));                                                      // không cho nhảy ngược
+  }
+  const lastC = asg[asg.length - 1];
+  if (lastC <= 0) return;   // mọi câu dịch đều thuộc câu gốc đầu → chưa có gì chốt được
+  const rows = []; let pendO = [];
+  for (let s = 0; s < lastC; s++) {
+    const ts = out.filter((_, j) => asg[j] === s).map(x => x.text);
+    pendO.push(src[s].text);
+    if (!ts.length) continue;                     // câu gốc chưa/không có bản dịch riêng → gộp vào hàng kế
+    rows.push({ o: pendO.join(' '), t: ts.join(' ') }); pendO = [];
+  }
+  if (!rows.length) return;
+  if (pendO.length) rows[rows.length - 1].o += ' ' + pendO.join(' ');   // câu gốc lẻ cuối (không dịch riêng) → gộp vào hàng trước
+  let nOutC = 0; while (nOutC < out.length && asg[nOutC] < lastC) nOutC++;
+  if (!nOutC) return;
+  const fin = rows;   // KHÔNG _fillerPostproc: heuristic đó vá lỗi T1C; Decision đã ghép theo nghĩa (なるほど↔Ra vậy là đúng)
+  for (let i = 0; i < fin.length; i++) _emitRow(_lineBase + i, fin[i].o, fin[i].t, false);
+  _lineBase += fin.length;
+  _cInPos += src[lastC - 1].end; _cOutPos += out[nOutC - 1].end;
+  _inT = _inT.slice(lastC); _outT = _outT.slice(nOutC);
+  _maxId = Math.max(_maxId, _lineBase - 1);
+  console.log(`[align] Decision chốt ${fin.length} hàng (${lastC} câu gốc ↔ ${nOutC} câu dịch)`);
+  _schedulePump();   // vẽ lại phần còn lại (dòng tạm) từ _lineBase mới
 }
 function _flush() { clearTimeout(_emitTimer); clearTimeout(_flushTimer); _pump(true); }
 function _clearTurn() { for (const k in _emit) delete _emit[k]; for (const k in _rowTs) delete _rowTs[k]; _maxId = _lineBase - 1; _noTransTurn = false; }
-function _endTurnHard() { _lineBase = _maxId + 1; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _clearTurn(); }
+function _endTurnHard() { _lineBase = _maxId + 1; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _turnEnded = false; _resetCommit(); _clearTurn(); }
 
 // ── Audio TTS: gom ~0.4s rồi phát trọn 1 lần (Node Buffer) ──
 function _flushAudio(reason) {
@@ -326,7 +405,7 @@ function start() {
   if (_started) return;
   if (!isConfigured()) { send('gemini-status', { error: 'no-key' }); return; }
   // KHÔNG reset _lineBase: id phải TĂNG ĐƠN ĐIỆU xuyên start/stop (renderer chỉ xoá list khi bấm Clear).
-  _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _clearTurn(); _resetAudio();
+  _started = true; _handle = null; _inAcc = ''; _outAcc = ''; _inT = []; _outT = []; _resetCommit(); _clearTurn(); _resetAudio();
   _ensure().catch(() => {});
   console.log('[live-translate] start');
 }
