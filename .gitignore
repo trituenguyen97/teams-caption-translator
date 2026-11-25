@@ -57,3 +57,4 @@ extension/mp3-exp/
 #    Nếu repo lỡ public / rò rỉ → PHẢI đổi khoá (re-key, ID đổi) + mọi người chạy lại apply-policy.bat.
 !extension.pem
 
+build/release-notes.md

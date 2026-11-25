@@ -1,6 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('__caption', {
+  // Cập nhật phiên bản (electron-updater)
+  onUpdateStatus:  cb => ipcRenderer.on('update-status', (_, d) => cb(d)),
+  updateGet:       () => ipcRenderer.invoke('update-get'),
+  updateCheck:     () => ipcRenderer.invoke('update-check'),
+  updateInstall:   () => ipcRenderer.invoke('update-install'),
   // main → renderer
   onStatus:        cb => ipcRenderer.on('status',         (_, d) => cb(d)),
   onBusy:          cb => ipcRenderer.on('busy',           (_, d) => cb(d)),

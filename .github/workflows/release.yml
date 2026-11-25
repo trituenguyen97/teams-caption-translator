@@ -1,0 +1,87 @@
+# Push tag vX.Y.Z (npm run release -- patch|minor|major) → build bản cài Windows → đưa lên VPS (update.gin.info.vn).
+# App đang chạy kiểm tra latest.yml lúc mở → hiện "Có bản mới" + ghi chú thay đổi trong Cài đặt.
+#
+# Secrets cần có (Settings → Secrets and variables → Actions):
+#   VPS_SSH_KEY     — private key user ctdeploy (chỉ ghi được /srv/ctupdate, không sudo)
+#   VPS_KNOWN_HOSTS — dòng ssh-keyscan của VPS (chống MITM)
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write   # tạo GitHub Release (bản sao lưu)
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  VPS_HOST: 163.192.37.48
+  VPS_USER: ctdeploy
+  VPS_DIR: /srv/ctupdate
+  KEEP_VERSIONS: 5
+
+jobs:
+  build-deploy:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Kiểm tra tag khớp package.json
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          P=$(node -p "require('./package.json').version")
+          [ "$V" = "$P" ] || { echo "::error::Tag $GITHUB_REF_NAME ≠ package.json $P"; exit 1; }
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: Lấy ghi chú thay đổi từ CHANGELOG.md
+        run: |
+          mkdir -p build
+          awk -v v="$VERSION" '
+            $0 ~ "^## "v"( |$)" {on=1; next}
+            on && /^## / {exit}
+            on {print}' CHANGELOG.md | sed '/./,$!d' > build/release-notes.md
+          [ -s build/release-notes.md ] || echo "- Bản v$VERSION" > build/release-notes.md
+          cat build/release-notes.md
+
+      - run: npm ci
+
+      - name: Build bản cài Windows (NSIS + latest.yml)
+        run: npx electron-builder --win --publish never -c.releaseInfo.releaseNotesFile=build/release-notes.md
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload lên VPS (exe + blockmap trước, latest.yml SAU CÙNG)
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          SSH="ssh -i $HOME/.ssh/deploy -o BatchMode=yes -o StrictHostKeyChecking=yes"
+          EXE="dist/CaptionTranslator-Setup-$VERSION.exe"
+          ls -la dist/*.exe dist/*.blockmap dist/latest.yml
+          scp -i ~/.ssh/deploy -o BatchMode=yes "$EXE" "$EXE.blockmap" "$VPS_USER@$VPS_HOST:$VPS_DIR/"
+          # latest.yml ghi qua file tạm rồi mv → app không bao giờ đọc phải file dở dang
+          scp -i ~/.ssh/deploy -o BatchMode=yes dist/latest.yml "$VPS_USER@$VPS_HOST:$VPS_DIR/latest.yml.tmp"
+          $SSH "$VPS_USER@$VPS_HOST" "mv -f $VPS_DIR/latest.yml.tmp $VPS_DIR/latest.yml && cd $VPS_DIR && ls -1t CaptionTranslator-Setup-*.exe | tail -n +$((KEEP_VERSIONS+1)) | while read f; do rm -f \"\$f\" \"\$f.blockmap\"; done; ls -la $VPS_DIR"
+          rm -f ~/.ssh/deploy
+
+      - name: GitHub Release (sao lưu bản cài)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "v$VERSION" --notes-file build/release-notes.md \
+            "dist/CaptionTranslator-Setup-$VERSION.exe" dist/latest.yml || echo "::warning::không tạo được GitHub Release"

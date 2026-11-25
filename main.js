@@ -97,6 +97,7 @@ app.whenReady().then(() => {
   Store.set('captureSource', cs);
 
   registerAll(app);
+  require('./src/updater').init();   // kiểm tra phiên bản mới (chỉ bản đã đóng gói)
   createWindow();
   startService();
 

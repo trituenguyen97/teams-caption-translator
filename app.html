@@ -1126,6 +1126,20 @@
     /* separator giữa các nhóm trong menu */
     .app-menu .menu-sep { height: 1px; background: var(--m3-line); margin: 4px 6px; }
     .app-menu .menu-row { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 8px; }
+    /* Cập nhật phiên bản */
+    #menu-btn.has-update { position: relative; }
+    #menu-btn.has-update::after { content:""; position:absolute; top:4px; right:4px; width:8px; height:8px; border-radius:50%; background:#e5484d; box-shadow:0 0 0 2px var(--m3-surface, #1e1e1e); }
+    .upd-box { border:1px solid #3794ff; background:rgba(55,148,255,.10); border-radius:10px; padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
+    .upd-box .upd-title { font-weight:700; font-size:12.5px; }
+    .upd-notes { font-size:11.5px; line-height:1.45; max-height:180px; overflow:auto; color:var(--m3-on-2); }
+    .upd-notes h1,.upd-notes h2,.upd-notes h3 { font-size:12px; margin:6px 0 2px; }
+    .upd-notes ul { margin:2px 0; padding-left:16px; }
+    .upd-bar { height:5px; border-radius:3px; background:rgba(128,128,128,.25); overflow:hidden; }
+    .upd-bar > span { display:block; height:100%; width:0; background:#3794ff; transition:width .3s; }
+    .upd-btn { background:#1a4a78; border:1px solid #3794ff; color:#fff; border-radius:8px; padding:5px 10px; cursor:pointer; font-size:12px; }
+    .upd-btn:disabled { opacity:.6; cursor:default; }
+    .upd-line { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; }
+    .upd-link { background:none; border:0; color:#3794ff; cursor:pointer; font-size:11.5px; padding:0; }
     /* field trong menu: bỏ viền, giữ nền fill phẳng.
        Phải nâng specificity (.app-menu #id) để đè border !important của ID selector từ CSS modal cũ. */
     .app-menu select,
@@ -1406,6 +1420,19 @@
       <div class="menu-row">
         <span data-i18n="settings.uiLang">Ngôn ngữ giao diện</span>
         <div class="flagrow" id="uilang-row"></div>
+      </div>
+
+      <div class="menu-sep"></div>
+      <div class="menu-group-label" data-i18n="group.version">Phiên bản</div>
+      <div class="menu-row" id="upd-row">
+        <div class="upd-line"><span id="upd-current">v—</span><button type="button" class="upd-link" id="upd-check" data-i18n="update.check">Kiểm tra cập nhật</button></div>
+        <span class="menu-note" id="upd-status"></span>
+        <div class="upd-box" id="upd-box" style="display:none">
+          <div class="upd-title" id="upd-title"></div>
+          <div class="upd-notes" id="upd-notes"></div>
+          <div class="upd-bar" id="upd-bar" style="display:none"><span></span></div>
+          <button type="button" class="upd-btn" id="upd-install" data-i18n="update.install">⬇ Cập nhật &amp; khởi động lại</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2097,6 +2124,39 @@
       const _mb = document.getElementById('menu-btn');
       _mb && _mb.addEventListener('click', () => { _closeAppList(); if (sCapture && sCapture.value === 'system') loadAudioProcesses(_audioProcessName, _audioProcessApp); });
     }
+
+    // ── Cập nhật phiên bản (x.y.z): main kiểm tra lúc mở app → có bản mới → chấm đỏ trên ⋮ + hộp thông báo trong Cài đặt ──
+    (function initUpdater() {
+      if (!api.onUpdateStatus) return;
+      const $ = id => document.getElementById(id);
+      const cur = $('upd-current'), st = $('upd-status'), box = $('upd-box'), title = $('upd-title'), notes = $('upd-notes'),
+            bar = $('upd-bar'), btn = $('upd-install'), chk = $('upd-check'), mb = $('menu-btn');
+      function render(u) {
+        if (!u) return;
+        cur.textContent = 'v' + (u.current || '');
+        const has = !!u.version && u.state !== 'latest' && u.state !== 'checking';
+        mb && mb.classList.toggle('has-update', has);
+        box.style.display = has ? '' : 'none';
+        if (has) {
+          title.textContent = t('update.available', { v: u.version });
+          notes.innerHTML = u.notes ? md2html(u.notes) : '<em>' + esc(t('update.noNotes')) + '</em>';
+        }
+        const dl = u.state === 'downloading' || u.state === 'downloaded';
+        bar.style.display = dl ? '' : 'none';
+        if (dl) bar.firstElementChild.style.width = (u.state === 'downloaded' ? 100 : (u.percent || 0)) + '%';
+        btn.disabled = dl;
+        btn.textContent = u.state === 'downloading' ? t('update.downloading', { p: u.percent || 0 })
+                        : u.state === 'downloaded' ? t('update.restarting') : t('update.install');
+        st.textContent = u.state === 'checking' ? t('update.checking')
+                       : u.state === 'latest' ? t('update.latest')
+                       : u.state === 'dev' ? t('update.dev')
+                       : u.state === 'error' ? '⚠ ' + t('update.error') + (u.error ? ': ' + String(u.error).slice(0, 120) : '') : '';
+      }
+      api.onUpdateStatus(render);
+      api.updateGet().then(render).catch(() => {});
+      chk.addEventListener('click', () => { st.textContent = t('update.checking'); api.updateCheck().then(render).catch(() => {}); });
+      btn.addEventListener('click', () => { btn.disabled = true; api.updateInstall().catch(() => { btn.disabled = false; }); });
+    })();
 
     // ── Header: đổi ngôn ngữ giao diện (🌐) + chế độ sáng/tối (🌙/☀️) — áp dụng + lưu NGAY (toggle trực tiếp) ──
     // ── Header menu (⋮): gộp ngôn ngữ dịch / ngôn ngữ app / theme / export / settings ──
