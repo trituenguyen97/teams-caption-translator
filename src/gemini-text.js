@@ -439,4 +439,79 @@ async function summarizeOverall(captions, facts) {
   return { ok: false, error: lastErr, quota: hydrogenQuota() };
 }
 
-module.exports = { summarize, summarizeFull, summarizeReport, summarizeOverall, hydrogenQuota };
+// ══ ARTIFACT (mức 2 + 3): trang TƯƠNG TÁC có JavaScript + chế độ TRÌNH CHIẾU — tạo theo yêu cầu, 1 lượt Hydrogen ══
+// Đầu vào = biên bản Markdown đã có (nhẹ hơn transcript). Chạy trong iframe sandbox="allow-scripts" (KHÔNG allow-same-origin
+// → origin rỗng, không chạm app/API key) + CSP chặn mọi kết nối mạng. Client bơm thêm bộ dò lỗi → JS hỏng thì báo & cho tạo lại.
+const ARTIFACT_SCHEMA = { type: 'OBJECT', properties: { html: { type: 'STRING', description: 'Một tài liệu HTML5 hoàn chỉnh, tự chứa, có <script> JavaScript thuần nội tuyến.' } }, required: ['html'] };
+function _buildArtifactPrompt(markdown, facts) {
+  const L = _outLang();
+  return `Bạn là kỹ sư front-end kiêm nhà thiết kế thông tin. Từ BIÊN BẢN CUỘC HỌP (Markdown) ở cuối, viết MỘT trang web tương tác tự chứa ("artifact") giúp xem lại cuộc họp. Trả JSON {"html": "..."}.
+
+NGÔN NGỮ giao diện & nội dung: ${L}. Chỉ dùng thông tin CÓ trong biên bản — không bịa.
+
+CHỨC NĂNG (chỉ làm phần có dữ liệu thật):
+1. Thanh điều hướng trên cùng: tên cuộc họp + các tab (Tổng quan · Thảo luận · Quyết định · Việc cần làm · Rủi ro) chuyển nội dung không tải lại trang; nút "▶ Trình chiếu".
+2. Tổng quan: 3-4 chỉ số chính (đếm từ biên bản) có hiệu ứng đếm số tăng dần khi mở; 1 câu tóm tắt.
+3. Thảo luận: các chủ đề dạng mục thu gọn/mở rộng (accordion) có chuyển động mượt; ô TÌM KIẾM lọc theo từ khoá và tô sáng chỗ khớp.
+4. Việc cần làm: bảng SẮP XẾP được khi bấm tiêu đề cột; bộ lọc theo người phụ trách và mức ưu tiên; ô tick "đã xong" (gạch ngang dòng, cập nhật bộ đếm "x/y việc đã xong" — chỉ giữ trong bộ nhớ trang).
+5. Biểu đồ vẽ bằng SVG/JS (KHÔNG thư viện) khi có ≥3 điểm dữ liệu thật (vd số việc theo người phụ trách / theo ưu tiên): thanh có hiệu ứng mọc lên, rê chuột hiện tooltip giá trị. Không đủ dữ liệu → không vẽ.
+6. TRÌNH CHIẾU (motion): bấm "▶ Trình chiếu" → phủ toàn màn hình, mỗi slide 1 ý lớn (Tóm tắt → từng Quyết định → Việc cần làm → Bước tiếp theo), chuyển slide bằng ← → / Space / click, Esc để thoát; hiệu ứng chuyển trượt + mờ dần, các dòng trên slide hiện lần lượt; thanh tiến độ mảnh ở đáy; nút tự chạy (mỗi slide ~6s).
+7. Tôn trọng @media (prefers-reduced-motion: reduce): tắt/giảm chuyển động.
+
+THIẾT KẾ — tối giản kiểu báo cáo doanh nghiệp (giống bản HTML tĩnh): màu chữ #1F2328, chữ phụ #57606A, kẻ #D0D7DE, nền #FFFFFF / #F6F8FA, DUY NHẤT 1 accent #1F4E79. Font system-ui,"Segoe UI",Roboto,Arial,sans-serif. Bo góc ≤ 6px, không bóng đổ đậm, không gradient, không emoji, không viền màu bên trái khối, không pill/badge nhiều màu. Chuyển động tinh tế (150-400ms, ease-out). Trình chiếu: nền #1F2328 chữ trắng, accent #8AB4E0.
+Responsive: dùng tốt ở khung hẹp ~420px (panel cạnh) lẫn toàn màn hình. Không tràn ngang (*{box-sizing:border-box}, min-width:0, overflow-wrap:anywhere, bảng rộng bọc overflow-x:auto).
+
+KỸ THUẬT BẮT BUỘC:
+- MỘT file HTML5 hoàn chỉnh: <!doctype html>…<style>…</style>…<script>…</script>. JavaScript thuần (ES2020), bọc trong try/catch ở hàm khởi tạo; dữ liệu cuộc họp nhúng sẵn dạng 1 object JS (const DATA = {...}) rồi render từ đó.
+- TUYỆT ĐỐI KHÔNG: tải tài nguyên ngoài (script/CSS/font/ảnh từ mạng, CDN), fetch/XMLHttpRequest/WebSocket/EventSource, localStorage/sessionStorage/cookie/indexedDB (trang chạy ở origin rỗng → các API này sẽ lỗi), alert/confirm/prompt, window.open, eval/new Function, iframe/form.
+- Trang phải hiển thị đầy đủ nội dung chính ngay cả trước khi JS chạy xong (nội dung tĩnh trong HTML hoặc render đồng bộ khi tải).
+${_factsBlock(facts)}${_extraBlock()}
+---
+BIÊN BẢN CUỘC HỌP (Markdown):
+${markdown}`;
+}
+// Gỡ phần nguy hiểm nhưng GIỮ <script> nội tuyến; chặn script/tài nguyên ngoài bằng CSP chèn đầu <head>.
+const ARTIFACT_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
+function _sanitizeArtifact(h) {
+  h = String(h || '')
+    .replace(/<script\b[^>]*\bsrc\s*=[^>]*>[\s\S]*?<\/script\s*>/gi, '')   // script NGOÀI
+    .replace(/<(iframe|object|embed|form|base)\b[\s\S]*?(<\/\1\s*>|>)/gi, '')
+    .replace(/<meta\b[^>]*http-equiv[^>]*>/gi, '')                           // không cho model tự đặt CSP/refresh
+    .replace(/(href|src|xlink:href|action)\s*=\s*(["'])\s*javascript:[^"']*\2/gi, '$1="#"')
+    .trim();
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}">`;
+  if (/<head[^>]*>/i.test(h)) h = h.replace(/<head[^>]*>/i, m => m + meta);
+  else h = h.replace(/<html[^>]*>/i, m => m + '<head>' + meta + '</head>');
+  return h;
+}
+// Trả { ok, html, quota } | { ok:false, error, quota }. markdown = biên bản đã có (report.markdown).
+async function summarizeArtifact(markdown, facts) {
+  markdown = String(markdown || '').trim();
+  if (!state.apiKey || !String(state.apiKey).trim()) return { ok: false, error: 'no-key', quota: hydrogenQuota() };
+  if (markdown.length < 50) return { ok: false, error: 'empty', quota: hydrogenQuota() };
+  if (hydrogenQuota().remaining <= 0) return { ok: false, error: 'quota-exhausted', quota: hydrogenQuota() };
+  const ai = await _ai();
+  const prompt = _buildArtifactPrompt(markdown, facts);
+  let lastErr = 'failed';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const config = { temperature: 0.4, maxOutputTokens: 32768, responseMimeType: 'application/json', responseSchema: ARTIFACT_SCHEMA };
+      const res = await ai.models.generateContent({ model: HYDROGEN.id, contents: prompt, config });
+      _setHydrogenUsed(hydrogenQuota().used + 1);
+      const text = (res && (typeof res.text === 'string' ? res.text : (res.text && res.text()))) || '';
+      const obj = _parseJson(text) || {};
+      const html = _sanitizeArtifact(obj.html);
+      if (!/<html[\s>]/i.test(html) || !/<script\b/i.test(html)) return { ok: false, error: 'empty-or-invalid-output', quota: hydrogenQuota() };
+      return { ok: true, html, model: HYDROGEN.id, quota: hydrogenQuota() };
+    } catch (e) {
+      const msg = (e && e.message) || String(e); lastErr = msg;
+      console.warn(`[gemini-text] artifact (lần ${attempt + 1}): ${msg}`);
+      if (_isQuota(msg)) { if (/per\s*day|perday|daily|RequestsPerDay/i.test(msg)) _setHydrogenUsed(HYDROGEN.rpd); return { ok: false, error: 'quota-exhausted', quota: hydrogenQuota() }; }
+      if (!/\b503\b|UNAVAILABLE|overloaded|high demand|\b500\b|INTERNAL/i.test(msg)) break;
+      await new Promise(r => setTimeout(r, attempt ? 8000 : 3000));
+    }
+  }
+  return { ok: false, error: lastErr, quota: hydrogenQuota() };
+}
+
+module.exports = { summarize, summarizeFull, summarizeReport, summarizeOverall, summarizeArtifact, hydrogenQuota };

@@ -5,6 +5,9 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+- Báo cáo tổng có thêm chế độ ✦ Artifact (bấm để tạo, 1 lượt Hydrogen): trang tương tác với tab, tìm kiếm, lọc & sắp xếp việc cần làm, tick đã xong, biểu đồ có tooltip, và chế độ Trình chiếu có chuyển động
+- Nút chọn hiển thị báo cáo tổng: HTML | MD | Artifact; nút Xuất .html xuất đúng chế độ đang xem
+
 ## 1.1.4 — 2026-11-25
 
 - Báo cáo tổng HTML theo phong cách biên bản doanh nghiệp: tối giản, 1 màu nhấn, bảng thay cho thẻ màu, bỏ emoji/khung/viền màu

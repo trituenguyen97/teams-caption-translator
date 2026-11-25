@@ -45,7 +45,8 @@ contextBridge.exposeInMainWorld('__caption', {
   summarizeMeeting: (captions) => ipcRenderer.invoke('summarize-meeting', captions),   // tổng thể → gemma-4-31b
   summarizeReport: (payload) => ipcRenderer.invoke('summarize-report', payload),
   summarizeOverall: (payload) => ipcRenderer.invoke('summarize-overall', payload),   // tổng thể cao cấp → gemini-4-hydrogen (JSON dashboard + markdown)
-  hydrogenQuota: () => ipcRenderer.invoke('hydrogen-quota'),                         // { used, limit:20, remaining } (đếm cục bộ, reset nửa đêm Pacific)   // tổng thể JSON landing-page → render HTML đẹp
+  hydrogenQuota: () => ipcRenderer.invoke('hydrogen-quota'),                         // { used, limit:20, remaining } (đếm cục bộ, reset nửa đêm Pacific)
+  summarizeArtifact: (payload) => ipcRenderer.invoke('summarize-artifact', payload),   // artifact tương tác + trình chiếu (Hydrogen)
   setSummaryPanel: (open)    => ipcRenderer.send('summary-panel', open),
   ensureWidth:     (px)      => ipcRenderer.send('ensure-width', px),
   exportSummary:   (data)    => ipcRenderer.invoke('export-summary', data),
