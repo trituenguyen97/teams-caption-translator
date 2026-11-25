@@ -369,20 +369,29 @@ Mục không có nội dung → ghi "Không có".
 ━━ 2) "html" — BÁO CÁO TRỰC QUAN (một trang, bạn TỰ THIẾT KẾ) ━━
 Mục tiêu: người đọc nắm cuộc họp trong 30 giây. TRỰC QUAN hơn CHỮ: ưu tiên thẻ số liệu, biểu đồ, sơ đồ, timeline, bảng, badge — chữ ngắn gọn (gạch đầu dòng ≤ 15 từ); chi tiết dài để ở markdown.
 THÍCH ỨNG THEO NỘI DUNG — mọi phần bên dưới là TUỲ CHỌN, CHỈ đưa vào khi transcript có dữ liệu THẬT cho nó. Thà ít phần mà đúng còn hơn đủ phần mà gượng. Họp trao đổi thuần (không số liệu/quy trình) → trang gọn: mở đầu + chủ đề + quyết định/việc cần làm là đủ, KHÔNG vẽ biểu đồ/sơ đồ cho có. TUYỆT ĐỐI không tạo biểu đồ từ số bịa, không chia % khi chỉ có 1-2 chủ đề, không vẽ sơ đồ luồng khi cuộc họp không bàn một quy trình/chuỗi bước cụ thể.
-Các phần có thể dùng:
-- Phần mở đầu: tiêu đề + 1 câu kết quả chính + dải thẻ số liệu (số chủ đề, quyết định, việc cần làm, thời lượng, người tham gia…) + thông tin ngày/thời lượng/thành phần.
-- 0-3 BIỂU ĐỒ SVG nội tuyến — CHỈ khi có ≥3 điểm dữ liệu có ý nghĩa (vd số liệu thật được nêu trong họp; ≥3 chủ đề rõ rệt → donut tỉ trọng; ≥3 việc có người phụ trách → cột theo người). Có nhãn + giá trị + chú thích (ghi "ước lượng" nếu là ước lượng).
-- 0-1 SƠ ĐỒ (SVG hoặc HTML/CSS) — CHỈ khi cuộc họp THỰC SỰ bàn một quy trình/chuỗi bước/luồng quyết định (hộp + mũi tên, nút quyết định dạng thoi) hoặc chuỗi vấn đề → nguyên nhân → giải pháp rõ ràng.
-- Chủ đề chính dạng lưới thẻ (icon emoji + tiêu đề + 2-3 ý + kết luận).
-- Quyết định đã chốt (thẻ nổi bật). Việc cần làm (bảng: việc · phụ trách · hạn · badge ưu tiên màu). Rủi ro/vấn đề mở (thẻ theo mức độ cao/trung bình/thấp).
-- Timeline các bước tiếp theo (chỉ khi có ≥2 mốc/bước cụ thể).
+Các phần có thể dùng (theo thứ tự, đánh số mục 1, 2, 3…):
+- Đầu trang: tiêu đề cuộc họp + 1 câu kết quả chính + 1 dòng thông tin (ngày · thời lượng · thành phần) dạng chữ thường, phân cách bằng dấu "·". Ngay dưới: dải 3-4 chỉ số (con số lớn + nhãn nhỏ) đặt cạnh nhau, phân cách bằng đường kẻ dọc mảnh — KHÔNG đóng khung từng chỉ số.
+- 0-3 BIỂU ĐỒ SVG nội tuyến — CHỈ khi có ≥3 điểm dữ liệu có ý nghĩa (số liệu thật trong họp; ≥3 chủ đề rõ rệt → thanh ngang tỉ trọng; ≥3 việc có người phụ trách → cột theo người). Nhãn + giá trị + chú thích nguồn ("ước lượng theo số câu" nếu là ước lượng).
+- 0-1 SƠ ĐỒ (SVG) — CHỈ khi cuộc họp THỰC SỰ bàn một quy trình/chuỗi bước/luồng quyết định: hộp chữ nhật viền mảnh + mũi tên, nút quyết định hình thoi.
+- Nội dung thảo luận: mỗi chủ đề = tiêu đề phụ + 2-3 gạch đầu dòng ngắn + 1 dòng "Kết luận: …" (chữ đậm cho từ "Kết luận", phần sau chữ thường) — trình bày dạng văn bản liền mạch, KHÔNG đặt trong thẻ/khung.
+- Quyết định đã chốt và Việc cần làm: dạng BẢNG (# · nội dung · phụ trách · hạn · ưu tiên). Ưu tiên ghi bằng CHỮ ("Cao/Trung bình/Thấp"), chỉ mức "Cao" được tô màu accent; không dùng badge/viên thuốc.
+- Rủi ro / vấn đề mở: danh sách hoặc bảng (vấn đề · mức độ · hướng xử lý). Bước tiếp theo: danh sách đánh số theo mốc thời gian (chỉ khi có ≥2 mốc cụ thể).
+- Nếu yêu cầu riêng của người dùng không khớp nội dung transcript: ghi 1 câu ghi chú ngắn ở đầu phần Tóm tắt (chữ nghiêng, màu xám) — KHÔNG làm banner/hộp cảnh báo màu.
+
+PHONG CÁCH THIẾT KẾ — "báo cáo doanh nghiệp / tư vấn" (tối giản, nghiêm túc, giống tài liệu in), TUÂN THỦ CHÍNH XÁC:
+- Màu (chỉ dùng đúng các mã này): chữ chính #1F2328 · chữ phụ #57606A · đường kẻ #D0D7DE · nền trang #FFFFFF · nền xen kẽ hàng bảng/khối nhẹ #F6F8FA · DUY NHẤT 1 màu accent #1F4E79 (xanh navy), dùng TIẾT KIỆM: số liệu chính, tiêu đề mục, ưu tiên "Cao", 1 chuỗi màu biểu đồ. Biểu đồ: accent + các sắc độ xám (#8C959F, #C9D1D9). Tuyệt đối không thêm màu khác (không cam/đỏ/tím/xanh lá, không gradient).
+- Chữ: font-family system-ui,"Segoe UI",Roboto,Arial,sans-serif. Tiêu đề trang 26px/600; tiêu đề mục 17px/600 có số thứ tự ("1. Tóm tắt"), viền dưới 1px #D0D7DE; nội dung 14.5px/1.6. Số liệu chính 28px/600 màu accent, dùng font-variant-numeric:tabular-nums.
+- Bố cục: 1 cột chính max-width 960px, căn giữa, lề rộng; phân tách các mục bằng KHOẢNG TRẮNG (32-40px) và đường kẻ ngang mảnh — KHÔNG dùng thẻ (card) có bóng đổ. Lưới 2 cột chỉ dùng cho biểu đồ đặt cạnh nhau (khung hẹp → 1 cột).
+- Bảng: viền ngang 1px #D0D7DE, không viền dọc, tiêu đề cột chữ 12.5px in đậm màu #57606A (không nền màu đậm), hàng xen kẽ #F6F8FA.
+- CẤM (các mẫu "trông như AI sinh ra"): thẻ bo góc lớn có bóng đổ; viền màu dày bên trái khối (border-left accent) cho kết luận/ghi chú; nhãn hình viên thuốc (pill/badge) cho tag, ngày, trạng thái; icon emoji trong tiêu đề/thẻ; banner cảnh báo màu cam/vàng; gradient, glow, đổ bóng; chữ in hoa giãn cách làm nhãn trang trí; nhiều màu nhấn. Bo góc tối đa 4px (chỉ cho khối biểu đồ nếu cần).
+- @media print: nền trắng, không ngắt giữa bảng/biểu đồ (break-inside:avoid).
+
 Yêu cầu kỹ thuật BẮT BUỘC:
 - Tài liệu HTML5 HOÀN CHỈNH, TỰ CHỨA: <!doctype html><html lang="…"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>…</title><style>…</style></head><body>…</body></html>.
-- TUYỆT ĐỐI KHÔNG dùng <script>, thuộc tính sự kiện (onclick…), iframe, form, hay tài nguyên ngoài (ảnh/CDN/font từ mạng) — trang hiển thị trong khung KHÔNG chạy JavaScript và phải xem được offline. Font: system-ui/Segoe UI/sans-serif.
-- Biểu đồ/sơ đồ: SVG nội tuyến có viewBox (co giãn theo bề rộng), hoặc HTML/CSS thuần (flex/grid, thanh bar bằng width %).
-- Responsive: đẹp ở khung hẹp ~420px (panel cạnh) lẫn màn rộng; dùng grid auto-fit, max-width ~1100px, căn giữa.
-- KHÔNG được tràn ngang: *{box-sizing:border-box}, phần tử flex/grid con đặt min-width:0, chữ dài cho xuống dòng (overflow-wrap:anywhere), bảng rộng bọc trong khung overflow-x:auto, SVG width:100% height:auto.
-- Thẩm mỹ chuyên nghiệp, hiện đại: bảng màu hài hoà 1 màu chủ đạo + 2-3 màu nhấn, nền sáng, độ tương phản đọc tốt, bo góc, khoảng trắng thoáng, phân cấp tiêu đề rõ, @media print gọn gàng.
+- TUYỆT ĐỐI KHÔNG dùng <script>, thuộc tính sự kiện (onclick…), iframe, form, hay tài nguyên ngoài (ảnh/CDN/font từ mạng) — trang hiển thị trong khung KHÔNG chạy JavaScript và phải xem được offline.
+- Biểu đồ/sơ đồ: SVG nội tuyến có viewBox, width:100% height:auto.
+- Responsive: đọc tốt ở khung hẹp ~420px (panel cạnh) lẫn màn rộng.
+- KHÔNG được tràn ngang: *{box-sizing:border-box}, phần tử flex/grid con đặt min-width:0, chữ dài cho xuống dòng (overflow-wrap:anywhere), bảng rộng bọc trong khung overflow-x:auto.
 ${_factsBlock(facts)}${_transcribeNote()}${_extraBlock()}
 ---
 TRANSCRIPT:
