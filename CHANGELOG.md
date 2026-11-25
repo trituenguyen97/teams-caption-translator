@@ -5,6 +5,8 @@ Ghi thay đổi mới dưới mục `[Unreleased]`, rồi chạy `npm run releas
 
 ## [Unreleased]
 
+## 1.1.4 — 2026-11-25
+
 - Báo cáo tổng HTML theo phong cách biên bản doanh nghiệp: tối giản, 1 màu nhấn, bảng thay cho thẻ màu, bỏ emoji/khung/viền màu
 
 ## 1.1.3 — 2026-11-25
